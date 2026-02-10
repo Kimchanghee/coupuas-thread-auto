@@ -1,0 +1,23 @@
+# 패키지에 포함할 파일들
+
+# Python 소스 파일
+recursive-include src *.py
+
+# 설정 파일
+include requirements.txt
+include setup.py
+include main.py
+include ceo_thread_auto.spec
+
+# 문서
+include README.md
+
+# 제외 항목
+global-exclude __pycache__
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude .git
+global-exclude .venv
+global-exclude build
+global-exclude dist
+global-exclude *.egg-info
