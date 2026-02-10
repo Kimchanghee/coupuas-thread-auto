@@ -54,7 +54,9 @@ nul
 # Generated content
 generated_images/
 
-# 생성된 이미지 및 임시 파일
+# 다운로드 미디어 및 캐시
+media/
+images/cache/
 images/*.png
 images/*.jpg
 images/*.jpeg

@@ -68,7 +68,7 @@ class CoupangThreadsUploader:
                 agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                 time.sleep(2)
             except Exception as e:
-                print(f"  ⚠️ 페이지 이동 실패: {e}")
+                print(f"  페이지 이동 실패: {e}")
 
             self._check_cancelled()
 
@@ -79,7 +79,7 @@ class CoupangThreadsUploader:
             if not helper.ensure_login(ig_username, ig_password):
                 raise Exception(f"로그인 실패: {ig_username or '계정 미설정'}")
 
-            print(f"  ✅ 로그인 완료: @{ig_username}" if ig_username else "  ✅ 로그인 완료")
+            print(f"  로그인 완료: @{ig_username}" if ig_username else "  로그인 완료")
 
             first_post = product_post['first_post']
             second_post = product_post['second_post']
@@ -100,17 +100,17 @@ class CoupangThreadsUploader:
             success = helper.create_thread_direct(posts_data)
 
             if success:
-                print(f"  ✅ 업로드 성공!")
+                print(f"  업로드 성공")
                 return True
             else:
-                print(f"  ⚠️ Playwright 실패, AI fallback 시도...")
+                print(f"  직접 작성 실패, AI 모드로 재시도...")
                 self._check_cancelled()
                 return self._upload_with_ai(agent, posts_data)
 
         except CancelledException:
             raise
         except Exception as e:
-            print(f"  ❌ 업로드 오류: {e}")
+            print(f"  업로드 오류: {e}")
             self.last_error = str(e)
             return False
 
@@ -172,7 +172,7 @@ class CoupangThreadsUploader:
         except CancelledException:
             raise
         except Exception as e:
-            print(f"  ⚠️ AI 업로드 실패: {e}")
+            print(f"  AI 업로드 실패: {e}")
             return False
 
     def upload_batch(self, products: List[Dict], interval: int = 60,
@@ -294,7 +294,7 @@ class CoupangThreadsUploader:
 
                     if success:
                         results['success'] += 1
-                        log("업로드 성공", f"{product_title} 업로드 완료!")
+                        log("업로드 성공", f"{product_title} 업로드 완료")
                     else:
                         results['failed'] += 1
                         log("업로드 실패", f"{product_title} 업로드에 실패했습니다")
@@ -368,9 +368,9 @@ class CoupangThreadsUploader:
             self._current_agent = None
 
         status = "취소됨" if results['cancelled'] else "완료"
-        print(f"\n{'='*50}")
-        print(f"📊 업로드 {status}: 성공 {results['success']}개 / 실패 {results['failed']}개")
-        print(f"{'='*50}")
+        print(f"\n{'━'*50}")
+        print(f"  업로드 {status}: 성공 {results['success']}개 / 실패 {results['failed']}개")
+        print(f"{'━'*50}")
 
         return results
 
@@ -453,49 +453,49 @@ class CoupangPartnersPipeline:
         """
         self._check_cancelled()
 
-        print(f"\n📎 링크 처리 중: {coupang_url[:50]}...")
+        print(f"\n  링크 처리 중: {coupang_url[:50]}...")
 
-        print("  1️⃣ 쿠팡 링크 파싱...")
+        print("  [1단계] 쿠팡 링크 분석...")
         product_info = self.coupang_parser.parse_link(coupang_url)
 
         if not product_info:
-            print(f"  ❌ 링크 파싱 실패")
+            print(f"  링크 분석 실패")
             return None
 
         # 사용자 키워드가 제공되면 우선 사용
         if user_keywords:
             product_info['title'] = user_keywords
             product_info['search_keywords'] = user_keywords
-            print(f"  ✅ 사용자 키워드: {user_keywords[:40]}...")
+            print(f"  사용자 키워드: {user_keywords[:40]}...")
         elif product_info.get('title'):
-            print(f"  ✅ 상품명: {product_info.get('title', '')[:40]}...")
+            print(f"  상품명: {product_info.get('title', '')[:40]}...")
         else:
-            print(f"  ⚠️ 상품명 없음 (product_id만 추출됨)")
+            print(f"  상품명 없음 (상품 번호만 추출됨)")
             product_info['title'] = f"쿠팡 상품 #{product_info.get('product_id', '')}"
 
         self._check_cancelled()
 
         # 미디어 설정: 1688에서 이미지 검색 (최대 10회 재시도)
-        print("  1.5 1688 이미지 검색 (최대 10회 시도)...")
+        print("  [1.5단계] 1688 이미지 검색 (최대 10회 시도)...")
         images = self.image_search.search_product_images(product_info, self.google_api_key)
         if images:
             product_info['image_path'] = images[0]
             # 두 번째 이미지가 있으면 저장 (나중에 사용 가능)
             if len(images) > 1:
                 product_info['image_path_2'] = images[1]
-                print(f"  ✅ 1688 이미지 {len(images)}개 확보!")
+                print(f"  1688 이미지 {len(images)}개 확보")
             else:
-                print(f"  ✅ 1688 이미지 1개 확보")
+                print(f"  1688 이미지 1개 확보")
         else:
-            print(f"  ⚠️ 1688 이미지 검색 실패 (이미지 없이 진행)")
+            print(f"  1688 이미지 검색 실패 (이미지 없이 진행)")
             product_info['image_path'] = None
         product_info['video_path'] = None
 
         self._check_cancelled()
 
-        print("  2️⃣ 어그로 문구 생성...")
+        print("  [2단계] 게시글 문구 생성...")
         post_data = self.aggro_generator.generate_product_post(product_info)
-        print(f"  ✅ 문구: {post_data['first_post']['text'][:40]}...")
+        print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")
 
         return post_data
 
@@ -581,7 +581,7 @@ class CoupangPartnersPipeline:
 
             # 로그인 상태만 확인 (자동 로그인 시도 안 함)
             if not helper.check_login_status():
-                log("로그인 필요", "⚠️ Threads에 로그인되어 있지 않습니다.")
+                log("로그인 필요", "Threads에 로그인되어 있지 않습니다.")
                 log("안내", "열린 브라우저에서 직접 로그인해주세요. (60초 대기)")
 
                 # 60초 대기하면서 로그인 확인
@@ -590,14 +590,14 @@ class CoupangPartnersPipeline:
                     if wait_sec % 10 == 0:
                         log("대기 중", f"로그인 대기... {60 - wait_sec}초 남음")
                     if helper.check_login_status():
-                        log("로그인 감지", "✅ 로그인이 확인되었습니다!")
+                        log("로그인 감지", "로그인이 확인되었습니다")
                         break
                 else:
-                    log("로그인 실패", "❌ 60초 내에 로그인되지 않았습니다. 업로드를 중단합니다.")
+                    log("로그인 실패", "60초 내에 로그인되지 않았습니다. 업로드를 중단합니다.")
                     results['failed'] = total
                     return results
 
-            log("로그인 확인됨", "✅ Threads 로그인 상태 확인 완료")
+            log("로그인 확인됨", "Threads 로그인 상태 확인 완료")
 
             # 각 상품을 순차적으로 처리
             for i, item in enumerate(link_data, 1):
@@ -679,7 +679,7 @@ class CoupangPartnersPipeline:
 
                     if success:
                         results['uploaded'] += 1
-                        log("업로드 성공", f"✅ {product_name} 게시 완료!")
+                        log("업로드 성공", f"{product_name} 게시 완료")
                         # 업로드 기록 저장
                         self.link_history.add_link(url, product_name, success=True)
                         results['details'].append({
@@ -690,7 +690,7 @@ class CoupangPartnersPipeline:
                         })
                     else:
                         results['failed'] += 1
-                        log("업로드 실패", f"❌ {product_name} 게시 실패")
+                        log("업로드 실패", f"{product_name} 게시 실패")
                         # 실패도 기록 (재시도 방지)
                         self.link_history.add_link(url, product_name, success=False)
                         results['details'].append({

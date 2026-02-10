@@ -33,49 +33,49 @@ class ThreadsPlaywrightHelper:
             # 방법 1: 로그인 입력창 존재 여부 (명확한 로그아웃 신호)
             login_input = self.page.locator('input[name="username"], input[type="text"][placeholder*="사용자"]').count()
             if login_input > 0:
-                print("  ❌ 로그아웃 (로그인 입력창 존재)")
+                print("  로그아웃 상태 (로그인 입력창 존재)")
                 return False
 
             # 방법 2: URL 체크 (로그인 페이지면 명확히 로그아웃)
             url = self.page.url
             if "login" in url.lower():
-                print("  ❌ 로그아웃 (로그인 페이지)")
+                print("  로그아웃 상태 (로그인 페이지)")
                 return False
 
             # 방법 3: Feed 게시물 존재 (가장 확실한 로그인 신호)
             articles = self.page.locator('article').count()
             if articles > 0:
-                print(f"  ✅ 로그인됨 (Feed에 {articles}개 게시물 존재)")
+                print(f"  로그인 확인 (피드에 {articles}개 게시물 존재)")
                 return True
 
             # 방법 4: Navigation bar 존재
             nav = self.page.locator('nav').count()
             if nav > 0:
-                print("  ✅ 로그인됨 (Navigation bar 존재)")
+                print("  로그인 확인 (내비게이션 바 존재)")
                 return True
 
             # 방법 5: 특정 버튼들 (보조 확인)
             new_thread_btn = self.page.locator('a[aria-label*="New"], a[href*="compose"], button[aria-label*="New"]').count()
             if new_thread_btn > 0:
-                print("  ✅ 로그인됨 (New thread 버튼 존재)")
+                print("  로그인 확인 (새 스레드 버튼 존재)")
                 return True
 
             profile_btn = self.page.locator('a[aria-label*="Profile"], a[href*="/profile"]').count()
             if profile_btn > 0:
-                print("  ✅ 로그인됨 (프로필 버튼 존재)")
+                print("  로그인 확인 (프로필 버튼 존재)")
                 return True
 
             # 방법 6: URL이 threads.net 또는 threads.com이고 로그인 페이지가 아니면 로그인된 것으로 간주
             if ("threads.net" in url or "threads.com" in url) and "login" not in url.lower():
-                print(f"  ✅ 로그인됨 (Threads 메인 페이지 접속)")
+                print(f"  로그인 확인 (Threads 메인 페이지 접속)")
                 return True
 
             # 모든 확인 실패
-            print("  ⚠️ 로그인 상태 불확실")
+            print("  로그인 상태 불확실")
             return False
 
         except Exception as e:
-            print(f"  ⚠️ 로그인 확인 중 오류: {e}")
+            print(f"  로그인 확인 중 오류: {e}")
             return False
 
     def direct_login(self, username: str, password: str) -> bool:
@@ -86,16 +86,16 @@ class ThreadsPlaywrightHelper:
             True: 성공, False: 실패
         """
         try:
-            print("🔐 Playwright로 직접 로그인 시도...")
+            print("  Playwright로 직접 로그인 시도...")
 
             # 1. Username 입력
             username_input = self.page.locator('input[name="username"], input[type="text"][autocomplete*="username"]').first
             if username_input.count() > 0:
                 username_input.click()
                 username_input.fill(username)
-                print("  ✓ Username 입력")
+                print("  사용자명 입력 완료")
             else:
-                print("  ❌ Username 입력창 못 찾음")
+                print("  사용자명 입력창을 찾을 수 없음")
                 return False
 
             time.sleep(1)
@@ -105,9 +105,9 @@ class ThreadsPlaywrightHelper:
             if password_input.count() > 0:
                 password_input.click()
                 password_input.fill(password)
-                print("  ✓ Password 입력")
+                print("  비밀번호 입력 완료")
             else:
-                print("  ❌ Password 입력창 못 찾음")
+                print("  비밀번호 입력창을 찾을 수 없음")
                 return False
 
             time.sleep(1)
@@ -116,9 +116,9 @@ class ThreadsPlaywrightHelper:
             login_btn = self.page.locator('button[type="submit"], button:has-text("로그인"), button:has-text("Log in")').first
             if login_btn.count() > 0:
                 login_btn.click()
-                print("  ✓ 로그인 버튼 클릭")
+                print("  로그인 버튼 클릭 완료")
             else:
-                print("  ❌ 로그인 버튼 못 찾음")
+                print("  로그인 버튼을 찾을 수 없음")
                 return False
 
             # 4. 로그인 완료 대기 (네비게이션)
@@ -128,29 +128,29 @@ class ThreadsPlaywrightHelper:
             return self.check_login_status()
 
         except Exception as e:
-            print(f"  ❌ 로그인 실패: {e}")
+            print(f"  로그인 실패: {e}")
             self.last_error = str(e)
             return False
 
     def try_instagram_login(self) -> bool:
         """Instagram으로 계속하기 버튼 시도"""
         try:
-            print("🔐 Instagram 자동 로그인 시도...")
+            print("  Instagram 자동 로그인 시도...")
 
             # "Instagram으로 계속하기" 버튼 찾기
             instagram_btn = self.page.locator('button:has-text("Instagram"), a:has-text("Instagram")').first
 
             if instagram_btn.count() > 0:
                 instagram_btn.click()
-                print("  ✓ Instagram 로그인 버튼 클릭")
+                print("  Instagram 로그인 버튼 클릭 완료")
                 time.sleep(5)
                 return self.check_login_status()
             else:
-                print("  ⚠️ Instagram 버튼 못 찾음")
+                print("  Instagram 버튼을 찾을 수 없음")
                 return False
 
         except Exception as e:
-            print(f"  ❌ Instagram 로그인 실패: {e}")
+            print(f"  Instagram 로그인 실패: {e}")
             return False
 
     def get_logged_in_username(self) -> Optional[str]:
@@ -165,7 +165,7 @@ class ThreadsPlaywrightHelper:
             current_url = self.page.url
 
             # 방법 1: 프로필 아이콘 클릭해서 자기 프로필로 이동
-            print("  🔍 프로필 페이지로 이동하여 사용자명 확인...")
+            print("  프로필 페이지로 이동하여 사용자명 확인...")
 
             # 프로필 아이콘/버튼 클릭 시도
             profile_btn_selectors = [
@@ -191,7 +191,7 @@ class ThreadsPlaywrightHelper:
                             if '/@' in new_url:
                                 username = new_url.split('/@')[-1].split('/')[0].split('?')[0]
                                 if username:
-                                    print(f"  ✅ 프로필 페이지 URL에서 사용자명 발견: @{username}")
+                                    print(f"  프로필 페이지 URL에서 사용자명 발견: @{username}")
                                     # 원래 페이지로 돌아가기
                                     self.page.goto(current_url, wait_until="domcontentloaded", timeout=10000)
                                     return username
@@ -199,7 +199,7 @@ class ThreadsPlaywrightHelper:
                     continue
 
             # 방법 2: 설정 > 계정 페이지에서 확인
-            print("  🔍 설정 페이지에서 사용자명 확인...")
+            print("  설정 페이지에서 사용자명 확인...")
             try:
                 self.page.goto("https://www.threads.net/settings/account", wait_until="domcontentloaded", timeout=10000)
                 time.sleep(2)
@@ -213,19 +213,19 @@ class ThreadsPlaywrightHelper:
                 username_match = re.search(r'/@([a-zA-Z0-9_.]+)', page_text)
                 if username_match:
                     username = username_match.group(1)
-                    print(f"  ✅ 설정 페이지에서 사용자명 발견: @{username}")
+                    print(f"  설정 페이지에서 사용자명 발견: @{username}")
                     self.page.goto(current_url, wait_until="domcontentloaded", timeout=10000)
                     return username
 
             except Exception as e:
-                print(f"  ⚠️ 설정 페이지 확인 실패: {e}")
+                print(f"  설정 페이지 확인 실패: {e}")
 
             # 방법 3: 단순히 로그인 됐다고만 표시 (사용자명 없이)
-            print("  ⚠️ 사용자명을 찾을 수 없음 (로그인 상태만 확인됨)")
+            print("  사용자명을 찾을 수 없음 (로그인 상태만 확인됨)")
             return None
 
         except Exception as e:
-            print(f"  ⚠️ 사용자명 확인 실패: {e}")
+            print(f"  사용자명 확인 실패: {e}")
             return None
 
     def verify_account(self, expected_username: str) -> bool:
@@ -242,10 +242,10 @@ class ThreadsPlaywrightHelper:
         # persistent profile을 계정별로 사용하므로
         # 로그인만 되어있으면 해당 계정이 맞는 것으로 간주
         if self.check_login_status():
-            print(f"  ✅ 로그인 확인됨 (계정: {expected_username or '미설정'})")
+            print(f"  로그인 확인됨 (계정: {expected_username or '미설정'})")
             return True
 
-        print("  ⚠️ 로그인되어 있지 않음")
+        print("  로그인되어 있지 않음")
         return False
 
     def logout(self) -> bool:
@@ -256,7 +256,7 @@ class ThreadsPlaywrightHelper:
             True: 성공, False: 실패
         """
         try:
-            print("  🔓 로그아웃 시도...")
+            print("  로그아웃 시도...")
 
             # 설정 페이지로 이동
             self.page.goto("https://www.threads.net/settings", wait_until="domcontentloaded", timeout=15000)
@@ -277,7 +277,7 @@ class ThreadsPlaywrightHelper:
                     btn = self.page.locator(selector).first
                     if btn.count() > 0:
                         btn.click()
-                        print("  ✓ 로그아웃 버튼 클릭")
+                        print("  로그아웃 버튼 클릭 완료")
                         time.sleep(2)
 
                         # 확인 다이얼로그가 있으면 확인 클릭
@@ -291,19 +291,19 @@ class ThreadsPlaywrightHelper:
                                 confirm_btn = self.page.locator(confirm_sel).first
                                 if confirm_btn.count() > 0:
                                     confirm_btn.click()
-                                    print("  ✓ 로그아웃 확인")
+                                    print("  로그아웃 확인 완료")
                                     time.sleep(3)
                                     break
                             except:
                                 continue
 
-                        print("  ✅ 로그아웃 완료")
+                        print("  로그아웃 완료")
                         return True
                 except:
                     continue
 
             # 프로필 메뉴에서 로그아웃 시도
-            print("  🔍 프로필 메뉴에서 로그아웃 시도...")
+            print("  프로필 메뉴에서 로그아웃 시도...")
             self.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
             time.sleep(2)
 
@@ -336,16 +336,16 @@ class ThreadsPlaywrightHelper:
                         if btn.count() > 0:
                             btn.click()
                             time.sleep(3)
-                            print("  ✅ 로그아웃 완료")
+                            print("  로그아웃 완료")
                             return True
                     except:
                         continue
 
-            print("  ⚠️ 로그아웃 버튼을 찾을 수 없음")
+            print("  로그아웃 버튼을 찾을 수 없음")
             return False
 
         except Exception as e:
-            print(f"  ❌ 로그아웃 실패: {e}")
+            print(f"  로그아웃 실패: {e}")
             return False
 
     def ensure_login(self, username: str = "", password: str = "") -> bool:
@@ -363,23 +363,23 @@ class ThreadsPlaywrightHelper:
         if self.check_login_status():
             # 계정 검증
             if username and not self.verify_account(username):
-                print("  ⚠️ 다른 계정으로 로그인되어 있음 - 자동 로그아웃 시도")
+                print("  다른 계정으로 로그인되어 있음 - 자동 로그아웃 시도")
 
                 # 로그아웃 시도
                 if self.logout():
-                    print("  ✅ 로그아웃 성공 - 설정된 계정으로 로그인 시도")
+                    print("  로그아웃 성공 - 설정된 계정으로 로그인 시도")
                     # 로그인 페이지로 이동
                     self.page.goto("https://www.threads.net/login", wait_until="domcontentloaded", timeout=15000)
                     time.sleep(2)
                 else:
-                    print("  ❌ 자동 로그아웃 실패 - 수동으로 로그아웃 후 다시 시도해주세요")
+                    print("  자동 로그아웃 실패 - 수동으로 로그아웃 후 다시 시도해주세요")
                     return False
             else:
                 return True
 
         # 2. 로그인 필요 - 직접 로그인 시도
         if username and password:
-            print(f"  🔐 설정된 계정으로 로그인 시도: {username}")
+            print(f"  설정된 계정으로 로그인 시도: {username}")
             if self.direct_login(username, password):
                 return self.verify_account(username)
 
@@ -389,7 +389,7 @@ class ThreadsPlaywrightHelper:
                 return self.verify_account(username)
             return True
 
-        print("  ❌ 로그인 실패")
+        print("  로그인 실패")
         return False
 
     # ========== 쓰레드 작성 ==========
@@ -415,18 +415,18 @@ class ThreadsPlaywrightHelper:
                 btn = self.page.locator(selector).first
                 if btn.count() > 0:
                     btn.click()
-                    print(f"  ✓ New thread 버튼 클릭 ({selector})")
+                    print(f"  새 스레드 버튼 클릭 완료 ({selector})")
                     time.sleep(2)
                     return True
 
             # Fallback: 좌표 클릭 (x=30, y=460 normalized)
-            print("  ⚠️ Selector 실패, 좌표로 시도...")
+            print("  선택자 실패, 좌표로 시도...")
             self.page.mouse.click(30, 460)
             time.sleep(2)
             return True
 
         except Exception as e:
-            print(f"  ❌ New thread 버튼 클릭 실패: {e}")
+            print(f"  새 스레드 버튼 클릭 실패: {e}")
             return False
 
     def dismiss_login_popup(self) -> bool:
@@ -505,10 +505,10 @@ class ThreadsPlaywrightHelper:
             textareas = self.page.locator('textarea, div[contenteditable="true"]')
             total_textareas = textareas.count()
 
-            print(f"      🔍 [type_in_textarea] 전체 textarea 개수: {total_textareas}, 입력할 index: {index}")
+            print(f"      [type_in_textarea] 전체 textarea 개수: {total_textareas}, 입력할 index: {index}")
 
             if total_textareas <= index:
-                print(f"      ❌ Textarea[{index}] 존재하지 않음 (총 {total_textareas}개)")
+                print(f"      Textarea[{index}] 존재하지 않음 (총 {total_textareas}개)")
                 return False
 
             textarea = textareas.nth(index)
@@ -518,12 +518,12 @@ class ThreadsPlaywrightHelper:
                 tag_name = textarea.evaluate("el => el.tagName")
                 existing_text = textarea.evaluate("el => el.value || el.innerText || ''")
                 trimmed_existing = (existing_text or "").strip()
-                print(f"      🔍 Textarea[{index}] 타입: {tag_name}, 기존 내용: '{existing_text[:50]}...'")
+                print(f"      Textarea[{index}] 타입: {tag_name}, 기존 내용: '{existing_text[:50]}...'")
             except:
                 trimmed_existing = ""
 
             if require_empty and trimmed_existing:
-                print(f"      ⚠️ Textarea[{index}]에 기존 내용이 있어 덮어쓰지 않음")
+                print(f"      Textarea[{index}]에 기존 내용이 있어 덮어쓰지 않음")
                 return False
 
             # 클릭 후 입력
@@ -542,14 +542,14 @@ class ThreadsPlaywrightHelper:
             # 입력 후 확인
             try:
                 after_text = textarea.evaluate("el => el.value || el.innerText || ''")
-                print(f"      ✓ Textarea[{index}]에 입력 완료: '{after_text[:50]}...' ({len(text)}자)")
+                print(f"      Textarea[{index}]에 입력 완료: '{after_text[:50]}...' ({len(text)}자)")
             except:
-                print(f"      ✓ Textarea[{index}]에 입력 완료 ({len(text)}자)")
+                print(f"      Textarea[{index}]에 입력 완료 ({len(text)}자)")
 
             return True
 
         except Exception as e:
-            print(f"      ❌ Textarea[{index}] 입력 실패: {e}")
+            print(f"      Textarea[{index}] 입력 실패: {e}")
             return False
 
     def click_add_to_thread(self) -> bool:
@@ -596,7 +596,7 @@ class ThreadsPlaywrightHelper:
                 'form div[tabindex]',
             ]
 
-            print(f"  🔍 '스레드에 추가' 버튼 찾는 중...")
+            print(f"  '스레드에 추가' 버튼 찾는 중...")
 
             for i, selector in enumerate(selectors):
                 try:
@@ -608,33 +608,33 @@ class ThreadsPlaywrightHelper:
                         element_text = btn.evaluate("el => el.innerText || el.textContent || el.placeholder || ''")
                         element_tag = btn.evaluate("el => el.tagName")
 
-                        print(f"    🔍 후보 발견 (selector #{i+1}): <{element_tag}> '{element_text[:50]}'")
+                        print(f"    후보 발견 (selector #{i+1}): <{element_tag}> '{element_text[:50]}'")
 
                         # text selector는 정확하므로 바로 클릭
                         if selector.startswith('text='):
-                            print(f"    ✓ text selector - 바로 클릭!")
+                            print(f"    text selector - 바로 클릭")
                             btn.click()
-                            print(f"    ✓ '스레드에 추가' 버튼 클릭 완료")
+                            print(f"    '스레드에 추가' 버튼 클릭 완료")
                             time.sleep(2)
                             return True
 
                         # "스레드에 추가"가 포함되어 있으면 우선 허용
                         if "스레드에 추가" in element_text or "add to thread" in element_text.lower():
-                            print(f"    ✓ '스레드에 추가' 텍스트 포함 - 클릭!")
+                            print(f"    '스레드에 추가' 텍스트 포함 - 클릭")
                             btn.click()
-                            print(f"    ✓ '스레드에 추가' 버튼 클릭 완료")
+                            print(f"    '스레드에 추가' 버튼 클릭 완료")
                             time.sleep(2)
                             return True
 
                         # 텍스트가 너무 길면 컨테이너 DIV일 가능성 높음 (100자 이상)
                         if len(element_text) > 100:
-                            print(f"    ⏭️  제외됨: 텍스트 너무 길음 ({len(element_text)}자) - 컨테이너 DIV")
+                            print(f"    제외됨: 텍스트 너무 길음 ({len(element_text)}자) - 컨테이너 DIV")
                             continue
 
                         # "만들기", "Post", "게시" 등 잘못된 버튼 제외
                         exclude_texts = ["만들기", "post", "게시", "취소", "cancel", "닫기", "close"]
                         if any(exc in element_text.lower() for exc in exclude_texts):
-                            print(f"    ⏭️  제외됨: '{element_text[:30]}' (잘못된 버튼)")
+                            print(f"    제외됨: '{element_text[:30]}' (잘못된 버튼)")
                             continue
 
                         # "스레드에 추가" 또는 "내용을 더 추가" 텍스트 포함 여부 확인
@@ -642,12 +642,12 @@ class ThreadsPlaywrightHelper:
                         if selector in ['div[role="button"]', 'div[tabindex="0"]', 'form div[role="button"]', 'form div[tabindex]']:
                             # 광범위한 selector는 텍스트 검증 필수
                             if not any(valid in element_text.lower() for valid in valid_texts):
-                                print(f"    ⏭️  제외됨: '{element_text[:30]}' (관련 텍스트 없음)")
+                                print(f"    제외됨: '{element_text[:30]}' (관련 텍스트 없음)")
                                 continue
 
-                        print(f"    ✓ 올바른 버튼 확인!")
+                        print(f"    올바른 버튼 확인")
                         btn.click()
-                        print(f"    ✓ '스레드에 추가' 버튼 클릭 완료")
+                        print(f"    '스레드에 추가' 버튼 클릭 완료")
                         time.sleep(2)  # UI 업데이트 대기
                         return True
                 except Exception as e:
@@ -655,13 +655,13 @@ class ThreadsPlaywrightHelper:
                     continue
 
             # 모든 selector 실패 - 디버그 정보 출력
-            print("  ❌ '스레드에 추가' 버튼 못 찾음 (모든 selector 실패)")
-            print("  🔍 페이지의 모든 클릭 가능 요소 분석 중...")
+            print("  '스레드에 추가' 버튼을 찾을 수 없음 (모든 selector 실패)")
+            print("  페이지의 모든 클릭 가능 요소 분석 중...")
 
             try:
                 # 모든 버튼, div[role=button], div[tabindex] 찾기
                 all_buttons = self.page.locator('button, div[role="button"], div[tabindex], a[role="button"]').all()
-                print(f"  📋 총 {len(all_buttons)}개 클릭 가능 요소 발견:")
+                print(f"  총 {len(all_buttons)}개 클릭 가능 요소 발견:")
 
                 for idx, btn in enumerate(all_buttons[:20]):  # 처음 20개만
                     try:
@@ -675,14 +675,14 @@ class ThreadsPlaywrightHelper:
 
                 # 스크린샷
                 self.page.screenshot(path="debug_add_button.png")
-                print("  📸 debug_add_button.png 저장됨")
+                print("  debug_add_button.png 저장됨")
             except Exception as e:
-                print(f"  ⚠️ 디버그 정보 출력 실패: {e}")
+                print(f"  디버그 정보 출력 실패: {e}")
 
             return False
 
         except Exception as e:
-            print(f"  ❌ '스레드에 추가' 버튼 클릭 실패: {e}")
+            print(f"  '스레드에 추가' 버튼 클릭 실패: {e}")
             return False
 
     def click_post_button(self) -> bool:
@@ -693,7 +693,7 @@ class ThreadsPlaywrightHelper:
             True: 성공, False: 실패
         """
         try:
-            print("  🔍 게시 버튼 찾는 중...")
+            print("  게시 버튼 찾는 중...")
 
             # 1차: Playwright 직접 클릭 - 하단 우측의 "게시" 버튼 찾기
             try:
@@ -720,16 +720,16 @@ class ThreadsPlaywrightHelper:
                     if box:
                         click_x = box['x'] + box['width'] / 2
                         click_y = box['y'] + box['height'] / 2
-                        print(f"  🎯 게시 버튼 발견 (하단): ({click_x:.0f}, {click_y:.0f})")
+                        print(f"  게시 버튼 발견 (하단): ({click_x:.0f}, {click_y:.0f})")
 
                         # 마우스로 직접 클릭
                         self.page.mouse.click(click_x, click_y)
-                        print(f"  ✓ 게시 버튼 마우스 클릭 완료")
+                        print(f"  게시 버튼 마우스 클릭 완료")
                         time.sleep(5)
                         return True
 
             except Exception as e:
-                print(f"  ⚠️ Playwright 직접 클릭 실패: {e}")
+                print(f"  Playwright 직접 클릭 실패: {e}")
 
             # 2차: JavaScript로 클릭 (fallback) - 하단 버튼 찾기
             try:
@@ -768,16 +768,16 @@ class ThreadsPlaywrightHelper:
                 """)
 
                 if result.startswith('clicked'):
-                    print(f"  ✓ Post 버튼 JS 클릭 성공 ({result})")
+                    print(f"  게시 버튼 JS 클릭 성공 ({result})")
                     time.sleep(5)
                     return True
 
             except Exception as e:
-                print(f"  ⚠️ JS 클릭 시도 실패: {e}")
+                print(f"  JS 클릭 시도 실패: {e}")
 
             # 2차: Playwright force 클릭 (요소 가림 무시)
             try:
-                print("  🔍 Playwright force 클릭 시도...")
+                print("  Playwright force 클릭 시도...")
                 selectors = [
                     'div[role="button"]:has-text("게시")',
                     'div[role="button"]:has-text("Post")',
@@ -808,16 +808,16 @@ class ThreadsPlaywrightHelper:
                     if bottom_btn:
                         # force=True로 클릭 (다른 요소가 가려도 클릭)
                         bottom_btn.click(force=True)
-                        print(f"  ✓ Post 버튼 force 클릭 성공 (y={bottom_y})")
+                        print(f"  게시 버튼 force 클릭 성공 (y={bottom_y})")
                         time.sleep(5)
                         return True
 
             except Exception as e:
-                print(f"  ⚠️ Force 클릭 시도 실패: {e}")
+                print(f"  Force 클릭 시도 실패: {e}")
 
             # 3차: Ctrl+Enter 단축키
             try:
-                print("  ⌨️ Ctrl+Enter 시도...")
+                print("  Ctrl+Enter 시도...")
                 textareas = self.page.locator('div[contenteditable="true"]')
                 if textareas.count() > 0:
                     textareas.last.focus()
@@ -825,15 +825,15 @@ class ThreadsPlaywrightHelper:
 
                 self.page.keyboard.press("Control+Enter")
                 time.sleep(5)
-                print("  ✓ Ctrl+Enter 전송 완료")
+                print("  Ctrl+Enter 전송 완료")
                 return True
 
             except Exception as e:
-                print(f"  ⚠️ Ctrl+Enter 시도 실패: {e}")
+                print(f"  Ctrl+Enter 시도 실패: {e}")
 
             # 4차: 좌표 기반 클릭 (다이얼로그 하단 우측 영역)
             try:
-                print("  🎯 좌표 기반 클릭 시도...")
+                print("  좌표 기반 클릭 시도...")
                 viewport = self.page.viewport_size
                 if viewport:
                     # 다이얼로그 하단 우측 영역 (게시 버튼이 보통 여기 있음)
@@ -841,22 +841,22 @@ class ThreadsPlaywrightHelper:
                     x = viewport['width'] // 2 + 200  # 중앙에서 우측으로
                     y = viewport['height'] // 2 + 200  # 중앙에서 하단으로
                     self.page.mouse.click(x, y)
-                    print(f"  ✓ 좌표 클릭 완료 ({x}, {y})")
+                    print(f"  좌표 클릭 완료 ({x}, {y})")
                     time.sleep(5)
                     return True
             except Exception as e:
-                print(f"  ⚠️ 좌표 클릭 실패: {e}")
+                print(f"  좌표 클릭 실패: {e}")
 
-            print("  ❌ Post 버튼 클릭 모든 방법 실패")
+            print("  게시 버튼 클릭 모든 방법 실패")
             try:
                 self.page.screenshot(path="debug_post_button.png")
-                print("  📸 debug_post_button.png 저장")
+                print("  debug_post_button.png 저장")
             except:
                 pass
             return False
 
         except Exception as e:
-            print(f"  ❌ Post 버튼 클릭 실패: {e}")
+            print(f"  게시 버튼 클릭 실패: {e}")
             return False
 
     # ========== 이미지 업로드 ==========
@@ -874,10 +874,10 @@ class ThreadsPlaywrightHelper:
         import os
         try:
             if not image_path or not os.path.exists(image_path):
-                print(f"  ⚠️ 이미지 파일 없음: {image_path}")
+                print(f"  이미지 파일 없음: {image_path}")
                 return False
 
-            print(f"  🖼️ 이미지 업로드 중: {image_path}")
+            print(f"  이미지 업로드 중: {image_path}")
 
             # 파일 입력 요소 찾기
             file_input = self.page.locator('input[type="file"][accept*="image"]')
@@ -885,14 +885,14 @@ class ThreadsPlaywrightHelper:
             if file_input.count() > 0:
                 file_input.set_input_files(os.path.abspath(image_path))
                 time.sleep(3)  # 이미지 업로드 대기
-                print(f"  ✅ 이미지 업로드 완료")
+                print(f"  이미지 업로드 완료")
                 return True
             else:
-                print(f"  ⚠️ 이미지 업로드 input 요소를 찾을 수 없음")
+                print(f"  이미지 업로드 input 요소를 찾을 수 없음")
                 return False
 
         except Exception as e:
-            print(f"  ⚠️ 이미지 업로드 실패: {e}")
+            print(f"  이미지 업로드 실패: {e}")
             return False
 
     # ========== 통합 워크플로우 ==========
@@ -921,9 +921,9 @@ class ThreadsPlaywrightHelper:
                 first_image = posts_data[0].get('image_path') if posts_data else None
 
             total = len(paragraphs)
-            print(f"\n📝 Playwright 직접 제어로 {total}개 문단 스레드 작성")
+            print(f"\n  Playwright로 {total}개 문단 스레드 작성 시작")
             if first_image:
-                print(f"  🖼️ 첫 번째 글에 이미지 첨부 예정: {first_image}")
+                print(f"  첫 번째 글에 이미지 첨부 예정: {first_image}")
 
             # 1. New thread 버튼 클릭
             if not self.click_new_thread():
@@ -932,9 +932,9 @@ class ThreadsPlaywrightHelper:
             # 로그인 팝업 체크
             time.sleep(1)
             if "가입" in self.page.content() or "log in" in self.page.content().lower():
-                print("  ⚠️ 로그인 팝업 감지, 닫기 시도")
+                print("  로그인 팝업 감지, 닫기 시도")
                 if not self.dismiss_login_popup():
-                    print("  ❌ 로그인 팝업 닫기 실패")
+                    print("  로그인 팝업 닫기 실패")
                     return False
                 # 다시 New thread 클릭
                 if not self.click_new_thread():
@@ -952,62 +952,62 @@ class ThreadsPlaywrightHelper:
             for i in range(1, total):
                 print(f"\n  [{i+1}/{total}] 문단 추가 중...")
 
-                # 🔍 현재 textarea 개수 확인
+                # 현재 textarea 개수 확인
                 textarea_count_before = self.count_textareas()
-                print(f"    🔍 [현재] Textarea 개수: {textarea_count_before}")
+                print(f"    [현재] Textarea 개수: {textarea_count_before}")
                 expected_count = i + 1
 
                 # 3-1. UI가 자동으로 생성하는지 잠시 대기
                 if textarea_count_before < expected_count:
-                    print(f"    ⏳ UI 자동 생성 대기 중...")
+                    print(f"    UI 자동 생성 대기 중...")
                     time.sleep(1)
                     textarea_count_after_wait = self.count_textareas()
                     if textarea_count_after_wait >= expected_count:
-                        print(f"    ✓ Textarea {expected_count}개 자동 생성됨 (버튼 클릭 불필요)")
+                        print(f"    Textarea {expected_count}개 자동 생성됨 (버튼 클릭 불필요)")
                     else:
-                        print(f"    🔍 자동 생성 안 됨 ({textarea_count_after_wait}/{expected_count})")
+                        print(f"    자동 생성 안 됨 ({textarea_count_after_wait}/{expected_count})")
 
                 # 3-2. 이미 충분한 textarea가 있는지 확인
                 textarea_count_current = self.count_textareas()
                 if textarea_count_current >= expected_count:
-                    print(f"    ✓ Textarea {expected_count}개 존재 (버튼 클릭 불필요)")
+                    print(f"    Textarea {expected_count}개 존재 (버튼 클릭 불필요)")
                 else:
                     # 3-2. '스레드에 추가' 클릭
-                    print(f"    🔘 '스레드에 추가' 버튼 클릭 필요...")
+                    print(f"    '스레드에 추가' 버튼 클릭 필요...")
                     if not self.click_add_to_thread():
-                        print(f"    ❌ '스레드에 추가' 버튼을 찾을 수 없음 → AI fallback 필요")
+                        print(f"    '스레드에 추가' 버튼을 찾을 수 없음")
                         return False
 
                     # 3-3. 버튼 클릭 후 textarea 개수 확인
                     time.sleep(1.5)
                     textarea_count_after = self.count_textareas()
-                    print(f"    🔍 [클릭 후] Textarea 개수: {textarea_count_after}")
+                    print(f"    [클릭 후] Textarea 개수: {textarea_count_after}")
 
                     if textarea_count_after < expected_count:
-                        print(f"    ❌ Textarea 생성 실패 ({textarea_count_after}/{expected_count})")
-                        print(f"    → 잘못된 요소를 클릭했거나 UI가 변경됨 → AI fallback으로 전환")
+                        print(f"    Textarea 생성 실패 ({textarea_count_after}/{expected_count})")
+                        print(f"    잘못된 요소를 클릭했거나 UI가 변경됨")
                         # 디버그 스크린샷
                         try:
                             self.page.screenshot(path=f"debug_failed_add_{i}.png")
-                            print(f"    📸 debug_failed_add_{i}.png 저장됨")
+                            print(f"    debug_failed_add_{i}.png 저장됨")
                         except:
                             pass
                         return False
 
-                    print(f"    ✓ Textarea {expected_count}개 확인")
+                    print(f"    Textarea {expected_count}개 확인")
 
                 # 3-4. 새 textarea에 입력 (기존 내용 보존)
                 target_index = self.find_empty_textarea_index()
                 if target_index is None:
-                    print("    ⚠️ 빈 textarea를 찾지 못해 마지막 textarea에 입력 시도")
+                    print("    빈 textarea를 찾지 못해 마지막 textarea에 입력 시도")
                     textarea_count_current = self.count_textareas()
                     target_index = textarea_count_current - 1 if textarea_count_current > 0 else i
                 else:
-                    print(f"    ✅ 빈 textarea 발견: index {target_index}")
+                    print(f"    빈 textarea 발견: index {target_index}")
 
-                print(f"    📝 Textarea[{target_index}]에 입력 시도...")
+                print(f"    Textarea[{target_index}]에 입력 시도...")
                 if not self.type_in_textarea(paragraphs[i], index=target_index, require_empty=True):
-                    print("    ⚠️ 대상 textarea에 입력 실패, 다른 빈 textarea 탐색...")
+                    print("    대상 textarea에 입력 실패, 다른 빈 textarea 탐색...")
                     typed = False
                     textareas_total = self.count_textareas()
                     for alt_idx in range(textareas_total):
@@ -1017,30 +1017,30 @@ class ThreadsPlaywrightHelper:
                             typed = True
                             break
                     if not typed:
-                        print("    ❌ 빈 textarea에 입력하지 못함 (덮어쓰기를 방지하기 위해 중단)")
+                        print("    빈 textarea에 입력하지 못함 (덮어쓰기를 방지하기 위해 중단)")
                         return False
 
             # 4. 최종 검증
-            print(f"\n🔍 최종 검증...")
+            print(f"\n  최종 검증...")
             final_count = self.count_textareas()
             if final_count != total:
-                print(f"  ⚠️ Textarea 개수 불일치 ({final_count}/{total})")
+                print(f"  Textarea 개수 불일치 ({final_count}/{total})")
 
             # 5. Post 버튼 클릭
-            print(f"\n📤 게시 중...")
+            print(f"\n  게시 중...")
             if not self.click_post_button():
                 return False
 
             # 6. 게시 완료 검증 (프로필 최신 글 매칭)
             if not self.verify_post_success(paragraphs[0] if paragraphs else ""):
-                print("  ⚠️ 게시 검증 실패 (프로필에서 최신 글 확인 불가)")
+                print("  게시 검증 실패 (프로필에서 최신 글 확인 불가)")
                 return False
 
-            print(f"\n✅ 쓰레드 게시 완료!")
+            print(f"\n  스레드 게시 완료")
             return True
 
         except Exception as e:
-            print(f"\n❌ 쓰레드 작성 실패: {e}")
+            print(f"\n  스레드 작성 실패: {e}")
             self.last_error = str(e)
             return False
 
@@ -1053,7 +1053,7 @@ class ThreadsPlaywrightHelper:
         """
         try:
             # 게시 처리 대기 (Threads가 서버에 전송하는 시간)
-            print("  ⏳ 게시 처리 대기 중...")
+            print("  게시 처리 대기 중...")
             time.sleep(3)
 
             # Compose 창이 닫혔는지 확인 (여러 번 시도)
@@ -1065,25 +1065,25 @@ class ThreadsPlaywrightHelper:
                 compose_modal = self.page.locator('div[role="dialog"]').count() > 0
 
                 if not post_btn_visible and not compose_modal:
-                    print("  ✅ Compose 창이 닫혔습니다 - 게시 성공!")
+                    print("  Compose 창이 닫혔습니다 - 게시 성공")
                     return True
 
                 if attempt < 2:
-                    print(f"  ⏳ Compose 창 닫힘 대기 중... ({attempt + 1}/3)")
+                    print(f"  Compose 창 닫힘 대기 중... ({attempt + 1}/3)")
                     time.sleep(2)
 
             # 마지막으로 URL 변경 확인 (compose에서 벗어났는지)
             current_url = self.page.url
             if '/compose' not in current_url.lower():
-                print(f"  ✅ compose 페이지에서 이동됨 - 게시 성공 추정")
+                print(f"  compose 페이지에서 이동됨 - 게시 성공 추정")
                 return True
 
             # 그래도 확실하지 않으면, 게시 성공으로 간주 (너무 엄격한 검증 방지)
             # 실제로 글이 작성되고 버튼을 클릭했다면 대부분 성공
-            print("  ℹ️ 검증 불확실 - 게시 성공으로 간주")
+            print("  검증 불확실 - 게시 성공으로 간주")
             return True
 
         except Exception as e:
-            print(f"  ⚠️ 검증 중 오류 (무시): {e}")
+            print(f"  검증 중 오류 (무시): {e}")
             # 검증 실패해도 게시는 성공했을 수 있음
             return True

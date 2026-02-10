@@ -1,6 +1,6 @@
 """
-Coupang Partners Thread Auto - Main Application
-Stitch Blue Theme
+쿠팡 파트너스 스레드 자동화 - 메인 애플리케이션
+Stitch Blue 테마
 """
 import sys
 import os
@@ -23,11 +23,11 @@ from PyQt5.QtGui import (
 
 from src.theme import Colors
 
-VERSION = "v2.1.0"
+VERSION = "v2.2.0"
 
 
 class SplashScreen(QSplashScreen):
-    """Premium Splash Screen - Stitch Blue theme"""
+    """프리미엄 스플래시 화면 - Stitch Blue 테마"""
 
     WIDTH = 500
     HEIGHT = 300
@@ -35,7 +35,7 @@ class SplashScreen(QSplashScreen):
 
     @classmethod
     def _resolve_font(cls):
-        """Resolve first available font from theme fallback list."""
+        """테마 폴백 목록에서 사용 가능한 첫 번째 폰트를 찾습니다."""
         if cls._FONT_FAMILY is not None:
             return cls._FONT_FAMILY
         candidates = ["Inter", "Segoe UI", "Pretendard"]
@@ -99,17 +99,17 @@ class SplashScreen(QSplashScreen):
         # ---- Title ----
         painter.setPen(QColor(Colors.TEXT_PRIMARY))
         painter.setFont(QFont(fn, 18, QFont.Bold))
-        painter.drawText(0, 112, w, 30, Qt.AlignCenter, "Coupang Partners")
+        painter.drawText(0, 112, w, 30, Qt.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4")
 
         # ---- Subtitle ----
         painter.setPen(QColor(Colors.ACCENT))
         painter.setFont(QFont(fn, 12, QFont.DemiBold))
-        painter.drawText(0, 142, w, 22, Qt.AlignCenter, "Thread Auto")
+        painter.drawText(0, 142, w, 22, Qt.AlignCenter, "\uc2a4\ub808\ub4dc \uc790\ub3d9\ud654")
 
         # ---- Tagline ----
         painter.setPen(QColor(Colors.TEXT_MUTED))
         painter.setFont(QFont(fn, 9))
-        painter.drawText(0, 172, w, 18, Qt.AlignCenter, "Automated Threads Upload for Coupang Partners")
+        painter.drawText(0, 172, w, 18, Qt.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4 Threads \uc790\ub3d9 \uc5c5\ub85c\ub4dc")
 
         # ---- Status message ----
         painter.setPen(QColor(Colors.TEXT_SECONDARY))
@@ -155,7 +155,6 @@ class SplashScreen(QSplashScreen):
 
     def showMessage(self, message, *args, **kwargs):
         self._status_msg = message
-        # drawContents handles rendering; call super for internal bookkeeping
         super().showMessage(message, *args, **kwargs)
         self.repaint()
 
@@ -184,18 +183,17 @@ def main():
     app.processEvents()
 
     steps = [
-        ("Loading configuration...", 20),
-        ("Initializing services...", 40),
-        ("Building interface...", 60),
-        ("Checking browser session...", 80),
-        ("Ready!", 100),
+        ("\uc124\uc815 \ubd88\ub7ec\uc624\ub294 \uc911...", 20),
+        ("\uc11c\ube44\uc2a4 \ucd08\uae30\ud654 \uc911...", 40),
+        ("\uc778\ud130\ud398\uc774\uc2a4 \uad6c\uc131 \uc911...", 60),
+        ("\ube0c\ub77c\uc6b0\uc800 \uc138\uc158 \ud655\uc778 \uc911...", 80),
+        ("\uc900\ube44 \uc644\ub8cc!", 100),
     ]
 
     for message, progress in steps:
         splash.showMessage(message)
         splash.setProgress(progress)
         app.processEvents()
-        # Short non-blocking delays with frequent event processing
         for _ in range(3):
             time.sleep(0.05)
             app.processEvents()

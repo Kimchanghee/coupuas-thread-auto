@@ -62,6 +62,9 @@ class Config:
         # 호환성: 이전 버전 설정
         self.instruction = data.get('instruction', '')
 
+        # 튜토리얼
+        self.tutorial_shown = data.get('tutorial_shown', False)
+
     def _set_defaults(self):
         """기본값 설정"""
         self.gemini_api_key = ''
@@ -75,6 +78,7 @@ class Config:
         self.media_download_dir = 'media'
         self.prefer_video = True
         self.instruction = ''
+        self.tutorial_shown = False
 
     def save(self):
         """설정 파일 저장 (민감 정보 파일 권한 제한)"""
@@ -89,6 +93,7 @@ class Config:
             'media_download_dir': self.media_download_dir,
             'prefer_video': self.prefer_video,
             'instruction': self.instruction,
+            'tutorial_shown': self.tutorial_shown,
         }
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:

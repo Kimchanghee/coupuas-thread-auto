@@ -1,6 +1,6 @@
 """
-Settings Dialog (PyQt5)
-Stitch Blue Design
+설정 다이얼로그 (PyQt5)
+Stitch Blue 디자인 - 좌표 기반 배치
 """
 import re
 import threading
@@ -13,7 +13,7 @@ from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
-from src.theme import Colors, global_stylesheet
+from src.theme import Colors, Radius, global_stylesheet
 
 
 # ─── Events ─────────────────────────────────────────────────
@@ -29,7 +29,7 @@ class LoginStatusEvent(QEvent):
 # ─── Section Card ────────────────────────────────────────────
 
 class SectionCard(QFrame):
-    """Settings section with icon, title and content"""
+    """설정 섹션 카드 (아이콘 + 제목 + 내용)"""
     def __init__(self, title, icon_char="", parent=None):
         super().__init__(parent)
         self._title = title
@@ -39,7 +39,7 @@ class SectionCard(QFrame):
         self._layout.setContentsMargins(20, 18, 20, 18)
         self._layout.setSpacing(14)
 
-        # Title row
+        # 제목 행
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
 
@@ -62,7 +62,7 @@ class SectionCard(QFrame):
         title_row.addStretch()
         self._layout.addLayout(title_row)
 
-        # Separator
+        # 구분선
         sep = QFrame()
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
@@ -84,7 +84,7 @@ class SectionCard(QFrame):
 # ─── Form Field ─────────────────────────────────────────────
 
 class FormField(QWidget):
-    """Label + input pair"""
+    """레이블 + 입력 위젯 쌍"""
     def __init__(self, label_text, input_widget, hint="", parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -93,7 +93,9 @@ class FormField(QWidget):
 
         top = QHBoxLayout()
         label = QLabel(label_text)
-        label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;")
+        label.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; letter-spacing: 0.5px;"
+        )
         top.addWidget(label)
 
         if hint:
@@ -109,7 +111,7 @@ class FormField(QWidget):
 # ─── Dialog Header ──────────────────────────────────────────
 
 class DialogHeader(QFrame):
-    """Dialog top bar with blur-style gradient"""
+    """다이얼로그 상단 바 (그라디언트 배경)"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(54)
@@ -129,11 +131,17 @@ class DialogHeader(QFrame):
 # ─── Settings Dialog ────────────────────────────────────────
 
 class SettingsDialog(QDialog):
+    """자동화 설정 다이얼로그 - 좌표 기반 배치"""
+
+    DLG_W = 540
+    DLG_H = 740
+    HEADER_H = 54
+    FOOTER_H = 62
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.setFixedSize(540, 740)
+        self.setWindowTitle("설정")
+        self.setFixedSize(self.DLG_W, self.DLG_H)
         self.setModal(True)
 
         self._closed = False
@@ -149,17 +157,14 @@ class SettingsDialog(QDialog):
         super().done(result)
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        # 최상위에 레이아웃 없이 좌표 기반 배치
 
-        # Header
-        header = DialogHeader()
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(20, 0, 20, 0)
+        # ── 헤더 ──
+        header = DialogHeader(self)
+        header.setGeometry(0, 0, self.DLG_W, self.HEADER_H)
 
-        close_btn = QPushButton("X")
-        close_btn.setFixedSize(32, 32)
+        close_btn = QPushButton("\u2715", header)
+        close_btn.setGeometry(12, 11, 32, 32)
         close_btn.setCursor(Qt.PointingHandCursor)
         close_btn.setStyleSheet(f"""
             QPushButton {{
@@ -176,21 +181,24 @@ class SettingsDialog(QDialog):
             }}
         """)
         close_btn.clicked.connect(self.reject)
-        header_layout.addWidget(close_btn)
 
-        title = QLabel("Automation Settings")
-        title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 14pt; font-weight: 700; letter-spacing: -0.3px;")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
+        title = QLabel("자동화 설정", header)
+        title.setGeometry(52, 10, 350, 34)
+        title.setStyleSheet(
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 14pt; font-weight: 700; "
+            f"letter-spacing: -0.3px; background: transparent;"
+        )
 
-        accent_icon = QLabel("*")
-        accent_icon.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 16pt; font-weight: 700;")
-        header_layout.addWidget(accent_icon)
+        accent_icon = QLabel("*", header)
+        accent_icon.setGeometry(self.DLG_W - 42, 14, 22, 26)
+        accent_icon.setStyleSheet(
+            f"color: {Colors.ACCENT}; font-size: 16pt; font-weight: 700; background: transparent;"
+        )
 
-        root.addWidget(header)
-
-        # Scrollable content
-        scroll = QScrollArea()
+        # ── 스크롤 영역 ──
+        scroll_h = self.DLG_H - self.HEADER_H - self.FOOTER_H
+        scroll = QScrollArea(self)
+        scroll.setGeometry(0, self.HEADER_H, self.DLG_W, scroll_h)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"""
@@ -212,54 +220,49 @@ class SettingsDialog(QDialog):
 
         self.content_layout.addStretch()
         scroll.setWidget(scroll_content)
-        root.addWidget(scroll, 1)
 
-        # Footer buttons
-        footer = QFrame()
-        footer.setFixedHeight(62)
+        # ── 푸터 ──
+        footer_y = self.DLG_H - self.FOOTER_H
+        footer = QFrame(self)
+        footer.setGeometry(0, footer_y, self.DLG_W, self.FOOTER_H)
         footer.setStyleSheet(f"""
             QFrame {{
                 background-color: {Colors.BG_CARD};
                 border-top: 1px solid {Colors.BORDER};
             }}
         """)
-        footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(20, 0, 20, 0)
-        footer_layout.addStretch()
 
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setFixedSize(100, 38)
+        # 저장 버튼 (오른쪽)
+        self.save_btn = QPushButton("저장", footer)
+        self.save_btn.setGeometry(self.DLG_W - 20 - 100, 12, 100, 38)
+        self.save_btn.setCursor(Qt.PointingHandCursor)
+        self.save_btn.clicked.connect(self._save_settings)
+
+        # 취소 버튼
+        self.cancel_btn = QPushButton("취소", footer)
+        self.cancel_btn.setGeometry(self.DLG_W - 20 - 100 - 10 - 90, 12, 90, 38)
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.setProperty("class", "ghost")
         self.cancel_btn.clicked.connect(self.reject)
-        footer_layout.addWidget(self.cancel_btn)
-
-        self.save_btn = QPushButton("Save Changes")
-        self.save_btn.setFixedSize(120, 38)
-        self.save_btn.setCursor(Qt.PointingHandCursor)
-        self.save_btn.clicked.connect(self._save_settings)
-        footer_layout.addWidget(self.save_btn)
-
-        root.addWidget(footer)
 
     # ── Sections ──
 
     def _build_api_section(self):
-        section = SectionCard("API Configuration", "*")
+        section = SectionCard("API 설정", "*")
         layout = section.content_layout()
 
         self.gemini_key_edit = QLineEdit()
         self.gemini_key_edit.setEchoMode(QLineEdit.Password)
-        self.gemini_key_edit.setPlaceholderText("Enter your Gemini API key")
-        layout.addWidget(FormField("Master API Key", self.gemini_key_edit, "from Google AI Studio"))
+        self.gemini_key_edit.setPlaceholderText("Gemini API 키를 입력하세요")
+        layout.addWidget(FormField("마스터 API 키", self.gemini_key_edit, "Google AI Studio에서 발급"))
 
         self.content_layout.addWidget(section)
 
     def _build_upload_section(self):
-        section = SectionCard("Upload Settings", "*")
+        section = SectionCard("업로드 설정", "*")
         layout = section.content_layout()
 
-        # Interval
+        # 업로드 간격
         interval_widget = QWidget()
         interval_row = QHBoxLayout(interval_widget)
         interval_row.setContentsMargins(0, 0, 0, 0)
@@ -267,60 +270,60 @@ class SettingsDialog(QDialog):
 
         self.hour_spin = QSpinBox()
         self.hour_spin.setRange(0, 23)
-        self.hour_spin.setFixedWidth(72)
-        self.hour_spin.setSuffix(" h")
+        self.hour_spin.setFixedWidth(80)
+        self.hour_spin.setSuffix(" 시간")
         interval_row.addWidget(self.hour_spin)
 
         self.min_spin = QSpinBox()
         self.min_spin.setRange(0, 59)
         self.min_spin.setFixedWidth(72)
-        self.min_spin.setSuffix(" m")
+        self.min_spin.setSuffix(" 분")
         interval_row.addWidget(self.min_spin)
 
         self.sec_spin = QSpinBox()
         self.sec_spin.setRange(0, 59)
         self.sec_spin.setFixedWidth(72)
-        self.sec_spin.setSuffix(" s")
+        self.sec_spin.setSuffix(" 초")
         interval_row.addWidget(self.sec_spin)
 
         interval_row.addStretch()
 
-        layout.addWidget(FormField("Upload Interval", interval_widget, "min 30s"))
+        layout.addWidget(FormField("업로드 간격", interval_widget, "최소 30초"))
 
-        self.video_check = QCheckBox("Prefer video over image uploads")
+        self.video_check = QCheckBox("이미지보다 영상 업로드 우선")
         self.video_check.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 10pt;")
         layout.addWidget(self.video_check)
 
         self.content_layout.addWidget(section)
 
     def _build_telegram_section(self):
-        section = SectionCard("Telegram Notifications", "*")
+        section = SectionCard("텔레그램 알림", "*")
         layout = section.content_layout()
 
-        self.telegram_check = QCheckBox("Enable Telegram alerts")
+        self.telegram_check = QCheckBox("텔레그램 알림 활성화")
         self.telegram_check.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 10pt;")
         layout.addWidget(self.telegram_check)
 
         self.bot_token_edit = QLineEdit()
         self.bot_token_edit.setEchoMode(QLineEdit.Password)
-        self.bot_token_edit.setPlaceholderText("BotFather token")
-        layout.addWidget(FormField("Bot Token", self.bot_token_edit))
+        self.bot_token_edit.setPlaceholderText("BotFather 토큰")
+        layout.addWidget(FormField("봇 토큰", self.bot_token_edit))
 
         self.chat_id_edit = QLineEdit()
-        self.chat_id_edit.setPlaceholderText("Your Chat ID")
-        layout.addWidget(FormField("Chat ID", self.chat_id_edit))
+        self.chat_id_edit.setPlaceholderText("채팅 ID")
+        layout.addWidget(FormField("채팅 ID", self.chat_id_edit))
 
         self.content_layout.addWidget(section)
 
     def _build_threads_section(self):
-        section = SectionCard("Threads Account", "*")
+        section = SectionCard("Threads 계정", "*")
         layout = section.content_layout()
 
         self.username_edit = QLineEdit()
-        self.username_edit.setPlaceholderText("e.g. myaccount")
-        layout.addWidget(FormField("Account Name", self.username_edit, "for profile identification"))
+        self.username_edit.setPlaceholderText("예: myaccount")
+        layout.addWidget(FormField("계정 이름", self.username_edit, "프로필 식별용"))
 
-        # Status indicator
+        # 상태 표시
         status_row = QHBoxLayout()
         status_row.setSpacing(8)
 
@@ -333,23 +336,25 @@ class SettingsDialog(QDialog):
         self._status_dot = status_dot
         status_row.addWidget(status_dot)
 
-        self.login_status_label = QLabel("Disconnected")
-        self.login_status_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;")
+        self.login_status_label = QLabel("연결 안됨")
+        self.login_status_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
+        )
         status_row.addWidget(self.login_status_label)
         status_row.addStretch()
         layout.addLayout(status_row)
 
-        # Login buttons
+        # 로그인 버튼들
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        self.threads_login_btn = QPushButton("Login with Threads")
+        self.threads_login_btn = QPushButton("Threads 로그인")
         self.threads_login_btn.setFixedHeight(40)
         self.threads_login_btn.setCursor(Qt.PointingHandCursor)
         self.threads_login_btn.clicked.connect(self._open_threads_login)
         btn_row.addWidget(self.threads_login_btn)
 
-        self.check_login_btn = QPushButton("Check Status")
+        self.check_login_btn = QPushButton("상태 확인")
         self.check_login_btn.setFixedHeight(40)
         self.check_login_btn.setCursor(Qt.PointingHandCursor)
         self.check_login_btn.setProperty("class", "ghost")
@@ -358,8 +363,8 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(btn_row)
 
-        # Hint
-        hint1 = QLabel("Close the browser after login to auto-save session.")
+        # 안내 문구
+        hint1 = QLabel("로그인 후 브라우저를 닫으면 세션이 자동 저장됩니다.")
         hint1.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 8pt;")
         layout.addWidget(hint1)
 
@@ -389,7 +394,7 @@ class SettingsDialog(QDialog):
         )
         if interval < 30:
             interval = 30
-            QMessageBox.information(self, "Notice", "Minimum upload interval is 30 seconds.")
+            QMessageBox.information(self, "알림", "최소 업로드 간격은 30초입니다.")
 
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
@@ -401,14 +406,14 @@ class SettingsDialog(QDialog):
 
         config.save()
 
-        QMessageBox.information(self, "Saved", "Settings have been saved.")
+        QMessageBox.information(self, "저장 완료", "설정이 저장되었습니다.")
         self.accept()
 
     # ── Threads Login ──
 
     @staticmethod
     def _sanitize_profile_name(username):
-        """Sanitize username for use as profile directory name."""
+        """프로필 디렉터리 이름용 사용자명 정리"""
         name = username.split('@')[0] if '@' in username else username
         return re.sub(r'[^\w\-.]', '_', name)
 
@@ -422,15 +427,15 @@ class SettingsDialog(QDialog):
     def _open_threads_login(self):
         username = self.username_edit.text().strip()
         if not username:
-            QMessageBox.warning(self, "Notice", "Please enter an account name first.")
+            QMessageBox.warning(self, "알림", "먼저 계정 이름을 입력하세요.")
             return
 
         config.instagram_username = username
         config.save()
 
         self.threads_login_btn.setEnabled(False)
-        self.threads_login_btn.setText("Opening...")
-        self._update_login_status("pending", "Browser opening...")
+        self.threads_login_btn.setText("여는 중...")
+        self._update_login_status("pending", "브라우저 여는 중...")
 
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
@@ -465,7 +470,7 @@ class SettingsDialog(QDialog):
                     pass
 
             except Exception as e:
-                print(f"Browser error: {e}")
+                print(f"브라우저 오류: {e}")
 
         thread = threading.Thread(target=open_browser, daemon=True)
         thread.start()
@@ -477,12 +482,12 @@ class SettingsDialog(QDialog):
         if self._closed:
             return
         self.threads_login_btn.setEnabled(True)
-        self.threads_login_btn.setText("Login with Threads")
+        self.threads_login_btn.setText("Threads 로그인")
 
     def _check_login_status(self):
         self.check_login_btn.setEnabled(False)
-        self.check_login_btn.setText("Checking...")
-        self._update_login_status("pending", "Checking...")
+        self.check_login_btn.setText("확인 중...")
+        self._update_login_status("pending", "확인 중...")
 
         def check_status():
             try:
@@ -514,7 +519,7 @@ class SettingsDialog(QDialog):
                         pass
 
             except Exception as e:
-                print(f"Login check error: {e}")
+                print(f"로그인 확인 오류: {e}")
                 return False, None
 
         def run_check():
@@ -547,12 +552,12 @@ class SettingsDialog(QDialog):
                 return True
             is_logged_in, username = event.result
             self.check_login_btn.setEnabled(True)
-            self.check_login_btn.setText("Check Status")
+            self.check_login_btn.setText("상태 확인")
 
             if is_logged_in:
-                name = f"@{username}" if username else "Connected"
+                name = f"@{username}" if username else "연결됨"
                 self._update_login_status("success", name)
             else:
-                self._update_login_status("error", "Disconnected")
+                self._update_login_status("error", "연결 안됨")
             return True
         return super().event(event)

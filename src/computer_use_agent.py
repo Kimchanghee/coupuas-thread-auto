@@ -82,7 +82,7 @@ class ComputerUseAgent:
 
         # 🔑 launch_persistent_context 사용 - 브라우저 프로필 완전 유지
         # 쿠키, localStorage, IndexedDB, Service Worker 등 모든 데이터 유지
-        print(f"🔐 브라우저 프로필: {profile_path}")
+        print(f"  브라우저 프로필: {profile_path}")
 
         try:
             self.context = self.playwright.chromium.launch_persistent_context(
@@ -96,7 +96,7 @@ class ComputerUseAgent:
                 ],
                 ignore_default_args=["--enable-automation"],
             )
-            print(f"✅ 브라우저 시작됨 (프로필 유지)")
+            print(f"  브라우저 시작 완료 (프로필 유지)")
 
             # 기존 쿠키 확인
             cookies = self.context.cookies()
@@ -104,10 +104,10 @@ class ComputerUseAgent:
                 threads_cookies = [c for c in cookies if 'threads' in c.get('domain', '').lower()]
                 ig_cookies = [c for c in cookies if 'instagram' in c.get('domain', '').lower()]
                 if threads_cookies or ig_cookies:
-                    print(f"   🍪 저장된 세션 발견: Threads {len(threads_cookies)}개, Instagram {len(ig_cookies)}개")
+                    print(f"  저장된 세션 발견: Threads {len(threads_cookies)}개, Instagram {len(ig_cookies)}개")
 
         except Exception as e:
-            print(f"⚠️ 영구 프로필 로드 실패, 일반 모드로 시작: {e}")
+            print(f"  영구 프로필 로드 실패, 일반 모드로 시작: {e}")
             # fallback: 일반 브라우저
             self.browser = self.playwright.chromium.launch(headless=self.headless)
             self.context = self.browser.new_context(
@@ -133,17 +133,17 @@ class ComputerUseAgent:
                 # 추가로 storage_state도 백업
                 storage_path = self._get_storage_state_path()
                 self.context.storage_state(path=storage_path)
-                print(f"✅ 세션 백업됨: {storage_path}")
+                print(f"  세션 백업 완료: {storage_path}")
             except Exception as e:
                 # persistent context에서는 실패해도 괜찮음 (자동 저장됨)
-                print(f"ℹ️ 세션 백업 스킵 (자동 저장 모드)")
+                print(f"  세션 백업 생략 (자동 저장 모드)")
 
     def close(self):
         """브라우저 닫기 - persistent context는 자동으로 세션 저장"""
         try:
             # persistent context 닫기 - 세션 자동 저장됨
             if self.context:
-                print("💾 브라우저 종료 중 (세션 자동 저장)...")
+                print("  브라우저 종료 중 (세션 자동 저장)...")
                 self.context.close()
             # fallback 브라우저가 있으면 닫기
             if self.browser:
@@ -151,7 +151,7 @@ class ComputerUseAgent:
             if self.playwright:
                 self.playwright.stop()
         except Exception as e:
-            print(f"⚠️ 브라우저 종료 중 오류: {e}")
+            print(f"  브라우저 종료 중 오류: {e}")
         finally:
             self.page = None
             self.browser = None
@@ -173,12 +173,12 @@ class ComputerUseAgent:
             fname = fc.name
             args = fc.args or {}
             extra_fields: Dict[str, Any] = {}
-            print(f"  -> Executing: {fname} ({args})")
+            print(f"  실행: {fname} ({args})")
 
             # Safety confirmation - AUTO ACCEPT for automation
             safety = args.get("safety_decision")
             if safety:
-                print("  ✓ Safety decision detected - Auto-accepting for automation")
+                print("  안전 확인 감지 - 자동화를 위해 자동 수락")
                 print(f"    {safety.get('explanation')}")
                 extra_fields["safety_acknowledgement"] = True
 
@@ -262,7 +262,7 @@ class ComputerUseAgent:
                 time.sleep(0.5)
                 results.append(ExecutedAction(fname, extra_fields))
             except Exception as e:  # noqa: BLE001
-                print(f"Error executing {fname}: {e}")
+                print(f"  실행 오류 ({fname}): {e}")
                 results.append(ExecutedAction(fname, {"error": str(e)}))
 
         return results
@@ -335,7 +335,7 @@ class ComputerUseAgent:
 
             # candidates가 비어있는지 확인
             if not response.candidates or len(response.candidates) == 0:
-                print("⚠️ API 응답에 candidates가 없습니다 (API 오버로드 또는 안전 필터)")
+                print("  API 응답 없음 (API 과부하 또는 안전 필터)")
                 return None
 
             candidate = response.candidates[0]
@@ -346,7 +346,7 @@ class ComputerUseAgent:
                 final_text = " ".join(
                     [p.text for p in candidate.content.parts if getattr(p, "text", None)]
                 )
-                print("Agent finished:", final_text)
+                print(f"  에이전트 완료: {final_text}")
                 return final_text
 
             # Execute actions
@@ -360,7 +360,7 @@ class ComputerUseAgent:
                 )
             )
 
-        print("Turn limit reached.")
+        print("  작업 턴 한도 도달")
         return None
 
 
