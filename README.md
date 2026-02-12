@@ -23,16 +23,26 @@
 
 ## 설치 방법
 
-### 1. Python 설치
+### 방법 1: 설치형 (권장) ✨
+
+1. [최신 릴리즈 페이지](https://github.com/yourusername/coupuas-thread-auto/releases/latest)에서 `CoupangThreadAuto.exe` 다운로드
+2. 다운로드한 파일을 원하는 위치에 저장
+3. 더블클릭으로 실행
+
+**자동 업데이트**: 프로그램 실행 시 자동으로 새 버전을 확인하고 업데이트할 수 있습니다! 🔄
+
+### 방법 2: 소스코드 실행
+
+#### 1. Python 설치
 [Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.8 이상을 다운로드하여 설치합니다.
 
-### 2. 프로젝트 클론
+#### 2. 프로젝트 클론
 ```bash
 git clone https://github.com/yourusername/ceo-thread-auto.git
 cd ceo-thread-auto
 ```
 
-### 3. 필요한 패키지 설치
+#### 3. 필요한 패키지 설치
 ```bash
 pip install -r requirements.txt
 ```
@@ -239,8 +249,74 @@ python setup_login.py
 - [x] Gemini 3 기반 글 변환 ✅
 - [x] 이미지 미리보기 ✅
 
+## 자동 업데이트 기능 🔄
+
+### 특징
+- ✅ **자동 확인**: 프로그램 시작 시 자동으로 새 버전 확인
+- ✅ **원클릭 업데이트**: 버튼 클릭만으로 다운로드 및 설치
+- ✅ **안전한 설치**: 기존 파일을 백업하고 문제 발생 시 자동 복구
+- ✅ **GitHub Releases 연동**: 공식 릴리즈만 자동으로 설치
+
+### 사용 방법
+1. 프로그램 실행 시 새 버전이 있으면 자동으로 알림
+2. 또는 상단의 **"업데이트"** 버튼 클릭
+3. 다이얼로그에서 변경사항 확인
+4. **"다운로드 및 설치"** 버튼 클릭
+5. 자동으로 업데이트 설치 후 프로그램 재시작
+
+## 개발자 가이드
+
+### 빌드 방법
+
+```bash
+# 의존성 설치
+pip install -r requirements.txt
+
+# Playwright 브라우저 설치
+playwright install chromium
+
+# EXE 빌드
+python build_exe.py
+```
+
+빌드된 파일은 `dist/CoupangThreadAuto.exe`에 생성됩니다.
+
+### 릴리즈 배포
+
+1. **버전 업데이트**
+   ```bash
+   # main.py에서 VERSION 수정
+   VERSION = "v2.3.0"
+   ```
+
+2. **변경사항 커밋**
+   ```bash
+   git add .
+   git commit -m "Release v2.3.0"
+   ```
+
+3. **태그 생성 및 푸시**
+   ```bash
+   git tag v2.3.0
+   git push origin v2.3.0
+   ```
+
+4. **자동 빌드 및 릴리즈**
+   - GitHub Actions가 자동으로 실행됩니다
+   - Windows 환경에서 빌드
+   - GitHub Releases에 자동 업로드
+   - 사용자들은 자동으로 업데이트 알림을 받습니다
+
+### GitHub Actions 워크플로우
+
+- `.github/workflows/build-release.yml`: 태그 푸시 시 자동 빌드 및 릴리즈
+- Windows 환경에서 PyInstaller로 빌드
+- 생성된 EXE를 GitHub Releases에 자동 업로드
+
 ## 향후 계획
 
+- [x] 자동 업데이트 기능 ✅
+- [x] GitHub Releases 통합 ✅
 - [ ] 실제 이미지 생성 API 통합 (DALL-E, Stable Diffusion 등)
 - [ ] 예약 업로드 기능
 - [ ] 업로드 기록 저장 및 관리

@@ -9,7 +9,11 @@ from PyQt5.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox
 from PyQt5.QtCore import Qt, QRectF, QRect, QPoint
 from PyQt5.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion
 
-from src.theme import Colors, Radius
+from src.theme import (
+    Colors, Radius, Gradients,
+    close_btn_style, ghost_btn_style, accent_btn_style,
+    muted_text_style, header_title_style, dialog_style
+)
 
 
 # ─── Tutorial Dialog Pages ─────────────────────────────────
@@ -203,19 +207,13 @@ class TutorialDialog(QDialog):
         self.step_label = QLabel(self)
         self.step_label.setGeometry(24, 16, 120, 20)
         self.step_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600; background: transparent;"
+            muted_text_style("9pt") + " font-weight: 600;"
         )
 
         close_btn = QPushButton("\u2715", self)
         close_btn.setGeometry(W - 48, 12, 32, 32)
         close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {Colors.TEXT_MUTED};
-                border: none; border-radius: 8px; font-size: 11pt; font-weight: 600;
-            }}
-            QPushButton:hover {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY}; }}
-        """)
+        close_btn.setStyleSheet(close_btn_style())
         close_btn.clicked.connect(self.accept)
 
         self.icon_label = QLabel(self)
@@ -225,10 +223,7 @@ class TutorialDialog(QDialog):
         self.title_label = QLabel(self)
         self.title_label.setGeometry(24, 120, W - 48, 32)
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 16pt; font-weight: 700; "
-            f"letter-spacing: -0.3px; background: transparent;"
-        )
+        self.title_label.setStyleSheet(header_title_style("16pt"))
 
         self.subtitle_label = QLabel(self)
         self.subtitle_label.setGeometry(24, 154, W - 48, 22)
@@ -263,14 +258,7 @@ class TutorialDialog(QDialog):
         self.prev_btn = QPushButton("\u2190 이전", self)
         self.prev_btn.setGeometry(24, 490, 100, 36)
         self.prev_btn.setCursor(Qt.PointingHandCursor)
-        self.prev_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {Colors.TEXT_SECONDARY};
-                border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD};
-                font-size: 10pt; font-weight: 600;
-            }}
-            QPushButton:hover {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY}; }}
-        """)
+        self.prev_btn.setStyleSheet(ghost_btn_style())
         self.prev_btn.clicked.connect(self._prev_page)
 
         self.skip_btn = QPushButton("건너뛰기", self)
@@ -290,11 +278,11 @@ class TutorialDialog(QDialog):
         self.next_btn.setCursor(Qt.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {Colors.ACCENT}; color: #FFFFFF;
+                background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
                 border: none; border-radius: {Radius.MD}; font-size: 10pt; font-weight: 600;
             }}
-            QPushButton:hover {{ background-color: {Colors.ACCENT_LIGHT}; }}
-            QPushButton:pressed {{ background-color: {Colors.ACCENT_DARK}; }}
+            QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
+            QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
         """)
         self.next_btn.clicked.connect(self._next_page)
 
@@ -615,15 +603,13 @@ class TutorialOverlay(QWidget):
         # 단계 표시
         self.step_label = QLabel(self.tooltip_card)
         self.step_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; "
-            f"background: transparent; border: none;"
+            muted_text_style("8pt") + " font-weight: 600; border: none;"
         )
 
         # 제목
         self.title_label = QLabel(self.tooltip_card)
         self.title_label.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 13pt; font-weight: 700; "
-            f"letter-spacing: -0.2px; background: transparent; border: none;"
+            header_title_style("13pt") + " border: none;"
         )
 
         # 설명
@@ -638,14 +624,7 @@ class TutorialOverlay(QWidget):
         self.prev_btn = QPushButton("\u2190 이전", self)
         self.prev_btn.setFixedSize(86, 34)
         self.prev_btn.setCursor(Qt.PointingHandCursor)
-        self.prev_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {Colors.TEXT_SECONDARY};
-                border: 1px solid {Colors.BORDER}; border-radius: {Radius.MD};
-                font-size: 9pt; font-weight: 600;
-            }}
-            QPushButton:hover {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY}; }}
-        """)
+        self.prev_btn.setStyleSheet(ghost_btn_style())
         self.prev_btn.clicked.connect(self._prev_step)
 
         # 건너뛰기 버튼
@@ -667,12 +646,12 @@ class TutorialOverlay(QWidget):
         self.next_btn.setCursor(Qt.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {Colors.ACCENT}; color: #FFFFFF;
+                background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
                 border: none; border-radius: {Radius.MD};
                 font-size: 9pt; font-weight: 600;
             }}
-            QPushButton:hover {{ background-color: {Colors.ACCENT_LIGHT}; }}
-            QPushButton:pressed {{ background-color: {Colors.ACCENT_DARK}; }}
+            QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
+            QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
         """)
         self.next_btn.clicked.connect(self._next_step)
 

@@ -13,7 +13,13 @@ from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
-from src.theme import Colors, Radius, global_stylesheet
+from src.theme import (
+    Colors, Radius, Spacing, Gradients, Typography,
+    section_title_style, section_icon_style, header_title_style,
+    close_btn_style, ghost_btn_style, accent_btn_style,
+    input_style, muted_text_style, hint_text_style,
+    scroll_area_style, dialog_style, global_stylesheet
+)
 
 
 # ─── Events ─────────────────────────────────────────────────
@@ -45,19 +51,12 @@ class SectionCard(QFrame):
 
         if icon_char:
             icon = QLabel(icon_char)
-            icon.setStyleSheet(f"color: {Colors.ACCENT}; font-size: 14pt; font-weight: 700;")
+            icon.setStyleSheet(section_icon_style())
             icon.setFixedWidth(22)
             title_row.addWidget(icon)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"""
-            color: {Colors.TEXT_PRIMARY};
-            font-size: 11pt;
-            font-weight: 700;
-            background: transparent;
-            border: none;
-            padding: 0;
-        """)
+        title_label.setStyleSheet(section_title_style())
         title_row.addWidget(title_label)
         title_row.addStretch()
         self._layout.addLayout(title_row)
@@ -100,7 +99,7 @@ class FormField(QWidget):
 
         if hint:
             hint_label = QLabel(hint)
-            hint_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 8pt;")
+            hint_label.setStyleSheet(hint_text_style())
             top.addStretch()
             top.addWidget(hint_label)
 
@@ -166,28 +165,12 @@ class SettingsDialog(QDialog):
         close_btn = QPushButton("\u2715", header)
         close_btn.setGeometry(12, 11, 32, 32)
         close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {Colors.TEXT_MUTED};
-                border: none;
-                border-radius: 8px;
-                font-size: 11pt;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background-color: {Colors.BG_ELEVATED};
-                color: {Colors.TEXT_PRIMARY};
-            }}
-        """)
+        close_btn.setStyleSheet(close_btn_style())
         close_btn.clicked.connect(self.reject)
 
         title = QLabel("자동화 설정", header)
         title.setGeometry(52, 10, 350, 34)
-        title.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 14pt; font-weight: 700; "
-            f"letter-spacing: -0.3px; background: transparent;"
-        )
+        title.setStyleSheet(header_title_style("14pt"))
 
         accent_icon = QLabel("*", header)
         accent_icon.setGeometry(self.DLG_W - 42, 14, 22, 26)
@@ -201,12 +184,7 @@ class SettingsDialog(QDialog):
         scroll.setGeometry(0, self.HEADER_H, self.DLG_W, scroll_h)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"""
-            QScrollArea {{
-                background: {Colors.BG_DARK};
-                border: none;
-            }}
-        """)
+        scroll.setStyleSheet(scroll_area_style())
 
         scroll_content = QWidget()
         self.content_layout = QVBoxLayout(scroll_content)
@@ -291,7 +269,6 @@ class SettingsDialog(QDialog):
         layout.addWidget(FormField("업로드 간격", interval_widget, "최소 30초"))
 
         self.video_check = QCheckBox("이미지보다 영상 업로드 우선")
-        self.video_check.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 10pt;")
         layout.addWidget(self.video_check)
 
         self.content_layout.addWidget(section)
@@ -301,7 +278,6 @@ class SettingsDialog(QDialog):
         layout = section.content_layout()
 
         self.telegram_check = QCheckBox("텔레그램 알림 활성화")
-        self.telegram_check.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; font-size: 10pt;")
         layout.addWidget(self.telegram_check)
 
         self.bot_token_edit = QLineEdit()
@@ -365,7 +341,7 @@ class SettingsDialog(QDialog):
 
         # 안내 문구
         hint1 = QLabel("로그인 후 브라우저를 닫으면 세션이 자동 저장됩니다.")
-        hint1.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 8pt;")
+        hint1.setStyleSheet(hint_text_style())
         layout.addWidget(hint1)
 
         self.content_layout.addWidget(section)

@@ -2,32 +2,36 @@
 설정 관리 모듈
 쿠팡 파트너스 Threads 자동화 설정을 관리합니다.
 """
+
 import json
 import os
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class Config:
     def __init__(self):
-        self.config_dir = Path.home() / ".coupang_thread_auto"
+        self.config_dir = Path.home() / ".shorts_thread_maker"
         self.config_file = self.config_dir / "config.json"
         self.ensure_config_dir()
         self.load()
 
     def ensure_config_dir(self):
-        """설정 디렉토리가 없으면 생성 (owner-only 권한)"""
+        """설정 디렉토리가 없으면 생성 (owner-only 권한)."""
         if not self.config_dir.exists():
             self.config_dir.mkdir(parents=True, mode=0o700)
 
     def load(self):
-        """설정 파일 로드"""
+        """설정 파일을 로드합니다."""
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self._load_from_dict(data)
-            except (json.JSONDecodeError, OSError) as e:
-                print(f"설정 파일 로드 오류: {e}")
+            except (json.JSONDecodeError, OSError):
+                logger.exception("Failed to load config file")
                 self._set_defaults()
                 self.save()
         else:
@@ -35,7 +39,7 @@ class Config:
             self.save()
 
     def _load_from_dict(self, data: dict):
-        """딕셔너리에서 설정 로드"""
+        """딕셔너리에서 설정을 로드합니다."""
         # 필수 설정
         self.gemini_api_key = data.get('gemini_api_key', '')
 
@@ -66,7 +70,7 @@ class Config:
         self.tutorial_shown = data.get('tutorial_shown', False)
 
     def _set_defaults(self):
-        """기본값 설정"""
+        """기본값을 설정합니다."""
         self.gemini_api_key = ''
         self.upload_interval = 60
         self.instagram_username = ''
@@ -81,7 +85,7 @@ class Config:
         self.tutorial_shown = False
 
     def save(self):
-        """설정 파일 저장 (민감 정보 파일 권한 제한)"""
+        """설정 파일 저장 (민감 정보 파일 권한 제한)."""
         data = {
             'gemini_api_key': self.gemini_api_key,
             'upload_interval': self.upload_interval,
@@ -103,8 +107,8 @@ class Config:
                 os.chmod(self.config_file, 0o600)
             except OSError:
                 pass
-        except OSError as e:
-            print(f"설정 저장 오류: {e}")
+        except OSError:
+            logger.exception("Failed to save config file")
 
 
 # 전역 설정 객체

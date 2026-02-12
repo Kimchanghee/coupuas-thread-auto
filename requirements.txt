@@ -2,6 +2,9 @@
 
 # ===== 핵심 의존성 =====
 
+# GUI
+PyQt5>=5.15.0
+
 # Google Gemini API
 google-generativeai>=0.8.0
 # Gemini Computer Use (preview)
@@ -28,3 +31,6 @@ python-dotenv>=1.0.0
 
 # PyInstaller (exe 빌드용)
 pyinstaller>=6.0.0
+
+# 자동 업데이트
+packaging>=23.0

@@ -49,6 +49,11 @@ HIDDEN_IMPORTS = [
     "re",
     "asyncio",
 
+    # 자동 업데이트
+    "packaging",
+    "packaging.version",
+    "packaging.specifiers",
+
     # 프로젝트 모듈
     "src",
     "src.main_window",
@@ -57,6 +62,12 @@ HIDDEN_IMPORTS = [
     "src.settings_dialog",
     "src.threads_playwright_helper",
     "src.computer_use_agent",
+    "src.auto_updater",
+    "src.update_dialog",
+    "src.login_window",
+    "src.auth_client",
+    "src.theme",
+    "src.tutorial",
     "src.services",
     "src.services.aggro_generator",
     "src.services.image_search",
@@ -152,7 +163,7 @@ def build_exe():
     print(f"  명령: {' '.join(cmd[:10])}...")
 
     try:
-        result = subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
         print("  - 빌드 성공!")
     except subprocess.CalledProcessError as e:
         print(f"  - 빌드 실패: {e}")
@@ -178,17 +189,34 @@ def build_exe():
         shutil.copy("settings.json", dist_folder)
         print(f"  - settings.json 복사됨")
 
-    # 5. 결과 확인
+    # 5. 결과 확인 및 버전 정보 출력
     print("\n[5/5] 빌드 결과 확인...")
     exe_path = os.path.join(dist_folder, f"{APP_NAME}.exe")
 
     if os.path.exists(exe_path):
         size_mb = os.path.getsize(exe_path) / (1024 * 1024)
+
+        # 버전 정보 읽기
+        try:
+            with open("main.py", "r", encoding="utf-8") as f:
+                for line in f:
+                    if "VERSION =" in line:
+                        version = line.split("=")[1].strip().strip('"').strip("'")
+                        print(f"  - 버전: {version}")
+                        break
+        except:
+            pass
+
         print(f"  - EXE 파일: {exe_path}")
         print(f"  - 파일 크기: {size_mb:.1f} MB")
         print("\n" + "=" * 60)
         print("빌드 완료!")
         print(f"실행 파일: {os.path.abspath(exe_path)}")
+        print("\n다음 단계:")
+        print("1. 생성된 EXE 파일을 테스트하세요")
+        print("2. Git 태그를 생성하여 릴리즈를 트리거하세요:")
+        print(f"   git tag v2.x.x")
+        print(f"   git push origin v2.x.x")
         print("=" * 60)
         return True
     else:

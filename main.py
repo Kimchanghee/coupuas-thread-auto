@@ -1,18 +1,48 @@
 """
 쿠팡 파트너스 스레드 자동화 - 메인 애플리케이션
 Stitch Blue 테마
+
+백엔드 project-user-dashboard(.env)를 함께 로드합니다.
 """
 import sys
 import os
 import io
 import time
+import logging
+from pathlib import Path
+from dotenv import load_dotenv
+
+def _to_utf8_text_stream(stream, std_stream=None):
+    """
+    Wrap stream buffer with UTF-8 TextIOWrapper when possible.
+    Some captured streams (e.g. pytest) do not expose .buffer.
+    """
+    if std_stream is not None and stream is not std_stream:
+        return stream
+    buffer = getattr(stream, "buffer", None)
+    if buffer is None:
+        return stream
+    return io.TextIOWrapper(
+        buffer,
+        encoding='utf-8',
+        errors='replace',
+        line_buffering=True,
+    )
 
 # Windows console UTF-8
 if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = _to_utf8_text_stream(sys.stdout, sys.__stdout__)
+    sys.stderr = _to_utf8_text_stream(sys.stderr, sys.__stderr__)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# project-user-dashboard 백엔드의 .env 로드
+_DASHBOARD_ENV = Path(__file__).resolve().parent.parent / "project-user-dashboard" / ".env"
+if _DASHBOARD_ENV.exists():
+    load_dotenv(_DASHBOARD_ENV, override=False)
+
+# DPI 스케일링: 모든 화면에서 동일한 물리 크기로 표시
+os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '1'
 
 from PyQt5.QtWidgets import QApplication, QSplashScreen
 from PyQt5.QtCore import Qt, QRectF
@@ -22,8 +52,25 @@ from PyQt5.QtGui import (
 )
 
 from src.theme import Colors
+from src.app_logging import setup_logging
 
 VERSION = "v2.2.0"
+logger = logging.getLogger(__name__)
+
+
+def _create_main_window(login_win, auth_result, main_window_cls=None):
+    """Create/show MainWindow and attach auth/login references for session continuity."""
+    logger.info("Creating main window")
+    if main_window_cls is None:
+        from src.main_window import MainWindow
+        main_window_cls = MainWindow
+
+    main_win = main_window_cls()
+    main_win._auth_data = auth_result
+    main_win._login_ref = login_win
+    main_win.show()
+    logger.info("Main window visible")
+    return main_win
 
 
 class SplashScreen(QSplashScreen):
@@ -160,6 +207,14 @@ class SplashScreen(QSplashScreen):
 
 
 def main():
+    log_file = setup_logging()
+    logger.info("Application startup")
+    logger.info("Log file path: %s", log_file)
+
+    # 모든 모니터에서 동일한 물리적 크기 보장
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
@@ -198,12 +253,22 @@ def main():
             time.sleep(0.05)
             app.processEvents()
 
-    # Main window
-    from src.main_window import MainWindow
-    window = MainWindow()
-    window.show()
+    # Login window
+    from src.login_window import LoginWindow
+    login_win = LoginWindow()
+    logger.info("Login window displayed")
+    app._login_window = login_win
+    app._main_window = None
 
-    splash.finish(window)
+    def on_login_success(result):
+        logger.info("Login success callback received")
+        login_win.hide()
+        app._main_window = _create_main_window(login_win, result)
+        logger.info("Main window created and shown")
+    login_win.login_success.connect(on_login_success)
+    login_win.show()
+    splash.finish(login_win)
+
     sys.exit(app.exec_())
 
 

@@ -5,44 +5,46 @@ Stitch Blue 디자인 - 좌표 기반 배치
 import re
 import html
 import time
+import logging
 import threading
 import queue
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
-    QMessageBox, QStatusBar, QTabWidget
+    QMessageBox, QStatusBar, QTabWidget, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
 from src.coupang_uploader import CoupangPartnersPipeline
-from src.theme import Colors, Typography, Radius, global_stylesheet
+from src.theme import (Colors, Typography, Radius, Gradients, Spacing,
+                       global_stylesheet, hex_alpha, badge_style, stat_card_style,
+                       tab_widget_style, terminal_text_style, header_title_style,
+                       muted_text_style, section_icon_style, accent_btn_style,
+                       outline_btn_style)
+
+logger = logging.getLogger(__name__)
 
 
-# ─── Helpers ─────────────────────────────────────────────────
+#
 
 def _format_interval(seconds):
-    """초 단위를 사람이 읽기 쉬운 시간 문자열로 변환"""
+    """Return a human-readable interval."""
     h = seconds // 3600
     m = (seconds % 3600) // 60
     s = seconds % 60
     if h > 0:
-        return f"{h}시간 {m}분 {s}초"
-    elif m > 0:
-        return f"{m}분 {s}초"
-    return f"{s}초"
+        return f"{h}h {m}m {s}s"
+    if m > 0:
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
-def _hex_alpha(color, alpha_hex):
-    """#RRGGBB 색상에 알파 hex 접미사 추가. hex가 아니면 그대로 반환."""
-    if isinstance(color, str) and color.startswith('#') and len(color) == 7:
-        return f"{color}{alpha_hex}"
-    return color
 
 
-# ─── Signals ────────────────────────────────────────────────
+#
 
 class Signals(QObject):
     log = pyqtSignal(str)
@@ -53,26 +55,59 @@ class Signals(QObject):
     finished = pyqtSignal(dict)
 
 
-# ─── Card Widget ────────────────────────────────────────────
+#
 
 class Card(QFrame):
-    """둥근 모서리 카드 컨테이너"""
+    """둥근 글로우 카드 위젯 (Stitch 스타일)."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
 
     def paintEvent(self, _event):
+        from PyQt5.QtGui import QPen, QPainterPath
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(QColor(Colors.BORDER))
-        painter.setBrush(QColor(Colors.BG_CARD))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 12, 12)
+        rect = self.rect().adjusted(3, 3, -3, -3)
+
+        #
+        glow_pen = QPen(QColor(13, 89, 242, 65), 3)
+        painter.setPen(glow_pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect.adjusted(-2, -2, 2, 2), 14, 14)
+
+        #
+        painter.setPen(QPen(QColor("#3A4C65"), 1.5))
+        painter.setBrush(QColor("#1C2840"))
+        painter.drawRoundedRect(rect, 12, 12)
+
+        #
+        accent = QLinearGradient(rect.x(), 0, rect.right(), 0)
+        accent.setColorAt(0, QColor(13, 89, 242, 0))
+        accent.setColorAt(0.2, QColor(13, 89, 242, 140))
+        accent.setColorAt(0.5, QColor(59, 123, 255, 180))
+        accent.setColorAt(0.8, QColor(13, 89, 242, 140))
+        accent.setColorAt(1, QColor(59, 123, 255, 0))
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(accent)
+        clip = QPainterPath()
+        clip.addRoundedRect(float(rect.x()), float(rect.y()), float(rect.width()), 4.0, 12, 12)
+        painter.drawPath(clip)
+
+        #
+        left_grad = QLinearGradient(0, rect.y(), 0, rect.bottom())
+        left_grad.setColorAt(0, QColor(Colors.ACCENT_LIGHT))
+        left_grad.setColorAt(0.5, QColor(Colors.ACCENT))
+        left_grad.setColorAt(1, QColor(Colors.ACCENT_DARK))
+        painter.setBrush(left_grad)
+        left_bar = QPainterPath()
+        left_bar.addRoundedRect(float(rect.x()), float(rect.y() + 12), 3.0, float(rect.height() - 24), 1.5, 1.5)
+        painter.drawPath(left_bar)
 
 
-# ─── Badge Widget ───────────────────────────────────────────
+#
 
 class Badge(QLabel):
-    """작은 알약형 상태 배지"""
+    """작은 알약형 상태 배지."""
     def __init__(self, text="", color=Colors.ACCENT, parent=None):
         super().__init__(text, parent)
         self.setAlignment(Qt.AlignCenter)
@@ -81,19 +116,7 @@ class Badge(QLabel):
         self._apply(color)
 
     def _apply(self, color):
-        bg = _hex_alpha(color, "18")
-        border = _hex_alpha(color, "35")
-        self.setStyleSheet(f"""
-            QLabel {{
-                background-color: {bg};
-                color: {color};
-                border: 1px solid {border};
-                border-radius: 12px;
-                padding: 0 12px;
-                font-size: 8pt;
-                font-weight: 600;
-            }}
-        """)
+        self.setStyleSheet(badge_style(color))
 
     def update_style(self, color, text=None):
         if text:
@@ -101,37 +124,54 @@ class Badge(QLabel):
         self._apply(color)
 
 
-# ─── Header Bar ─────────────────────────────────────────────
+#
 
 class HeaderBar(QFrame):
-    """그라디언트 배경의 상단 바"""
+    """그라디언트 헤더 바."""
+    ACCENT_LINE_H = 6
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(58)
+        self.setFixedHeight(72)
 
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        grad = QLinearGradient(0, 0, self.width(), 0)
-        grad.setColorAt(0, QColor(Colors.BG_CARD))
-        grad.setColorAt(0.5, QColor("#131A2A"))
-        grad.setColorAt(1, QColor(Colors.BG_CARD))
+        w, h = self.width(), self.height()
+
+        #
+        grad = QLinearGradient(0, 0, w, 0)
+        grad.setColorAt(0, QColor("#12203A"))
+        grad.setColorAt(0.5, QColor("#162847"))
+        grad.setColorAt(1, QColor("#12203A"))
         painter.fillRect(self.rect(), grad)
-        painter.setPen(QColor(Colors.BORDER))
-        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+
+        #
+        accent = QLinearGradient(0, 0, w, 0)
+        accent.setColorAt(0, QColor(13, 89, 242, 0))
+        accent.setColorAt(0.2, QColor(Colors.ACCENT))
+        accent.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
+        accent.setColorAt(0.8, QColor(Colors.ACCENT))
+        accent.setColorAt(1, QColor(13, 89, 242, 0))
+        painter.fillRect(0, 0, w, self.ACCENT_LINE_H, accent)
+
+        #
+        from PyQt5.QtGui import QPen
+        painter.setPen(QPen(QColor(13, 89, 242, 80), 1))
+        painter.drawLine(0, h - 1, w, h - 1)
 
 
-# ─── Main Window ────────────────────────────────────────────
+#
 
 class MainWindow(QMainWindow):
-    """쿠팡 파트너스 스레드 자동화 - 메인 윈도우 (좌표 기반 배치)"""
+    """쿠팡 파트너스 스레드 자동화 메인 윈도우."""
 
     MAX_LOG_LINES = 2000
 
-    # 윈도우 크기 상수
+    #
     WIN_W = 1120
     WIN_H = 760
-    HEADER_H = 58
+    HEADER_H = 72
     MARGIN = 16
     GAP = 12
     LEFT_W = 440
@@ -143,15 +183,16 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("쿠팡 파트너스 스레드 자동화")
+        self.setWindowTitle("Coupang Partners Thread Automation")
         self.setFixedSize(self.WIN_W, self.WIN_H)
 
         self.pipeline = CoupangPartnersPipeline(config.gemini_api_key)
         self._stop_event = threading.Event()
-        self._stop_event.set()  # 초기 상태: 실행 안 함
+        self._stop_event.set()
         self._urls_lock = threading.Lock()
         self.link_queue = queue.Queue()
         self.processed_urls = set()
+        logger.info("MainWindow initialized")
 
         self.signals = Signals()
         self.signals.log.connect(self._append_log)
@@ -165,8 +206,20 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(global_stylesheet())
         self._tutorial_overlay = None
 
-        # 튜토리얼에서 하이라이트할 위젯 참조 (tutorial.py에서 사용)
+        #
         self._tutorial_widgets = {}
+
+        #
+        from PyQt5.QtCore import QTimer
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.timeout.connect(self._send_heartbeat)
+        self._heartbeat_timer.start(60_000)
+        #
+        QTimer.singleShot(1000, self._send_heartbeat)
+
+        #
+        QTimer.singleShot(3000, self._check_for_updates_silent)
+        logger.info("MainWindow UI setup complete")
 
     @property
     def is_running(self):
@@ -186,96 +239,169 @@ class MainWindow(QMainWindow):
             self._tutorial_overlay = TutorialOverlay(self.centralWidget())
             self._tutorial_overlay.show_overlay()
 
-    # ━━━━━━━━━━━━━━━━━━━━━ UI BUILD (좌표 기반) ━━━━━━━━━━━━━━━━━━━━━
+    def paintEvent(self, event):
+        """메인 윈도우 하단 강조 라인."""
+        super().paintEvent(event)
+        painter = QPainter(self)
+        w, h = self.width(), self.height()
+        bot_grad = QLinearGradient(0, 0, w, 0)
+        bot_grad.setColorAt(0, QColor(13, 89, 242, 0))
+        bot_grad.setColorAt(0.3, QColor(Colors.ACCENT))
+        bot_grad.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
+        bot_grad.setColorAt(0.7, QColor(Colors.ACCENT))
+        bot_grad.setColorAt(1, QColor(13, 89, 242, 0))
+        painter.fillRect(0, h - 4, w, 4, bot_grad)
+
+    #
 
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
 
-        # 헤더 바
+        #
         self._build_header(central)
 
-        # 콘텐츠 영역 좌표 계산
+        #
         content_y = self.HEADER_H + 14
-        content_h = self.WIN_H - self.HEADER_H - 14 - 40  # 40 = 상태바(28) + 하단 여백(12)
+        content_h = self.WIN_H - self.HEADER_H - 14 - 40
         right_x = self.MARGIN + self.LEFT_W + self.GAP
         right_w = self.WIN_W - right_x - self.MARGIN
 
-        # 왼쪽 패널 (입력)
+        #
         self._build_input_panel(central, self.MARGIN, content_y, self.LEFT_W, content_h)
 
-        # 오른쪽 패널 (출력)
+        #
         self._build_output_panel(central, right_x, content_y, right_w, content_h)
 
-        # 상태바
+        #
         self._build_statusbar()
 
     def _build_header(self, parent):
         header = HeaderBar(parent)
         header.setGeometry(0, 0, self.WIN_W, self.HEADER_H)
 
-        # 브랜드 아이콘
+        #
+        brand_glow = QLabel("", header)
+        brand_glow.setGeometry(14, 12, 48, 48)
+        brand_glow.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(13, 89, 242, 0.25);
+                border: 2px solid rgba(13, 89, 242, 0.4);
+                border-radius: 24px;
+            }}
+        """)
         brand_icon = QLabel("C", header)
-        brand_icon.setGeometry(20, 12, 34, 34)
+        brand_icon.setGeometry(18, 16, 40, 40)
         brand_icon.setAlignment(Qt.AlignCenter)
         brand_icon.setStyleSheet(f"""
             QLabel {{
-                background-color: {Colors.ACCENT};
+                background: {Gradients.ACCENT_BTN};
                 color: #FFFFFF;
-                border-radius: 8px;
-                font-size: 15pt;
-                font-weight: 700;
+                border-radius: 20px;
+                font-size: 17pt;
+                font-weight: 800;
             }}
         """)
 
-        # 타이틀
+        #
         title_label = QLabel("쿠팡 파트너스", header)
-        title_label.setGeometry(66, 6, 250, 28)
+        title_label.setGeometry(72, 12, 250, 32)
         title_label.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 14pt; font-weight: 700; "
-            f"letter-spacing: -0.3px; background: transparent;"
+            f"color: #FFFFFF; font-size: 16pt; font-weight: 800; "
+            f"letter-spacing: -0.5px; background: transparent;"
         )
 
-        # 서브타이틀
-        sub_label = QLabel("스레드 자동화", header)
-        sub_label.setGeometry(66, 32, 150, 20)
+        #
+        sub_label = QLabel("THREAD AUTOMATION", header)
+        sub_label.setGeometry(72, 42, 200, 20)
         sub_label.setStyleSheet(
-            f"color: {Colors.ACCENT}; font-size: 9pt; font-weight: 600; background: transparent;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 8pt; font-weight: 700; "
+            f"letter-spacing: 2px; background: transparent;"
         )
 
-        # 우측 버튼 영역 (오른쪽부터 배치)
-        rx = self.WIN_W - 20  # 우측 마진
+        #
+        rx = self.WIN_W - 20
 
-        # 설정 버튼
-        rx -= 80
+        #
+        _nav_pill_style = f"""
+            QPushButton {{
+                background: rgba(13, 89, 242, 0.08);
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid rgba(13, 89, 242, 0.15);
+                border-radius: 14px;
+                font-size: 9pt;
+                font-weight: 600;
+                padding: 4px 12px;
+            }}
+            QPushButton:hover {{
+                background: rgba(13, 89, 242, 0.20);
+                color: #FFFFFF;
+                border-color: rgba(13, 89, 242, 0.40);
+            }}
+        """
+
+        #
+        rx -= 68
+        self.logout_btn = QPushButton("로그아웃", header)
+        self.logout_btn.setGeometry(rx, 22, 64, 28)
+        self.logout_btn.setCursor(Qt.PointingHandCursor)
+        self.logout_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(239, 68, 68, 0.08);
+                color: {Colors.TEXT_MUTED};
+                border: 1px solid rgba(239, 68, 68, 0.15);
+                border-radius: 14px;
+                font-size: 9pt;
+                font-weight: 600;
+                padding: 4px 12px;
+            }}
+            QPushButton:hover {{
+                background: rgba(239, 68, 68, 0.25);
+                color: {Colors.ERROR};
+                border-color: {Colors.ERROR};
+            }}
+        """)
+        self.logout_btn.clicked.connect(self._do_logout)
+
+        #
+        rx -= 56
         self.settings_btn = QPushButton("설정", header)
-        self.settings_btn.setGeometry(rx, 12, 80, 34)
+        self.settings_btn.setGeometry(rx, 22, 48, 28)
         self.settings_btn.setCursor(Qt.PointingHandCursor)
-        self.settings_btn.setProperty("class", "ghost")
+        self.settings_btn.setStyleSheet(_nav_pill_style)
         self.settings_btn.clicked.connect(self.open_settings)
 
-        # 사용법 버튼
-        rx -= 88  # 80 + 8 간격
-        self.tutorial_btn = QPushButton("사용법", header)
-        self.tutorial_btn.setGeometry(rx, 12, 80, 34)
+        #
+        rx -= 68
+        self.update_btn = QPushButton("업데이트", header)
+        self.update_btn.setGeometry(rx, 22, 60, 28)
+        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.setStyleSheet(_nav_pill_style)
+        self.update_btn.clicked.connect(self.check_for_updates)
+
+        #
+        rx -= 58
+        self.tutorial_btn = QPushButton("Tutorial", header)
+        self.tutorial_btn.setGeometry(rx, 22, 50, 28)
         self.tutorial_btn.setCursor(Qt.PointingHandCursor)
-        self.tutorial_btn.setProperty("class", "ghost")
+        self.tutorial_btn.setStyleSheet(_nav_pill_style)
         self.tutorial_btn.clicked.connect(self.open_tutorial)
 
-        # 상태 배지
-        rx -= 98  # 90 + 8 간격
+        #
+        rx -= 100
         self.status_badge = Badge("대기중", Colors.SUCCESS, header)
-        self.status_badge.setGeometry(rx, 17, 90, 24)
+        self.status_badge.setGeometry(rx, 24, 90, 24)
 
-        # 온라인 표시 점
-        rx -= 16
+        #
+        rx -= 18
         self._online_dot = QLabel("", header)
-        self._online_dot.setGeometry(rx, 25, 8, 8)
+        self._online_dot.setGeometry(rx, 32, 10, 10)
         self._online_dot.setStyleSheet(
-            f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
+            f"background-color: {Colors.SUCCESS}; border-radius: 5px; "
+            f"border: 2px solid rgba(34, 197, 94, 0.3);"
         )
 
-        # 튜토리얼 위젯 참조 저장
+        #
         self._header = header
         self._brand_icon = brand_icon
 
@@ -283,40 +409,46 @@ class MainWindow(QMainWindow):
         panel = Card(parent)
         panel.setGeometry(x, y, w, h)
 
-        px, py = 18, 16  # 내부 패딩
+        px, py = 18, 16
         inner_w = w - 36  # 18 * 2
 
-        # 섹션 아이콘
-        icon_label = QLabel("*", panel)
-        icon_label.setGeometry(px, py, 20, 28)
+        #
+        icon_bg = QLabel("", panel)
+        icon_bg.setGeometry(px, py, 32, 32)
+        icon_bg.setStyleSheet(f"""
+            QLabel {{
+                background-color: rgba(13, 89, 242, 0.15);
+                border: 1px solid rgba(13, 89, 242, 0.3);
+                border-radius: 16px;
+            }}
+        """)
+        icon_label = QLabel("\u26A1", panel)
+        icon_label.setGeometry(px, py, 32, 32)
+        icon_label.setAlignment(Qt.AlignCenter)
         icon_label.setStyleSheet(
-            f"color: {Colors.ACCENT}; font-size: 14pt; font-weight: 700; background: transparent;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 14pt; background: transparent;"
         )
 
-        # 섹션 제목
+        #
         sec_label = QLabel("새 자동화 시작", panel)
-        sec_label.setGeometry(px + 28, py, 250, 28)
+        sec_label.setGeometry(px + 40, py, 250, 32)
         sec_label.setStyleSheet(
-            f"font-size: 12pt; font-weight: 700; color: {Colors.TEXT_PRIMARY}; "
-            f"letter-spacing: -0.2px; background: transparent;"
+            f"font-size: 13pt; font-weight: 800; color: #FFFFFF; "
+            f"letter-spacing: -0.3px; background: transparent;"
         )
 
-        # 링크 개수 배지
+        #
         self.link_count_badge = Badge("0개 링크", Colors.TEXT_MUTED, panel)
         self.link_count_badge.setGeometry(w - 18 - 90, py + 2, 90, 24)
 
-        # 안내 문구
+        #
         hint = QLabel("아래에 쿠팡 파트너스 URL을 붙여넣기 하세요 (한 줄에 하나씩)", panel)
         hint.setGeometry(px, py + 40, inner_w, 18)
-        hint.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; background: transparent;"
-        )
+        hint.setStyleSheet(muted_text_style("9pt"))
 
-        # 텍스트 입력 영역
+        #
         text_y = py + 66
-        btn_h = 44
-        btn_y = h - 16 - btn_h
-        text_h = btn_y - text_y - 12
+        text_h = (h - 16 - 48) - text_y - 12  # 48 = btn_h
 
         self.links_text = QPlainTextEdit(panel)
         self.links_text.setGeometry(px, text_y, inner_w, text_h)
@@ -326,28 +458,38 @@ class MainWindow(QMainWindow):
         )
         self.links_text.textChanged.connect(self._update_link_count)
 
-        # 액션 버튼들 (비율 5:3:2)
+        #
+        btn_h = 48
+        btn_y = h - 16 - btn_h
         btn_gap = 10
         total_btn_w = inner_w - btn_gap * 2
         start_w = int(total_btn_w * 0.50)
         add_w = int(total_btn_w * 0.28)
         stop_w = total_btn_w - start_w - add_w
 
-        self.start_btn = QPushButton("자동화 시작", panel)
+        self.start_btn = QPushButton("\u25B6  자동화 시작", panel)
         self.start_btn.setGeometry(px, btn_y, start_w, btn_h)
         self.start_btn.setCursor(Qt.PointingHandCursor)
         self.start_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {Colors.ACCENT};
+                background: {Gradients.ACCENT_BTN};
                 color: #FFFFFF;
-                border: none;
-                border-radius: {Radius.MD};
-                font-size: 11pt;
-                font-weight: 700;
+                border: 2px solid rgba(59, 123, 255, 0.5);
+                border-radius: {Radius.LG};
+                font-size: 12pt;
+                font-weight: 800;
+                letter-spacing: 0.5px;
             }}
-            QPushButton:hover {{ background-color: {Colors.ACCENT_LIGHT}; }}
-            QPushButton:pressed {{ background-color: {Colors.ACCENT_DARK}; }}
-            QPushButton:disabled {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_MUTED}; }}
+            QPushButton:hover {{
+                background: {Gradients.ACCENT_BTN_HOVER};
+                border-color: rgba(59, 123, 255, 0.8);
+            }}
+            QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
+            QPushButton:disabled {{
+                background-color: {Colors.BG_ELEVATED};
+                color: {Colors.TEXT_MUTED};
+                border-color: {Colors.BORDER};
+            }}
         """)
         self.start_btn.clicked.connect(self.start_upload)
 
@@ -365,41 +507,20 @@ class MainWindow(QMainWindow):
         self.stop_btn.setProperty("class", "outline-danger")
         self.stop_btn.clicked.connect(self.stop_upload)
 
-        # 튜토리얼 위젯 참조
+        #
         self._input_panel = panel
 
     def _build_output_panel(self, parent, x, y, w, h):
         panel = Card(parent)
         panel.setGeometry(x, y, w, h)
 
-        # 탭 위젯 (카드 내부를 채움)
+        #
         self.tabs = QTabWidget(panel)
         self.tabs.setGeometry(0, 0, w, h)
         self.tabs.setDocumentMode(True)
-        self.tabs.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: none;
-                background: transparent;
-            }}
-            QTabBar::tab {{
-                background: transparent;
-                color: {Colors.TEXT_MUTED};
-                padding: 12px 22px;
-                border: none;
-                border-bottom: 2px solid transparent;
-                font-size: 10pt;
-                font-weight: 600;
-            }}
-            QTabBar::tab:hover {{
-                color: {Colors.TEXT_SECONDARY};
-            }}
-            QTabBar::tab:selected {{
-                color: {Colors.ACCENT};
-                border-bottom-color: {Colors.ACCENT};
-            }}
-        """)
+        self.tabs.setStyleSheet(tab_widget_style())
 
-        # 탭 1: 작업 내용
+        #
         log_tab = QWidget()
         log_layout = QVBoxLayout(log_tab)
         log_layout.setContentsMargins(16, 10, 16, 16)
@@ -424,27 +545,17 @@ class MainWindow(QMainWindow):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.document().setMaximumBlockCount(self.MAX_LOG_LINES)
-        self.log_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {Colors.BG_TERMINAL};
-                border: 1px solid {Colors.BORDER};
-                border-radius: {Radius.LG};
-                padding: 14px;
-                color: {Colors.TEXT_SECONDARY};
-                font-family: {Typography.FAMILY_MONO};
-                font-size: 9pt;
-            }}
-        """)
+        self.log_text.setStyleSheet(terminal_text_style())
         log_layout.addWidget(self.log_text)
         self.tabs.addTab(log_tab, "작업 내용")
 
-        # 탭 2: 결과
+        #
         result_tab = QWidget()
         result_layout = QVBoxLayout(result_tab)
         result_layout.setContentsMargins(16, 10, 16, 16)
         result_layout.setSpacing(12)
 
-        # 통계 카드 행
+        #
         stats_row = QHBoxLayout()
         stats_row.setSpacing(10)
 
@@ -456,7 +567,7 @@ class MainWindow(QMainWindow):
         stats_row.addWidget(self.stat_total)
         result_layout.addLayout(stats_row)
 
-        # 처리된 항목 목록
+        #
         list_header = QHBoxLayout()
         list_label = QLabel("처리된 항목")
         list_label.setStyleSheet(
@@ -487,98 +598,127 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.products_list, 1)
         self.tabs.addTab(result_tab, "결과")
 
-        # 튜토리얼 위젯 참조
+        #
         self._output_panel = panel
+
+    _STAT_ICONS = {"성공": "\u2714", "실패": "\u2718", "전체": "\u03A3"}
+    _STAT_ENG = {"성공": "SUCCESS", "실패": "FAIL", "전체": "TOTAL"}
 
     def _build_stat_card(self, label, value, color):
         card = QFrame()
-        bg_color = _hex_alpha(color, "0D")
-        border_color = _hex_alpha(color, "25")
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_color};
-                border: 1px solid {border_color};
-                border-radius: {Radius.LG};
-                padding: 8px;
-            }}
-        """)
+        card.setStyleSheet(stat_card_style(color))
         layout = QVBoxLayout(card)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(4)
 
+        #
+        icon_label = QLabel(self._STAT_ICONS.get(label, ""))
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setStyleSheet(
+            f"color: {color}; font-size: 20pt; font-weight: 800; background: transparent; border: none;"
+        )
+        layout.addWidget(icon_label)
+
+        #
         val_label = QLabel(value)
         val_label.setAlignment(Qt.AlignCenter)
         val_label.setStyleSheet(
-            f"color: {color}; font-size: 22pt; font-weight: 700; background: transparent; border: none;"
+            f"color: {color}; font-size: 28pt; font-weight: 800; background: transparent; border: none;"
         )
         layout.addWidget(val_label)
 
-        name_label = QLabel(label)
-        name_label.setAlignment(Qt.AlignCenter)
-        name_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; "
-            f"letter-spacing: 1px; background: transparent; border: none;"
+        #
+        eng_label = QLabel(self._STAT_ENG.get(label, label))
+        eng_label.setAlignment(Qt.AlignCenter)
+        eng_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: 7pt; font-weight: 700; "
+            f"letter-spacing: 2px; background: transparent; border: none;"
         )
-        layout.addWidget(name_label)
+        layout.addWidget(eng_label)
 
         return card, val_label
 
     def _build_statusbar(self):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
-        self.status_label = QLabel("시스템 온라인")
-        self.status_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 9pt;")
-        self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 9pt;")
+        self.statusbar.setStyleSheet(f"""
+            QStatusBar {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #12203A, stop:0.5 #162847, stop:1 #12203A);
+                color: {Colors.TEXT_SECONDARY};
+                border-top: 2px solid rgba(13, 89, 242, 0.3);
+                padding: 6px 16px;
+                font-size: 9pt;
+            }}
+        """)
+
+        #
+        self._statusbar_dot = QLabel("")
+        self._statusbar_dot.setFixedSize(10, 10)
+        self._statusbar_dot.setStyleSheet(
+            f"background-color: {Colors.SUCCESS}; border-radius: 5px; "
+            f"border: 2px solid rgba(34, 197, 94, 0.3);"
+        )
+        self.statusbar.addWidget(self._statusbar_dot)
+
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;")
         self.statusbar.addWidget(self.status_label, 1)
+
+        #
+        self._server_label = QLabel("서버 연결: --")
+        self._server_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT}; font-size: 8pt; font-weight: 600;")
+        self.statusbar.addPermanentWidget(self._server_label)
+
+        self.progress_label = QLabel("")
+        self.progress_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt;")
         self.statusbar.addPermanentWidget(self.progress_label)
 
-    # ━━━━━━━━━━━━━━━━━━━━━ SLOTS ━━━━━━━━━━━━━━━━━━━━━
+    #
 
     def _append_log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
-        # 이모지 및 영문 로그 마커를 한글로 정리
-        clean_msg = message
-        _emoji_map = {
-            "\u2705": "", "\u274c": "", "\u26a0\ufe0f": "", "\ud83d\udcce": "",
-            "\ud83d\udd10": "", "\ud83d\udcbe": "", "\u2139\ufe0f": "",
-            "\ud83d\udcca": "", "\ud83d\udcf8": "", "\ud83d\udd0d": "",
-            "\ud83d\udcdd": "", "\ud83d\udce4": "", "\ud83d\udc4d": "",
-            "\ud83d\udee1\ufe0f": "", "\u23f3": "", "\u2328\ufe0f": "",
-            "\ud83c\udfaf": "", "\ud83d\udcf0": "", "\ud83d\udd25": "",
-            "\ud83d\udcf1": "", "\ud83d\udc40": "", "\ud83d\udca1": "",
-            "1\ufe0f\u20e3": "[1]", "2\ufe0f\u20e3": "[2]",
-            "\ud83d\uddbc\ufe0f": "", "\ud83d\udd18": "",
-        }
-        for emoji, replacement in _emoji_map.items():
-            clean_msg = clean_msg.replace(emoji, replacement)
-        clean_msg = clean_msg.strip()
+        clean_msg = str(message).strip()
         if not clean_msg:
             return
 
+        logger.info("UI_LOG %s", clean_msg)
+
         safe_msg = html.escape(clean_msg)
+        lower_msg = clean_msg.lower()
         color = Colors.TEXT_SECONDARY
-        if any(kw in clean_msg for kw in ("오류", "실패", "치명적", "중단")):
+        tag = "INFO"
+        tag_color = Colors.INFO
+        if any(kw in lower_msg for kw in ("error", "fail", "exception", "cancel")):
             color = Colors.ERROR
-        elif any(kw in clean_msg for kw in ("성공", "완료", "확인됨", "확보")):
+            tag = "ERROR"
+            tag_color = Colors.ERROR
+        elif any(kw in lower_msg for kw in ("success", "done", "complete")):
             color = Colors.SUCCESS
-        elif "===" in clean_msg or "━" in clean_msg:
-            color = Colors.ACCENT
-        elif any(kw in clean_msg for kw in ("대기", "진행", "시작", "중지")):
+            tag = "SUCCESS"
+            tag_color = Colors.SUCCESS
+        elif any(kw in lower_msg for kw in ("warn", "wait", "running", "start")):
             color = Colors.WARNING
+            tag = "WARN"
+            tag_color = Colors.WARNING
+
         self.log_text.append(
             f'<span style="color:{Colors.TEXT_MUTED}">[{timestamp}]</span> '
+            f'<span style="color:{tag_color};font-weight:700">{tag}</span> '
             f'<span style="color:{color}">{safe_msg}</span>'
         )
 
     def _set_status(self, message):
+        logger.info("Status updated: %s", message)
         self.status_label.setText(message)
-        if any(kw in message for kw in ("오류", "취소", "실패", "중단")):
-            self.status_badge.update_style(Colors.ERROR, message[:14])
-        elif any(kw in message for kw in ("완료", "대기")):
-            self.status_badge.update_style(Colors.SUCCESS, message[:14])
+
+        lower_message = str(message).lower()
+        if any(kw in lower_message for kw in ("error", "fail", "cancel")):
+            self.status_badge.update_style(Colors.ERROR, str(message)[:14])
+        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success")):
+            self.status_badge.update_style(Colors.SUCCESS, str(message)[:14])
         else:
-            self.status_badge.update_style(Colors.WARNING, message[:14])
+            self.status_badge.update_style(Colors.WARNING, str(message)[:14])
 
     def _set_progress(self, message):
         self.progress_label.setText(message)
@@ -598,11 +738,12 @@ class MainWindow(QMainWindow):
         item.setForeground(QColor(color))
 
     def _on_finished(self, results):
+        logger.info("Upload finished: %s", results)
         self.is_running = False
         self.start_btn.setEnabled(True)
         self.add_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
-        self.status_badge.update_style(Colors.SUCCESS, "대기중")
+        self.status_badge.update_style(Colors.SUCCESS, "Ready")
 
         while not self.link_queue.empty():
             try:
@@ -610,18 +751,25 @@ class MainWindow(QMainWindow):
             except queue.Empty:
                 break
 
-        parse_failed = results.get('parse_failed', 0)
-        if results.get('cancelled'):
-            msg = (f"업로드가 취소되었습니다.\n\n"
-                   f"  완료: {results.get('uploaded', 0)}\n"
-                   f"  실패: {results.get('failed', 0)}")
+        parse_failed = results.get("parse_failed", 0)
+        uploaded = results.get("uploaded", 0)
+        failed = results.get("failed", 0)
+
+        if results.get("cancelled"):
+            msg = (
+                "업로드가 취소되었습니다.\n\n"
+                f"  완료: {uploaded}\n"
+                f"  실패: {failed}"
+            )
             if parse_failed > 0:
                 msg += f"\n  분석 오류: {parse_failed}"
             QMessageBox.information(self, "취소됨", msg)
         else:
-            msg = (f"업로드가 완료되었습니다.\n\n"
-                   f"  성공: {results.get('uploaded', 0)}\n"
-                   f"  실패: {results.get('failed', 0)}")
+            msg = (
+                "업로드가 완료되었습니다.\n\n"
+                f"  성공: {uploaded}\n"
+                f"  실패: {failed}"
+            )
             if parse_failed > 0:
                 msg += f"\n  분석 오류: {parse_failed}"
             QMessageBox.information(self, "완료", msg)
@@ -641,53 +789,62 @@ class MainWindow(QMainWindow):
         unique_links = list(dict.fromkeys(links))
         return [(url, None) for url in unique_links]
 
-    # ━━━━━━━━━━━━━━━━━━━━━ ACTIONS ━━━━━━━━━━━━━━━━━━━━━
+    #
 
     @staticmethod
     def _sanitize_profile_name(username):
-        """프로필 디렉터리 이름용 사용자명 정리"""
+        """프로필 디렉터리 이름용 사용자명 정리."""
         name = username.split('@')[0] if '@' in username else username
         return re.sub(r'[^\w\-.]', '_', name)
 
     def open_settings(self):
+        logger.info("open_settings invoked")
         from src.settings_dialog import SettingsDialog
         dialog = SettingsDialog(self)
         if dialog.exec_():
             self.pipeline = CoupangPartnersPipeline(config.gemini_api_key)
+            logger.info("settings saved; pipeline reinitialized")
 
     def open_tutorial(self):
+        logger.info("open_tutorial invoked")
         from src.tutorial import TutorialDialog
         dialog = TutorialDialog(self)
         dialog.exec_()
 
     def start_upload(self):
+        logger.info("start_upload invoked")
         content = self.links_text.toPlainText().strip()
         if not content:
+            logger.warning("start_upload blocked: empty content")
             QMessageBox.warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
             return
 
         api_key = config.gemini_api_key
         if not api_key or len(api_key.strip()) < 10:
+            logger.warning("start_upload blocked: invalid API key")
             QMessageBox.critical(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
             return
 
         link_data = self._extract_links(content)
-
         if not link_data:
+            logger.warning("start_upload blocked: no valid links found")
             QMessageBox.warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
             return
 
         config.load()
         interval = max(config.upload_interval, 30)
+        logger.info("start_upload prepared: links=%d interval=%d", len(link_data), interval)
 
         reply = QMessageBox.question(
-            self, "확인",
+            self,
+            "확인",
             f"{len(link_data)}개 링크를 처리하고 업로드할까요?\n"
             f"업로드 간격: {_format_interval(interval)}\n\n"
-            f"(실행 중에 링크를 추가할 수 있습니다)",
-            QMessageBox.Yes | QMessageBox.No
+            "(실행 중에 링크를 추가할 수 있습니다)",
+            QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
+            logger.info("start_upload cancelled by user")
             return
 
         self.is_running = True
@@ -697,7 +854,6 @@ class MainWindow(QMainWindow):
         self.products_list.clear()
         self.status_badge.update_style(Colors.WARNING, "실행중")
 
-        # 통계 초기화
         self._stat_success_val.setText("0")
         self._stat_failed_val.setText("0")
         self._stat_total_val.setText("0")
@@ -716,19 +872,22 @@ class MainWindow(QMainWindow):
         thread = threading.Thread(
             target=self._run_upload_queue,
             args=(interval,),
-            daemon=True
+            daemon=True,
         )
         thread.start()
+        logger.info("upload worker thread started")
 
     def add_links_to_queue(self):
+        logger.info("add_links_to_queue invoked")
         content = self.links_text.toPlainText().strip()
         if not content:
+            logger.warning("add_links_to_queue blocked: empty content")
             QMessageBox.warning(self, "알림", "추가할 링크를 입력하세요.")
             return
 
         link_data = self._extract_links(content)
-
         if not link_data:
+            logger.warning("add_links_to_queue blocked: no valid links found")
             QMessageBox.warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
             return
 
@@ -742,24 +901,27 @@ class MainWindow(QMainWindow):
                     added += 1
 
         if added > 0:
+            logger.info("add_links_to_queue: added=%d queue=%d", added, self.link_queue.qsize())
             self.signals.log.emit(f"{added}개 새 링크 추가됨 (대기열: {self.link_queue.qsize()})")
             clean_links = "\n".join([item[0] for item in link_data])
             self.links_text.setPlainText(clean_links)
         else:
+            logger.info("add_links_to_queue: no new links added")
             QMessageBox.information(self, "알림", "모든 링크가 이미 대기열에 있거나 처리되었습니다.")
 
     def _run_upload_queue(self, interval):
+        logger.info("upload queue worker started: interval=%s", interval)
         from src.computer_use_agent import ComputerUseAgent
         from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
         results = {
-            'total': 0,
-            'processed': 0,
-            'parse_failed': 0,
-            'uploaded': 0,
-            'failed': 0,
-            'cancelled': False,
-            'details': []
+            "total": 0,
+            "processed": 0,
+            "parse_failed": 0,
+            "uploaded": 0,
+            "failed": 0,
+            "cancelled": False,
+            "details": [],
         }
 
         def log(msg):
@@ -767,8 +929,8 @@ class MainWindow(QMainWindow):
             self.signals.progress.emit(msg)
 
         try:
-            log(f"자동화 시작 (대기열: {self.link_queue.qsize()}개)")
-            self.signals.status.emit("처리 중")
+            log(f"Upload started (queue: {self.link_queue.qsize()})")
+            self.signals.status.emit("Processing")
 
             ig_username = config.instagram_username
             if ig_username:
@@ -777,11 +939,11 @@ class MainWindow(QMainWindow):
             else:
                 profile_dir = ".threads_profile"
 
-            log("브라우저를 시작하는 중...")
+            log("Starting browser...")
             agent = ComputerUseAgent(
                 api_key=config.gemini_api_key,
                 headless=False,
-                profile_dir=profile_dir
+                profile_dir=profile_dir,
             )
             agent.start_browser()
 
@@ -789,27 +951,27 @@ class MainWindow(QMainWindow):
                 agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                 time.sleep(3)
             except Exception:
-                pass
+                logger.exception("Initial navigation to Threads failed")
 
             helper = ThreadsPlaywrightHelper(agent.page)
 
             if not helper.check_login_status():
-                log("로그인이 필요합니다 - 브라우저에서 로그인해 주세요 (60초 제한)")
+                log("Login required. Please sign in within 60 seconds.")
                 for wait_sec in range(20):
                     time.sleep(3)
                     remaining = 60 - (wait_sec * 3)
                     if wait_sec % 3 == 0:
-                        log(f"로그인 대기 중... 약 {remaining}초 남음")
+                        log(f"Waiting for login... {remaining}s remaining")
                     if helper.check_login_status():
-                        log("로그인 확인됨")
+                        log("Login confirmed")
                         break
                 else:
-                    log("로그인 실패 - 60초 시간 초과로 중단합니다")
-                    results['cancelled'] = True
+                    log("Login timeout after 60 seconds. Upload cancelled.")
+                    results["cancelled"] = True
                     self.signals.finished.emit(results)
                     return
 
-            log("Threads 로그인 상태 확인됨")
+            log("Threads login status verified")
 
             processed_count = 0
             empty_count = 0
@@ -821,109 +983,230 @@ class MainWindow(QMainWindow):
                 except queue.Empty:
                     empty_count += 1
                     if empty_count >= 6:
-                        log("대기열이 비어있어 종료합니다")
+                        log("Queue empty. Worker stopped.")
                         break
-                    log("새 링크를 대기하는 중...")
+                    log("Waiting for new links...")
                     continue
 
                 if self._stop_event.is_set():
-                    results['cancelled'] = True
+                    results["cancelled"] = True
                     break
 
                 processed_count += 1
                 url, keyword = item if isinstance(item, tuple) else (item, None)
-                results['total'] += 1
+                results["total"] += 1
 
-                log(f"━━━ 항목 {processed_count} (남은 대기열: {self.link_queue.qsize()}개) ━━━")
+                log(f"Processing item {processed_count} (queue: {self.link_queue.qsize()})")
+                log("Parsing product data...")
 
-                log("상품 정보 분석 중...")
                 try:
                     post_data = self.pipeline.process_link(url, user_keywords=keyword)
                     if not post_data:
-                        results['parse_failed'] += 1
-                        log("상품 분석 실패 - 다음 항목으로 건너뜁니다")
+                        results["parse_failed"] += 1
+                        log("Parse failed. Skipping this item.")
                         continue
 
-                    results['processed'] += 1
-                    product_name = post_data.get('product_title', '')[:30]
-                    log(f"상품 분석 완료: {product_name}")
-
-                except Exception as e:
-                    results['parse_failed'] += 1
-                    log(f"상품 분석 오류: {str(e)[:50]}")
+                    results["processed"] += 1
+                    product_name = post_data.get("product_title", "")[:30]
+                    log(f"Parse completed: {product_name}")
+                except Exception as exc:
+                    results["parse_failed"] += 1
+                    log(f"Parse error: {str(exc)[:80]}")
                     continue
 
-                log("Threads에 게시글 업로드 중...")
+                log("Uploading thread post...")
                 try:
                     agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                     time.sleep(2)
 
                     posts_data = [
-                        {'text': post_data['first_post']['text'], 'image_path': post_data['first_post'].get('media_path')},
-                        {'text': post_data['second_post']['text'], 'image_path': None}
+                        {
+                            "text": post_data["first_post"]["text"],
+                            "image_path": post_data["first_post"].get("media_path"),
+                        },
+                        {
+                            "text": post_data["second_post"]["text"],
+                            "image_path": None,
+                        },
                     ]
 
                     success = helper.create_thread_direct(posts_data)
-
                     if success:
-                        results['uploaded'] += 1
-                        log(f"업로드 성공: {product_name}")
+                        results["uploaded"] += 1
+                        log(f"Upload success: {product_name}")
                         self.signals.product.emit(product_name, True)
                     else:
-                        results['failed'] += 1
-                        log(f"업로드 실패: {product_name}")
+                        results["failed"] += 1
+                        log(f"Upload failed: {product_name}")
                         self.signals.product.emit(product_name, False)
 
-                    results['details'].append({
-                        'product_title': product_name,
-                        'url': url,
-                        'success': success
-                    })
-
-                except Exception as e:
-                    results['failed'] += 1
-                    log(f"업로드 오류: {str(e)[:50]}")
+                    results["details"].append(
+                        {
+                            "product_title": product_name,
+                            "url": url,
+                            "success": success,
+                        }
+                    )
+                except Exception as exc:
+                    results["failed"] += 1
+                    log(f"Upload error: {str(exc)[:80]}")
                     self.signals.product.emit(product_name, False)
 
-                self.signals.results.emit(results['uploaded'], results['failed'])
+                self.signals.results.emit(results["uploaded"], results["failed"])
 
                 if not self._stop_event.is_set():
-                    log(f"다음 항목까지 {_format_interval(interval)} 대기합니다")
-
+                    log(f"Waiting {_format_interval(interval)} until next item")
                     for sec in range(interval):
                         if self._stop_event.is_set():
-                            results['cancelled'] = True
+                            results["cancelled"] = True
                             break
                         remaining = interval - sec
                         if remaining % 60 == 0 and remaining > 0:
-                            log(f"대기 중... {_format_interval(remaining)} 남음")
+                            log(f"Waiting... {_format_interval(remaining)} left")
                         time.sleep(1)
 
             try:
                 agent.save_session()
                 agent.close()
             except Exception:
-                pass
+                logger.exception("Failed to close browser cleanly")
 
-            log("━" * 40)
-            log(f"작업 완료 - 성공: {results['uploaded']} / 실패: {results['failed']} / 분석 오류: {results['parse_failed']}")
+            log("=" * 40)
+            log(
+                "Finished - "
+                f"Uploaded: {results['uploaded']} / "
+                f"Failed: {results['failed']} / "
+                f"Parse failed: {results['parse_failed']}"
+            )
 
-            if results['cancelled']:
-                self.signals.status.emit("취소됨")
+            if results["cancelled"]:
+                self.signals.status.emit("Cancelled")
             else:
-                self.signals.status.emit("완료")
+                self.signals.status.emit("Completed")
 
             self.signals.finished.emit(results)
 
-        except Exception as e:
-            log(f"치명적 오류 발생: {e}")
-            self.signals.status.emit("오류 발생")
+        except Exception as exc:
+            logger.exception("Fatal error in _run_upload_queue")
+            log(f"Fatal error: {exc}")
+            self.signals.status.emit("Error")
             self.signals.finished.emit(results)
 
     def stop_upload(self):
+        logger.info("stop_upload invoked; is_running=%s", self.is_running)
         if self.is_running:
-            self.signals.log.emit("중지를 요청했습니다. 현재 작업을 마무리한 후 중지됩니다.")
-            self.signals.status.emit("중지 중...")
-            self.status_badge.update_style(Colors.WARNING, "중지 중")
+            self.signals.log.emit("Stop requested. The current item will finish first.")
+            self.signals.status.emit("Stopping...")
+            self.status_badge.update_style(Colors.WARNING, "Stopping")
             self.is_running = False
             self.pipeline.cancel()
+
+    def _send_heartbeat(self):
+        """Send heartbeat and reflect server connectivity in the UI."""
+        logger.debug("heartbeat tick; is_running=%s", self.is_running)
+        try:
+            from src import auth_client
+
+            if not auth_client.is_logged_in():
+                self._online_dot.setStyleSheet(
+                    f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;"
+                )
+                self.status_label.setText("Logged out")
+                return
+
+            task = "uploading" if self.is_running else "idle"
+            result = auth_client.heartbeat(current_task=task, app_version="v2.2.0")
+            if result.get("status") is True:
+                self._online_dot.setStyleSheet(
+                    f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
+                )
+                if not self.is_running:
+                    self.status_label.setText("Connected")
+            else:
+                self._online_dot.setStyleSheet(
+                    f"background-color: {Colors.ERROR}; border-radius: 4px;"
+                )
+                self.status_label.setText("Connection lost")
+        except Exception:
+            logger.exception("heartbeat failed")
+            self._online_dot.setStyleSheet(
+                f"background-color: {Colors.ERROR}; border-radius: 4px;"
+            )
+            self.status_label.setText("Connection error")
+
+    def _do_logout(self):
+        """로그아웃 처리 후 앱 종료."""
+        logger.info("logout requested")
+        if self.is_running:
+            QMessageBox.warning(self, "알림", "작업 중에는 로그아웃할 수 없습니다.\n먼저 작업을 중지해주세요.")
+            return
+        reply = QMessageBox.question(
+            self, "로그아웃",
+            "로그아웃하고 프로그램을 종료하시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            try:
+                from src import auth_client
+                auth_client.logout()
+            except Exception:
+                pass
+            QApplication.quit()
+
+    def check_for_updates(self):
+        """업데이트 확인 (사용자 버튼 클릭)."""
+        logger.info("manual update check opened")
+        from main import VERSION
+        from src.update_dialog import UpdateDialog
+
+        dialog = UpdateDialog(VERSION, self)
+        dialog.exec_()
+
+    def _check_for_updates_silent(self):
+        """백그라운드 자동 업데이트 체크 (알림만 표시)."""
+        logger.info("silent update check started")
+        try:
+            from main import VERSION
+            from src.auto_updater import AutoUpdater
+
+            updater = AutoUpdater(VERSION)
+            update_info = updater.check_for_updates()
+
+            if update_info:
+                #
+                reply = QMessageBox.information(
+                    self,
+                    "업데이트 알림",
+                    f"새 버전이 출시되었습니다. (v{update_info['version']})\n\n"
+                    f"지금 업데이트하시겠습니까?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+
+                if reply == QMessageBox.Yes:
+                    self.check_for_updates()
+        except Exception as e:
+            #
+            logger.exception("silent update check failed")
+            print(f"자동 업데이트 체크 실패: {e}")
+
+    def closeEvent(self, event):
+        """윈도우 종료 시 로그아웃 처리."""
+        logger.info("closeEvent invoked; is_running=%s", self.is_running)
+        if self.is_running:
+            reply = QMessageBox.question(
+                self, "종료 확인",
+                "작업이 진행 중입니다. 정말 종료하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
+            self.stop_upload()
+
+        try:
+            from src import auth_client
+            auth_client.logout()
+        except Exception:
+            pass
+        event.accept()

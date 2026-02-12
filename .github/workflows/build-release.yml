@@ -1,0 +1,114 @@
+name: Build and Release
+
+# 태그가 푸시될 때 자동으로 빌드 및 릴리즈
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # v2.2.0, v2.3.0 등
+
+# 수동 실행도 가능
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v2.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install chromium
+
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update version in main.py
+        shell: bash
+        run: |
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          sed -i "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" main.py
+          echo "Updated version to $VERSION"
+          grep "VERSION =" main.py
+
+      - name: Build executable
+        run: |
+          python build_exe.py
+
+      - name: Verify build
+        run: |
+          if (Test-Path "dist\CoupangThreadAuto.exe") {
+            Write-Host "✅ Build successful!"
+            $size = (Get-Item "dist\CoupangThreadAuto.exe").Length / 1MB
+            Write-Host "📦 File size: $([math]::Round($size, 2)) MB"
+          } else {
+            Write-Error "❌ Build failed - EXE not found"
+            exit 1
+          }
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          body: |
+            ## 쿠팡 파트너스 스레드 자동화 ${{ steps.get_version.outputs.VERSION }}
+
+            ### 다운로드
+            - [CoupangThreadAuto.exe](https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/CoupangThreadAuto.exe)
+
+            ### 설치 방법
+            1. 위의 `CoupangThreadAuto.exe` 파일을 다운로드하세요
+            2. 다운로드한 파일을 실행하세요
+            3. 자동으로 업데이트가 설치됩니다
+
+            ### 변경사항
+            - 새로운 기능 및 버그 수정 내용을 여기에 작성하세요
+
+            ### 시스템 요구사항
+            - Windows 10 이상
+            - 인터넷 연결
+
+            ---
+
+            **자동 업데이트**: 프로그램 실행 시 자동으로 최신 버전을 확인합니다.
+          draft: false
+          prerelease: false
+          files: |
+            dist/CoupangThreadAuto.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoupangThreadAuto-${{ steps.get_version.outputs.VERSION }}
+          path: |
+            dist/CoupangThreadAuto.exe
+            dist/media/
+            dist/user_data/
+          retention-days: 30
