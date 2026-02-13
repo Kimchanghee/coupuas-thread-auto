@@ -46,7 +46,7 @@ TUTORIAL_PAGES = [
             "\n"
             "  설정 방법\n"
             "\n"
-            "  1. 상단 [설정] 버튼을 클릭합니다\n"
+            "  1. 사이드바에서 [설정]을 클릭합니다\n"
             "  2. Google AI Studio에서 API 키를 발급받으세요\n"
             "     (aistudio.google.com)\n"
             "  3. [마스터 API 키] 입력란에 붙여넣기 합니다\n"
@@ -64,7 +64,7 @@ TUTORIAL_PAGES = [
             "\n"
             "  로그인 방법\n"
             "\n"
-            "  1. [설정] > [Threads 계정] 섹션으로 이동\n"
+            "  1. 사이드바에서 [Threads 계정]을 클릭\n"
             "  2. 계정 이름을 입력합니다\n"
             "  3. [Threads 로그인] 버튼을 클릭합니다\n"
             "  4. 열리는 브라우저에서 Instagram으로 로그인\n"
@@ -83,7 +83,7 @@ TUTORIAL_PAGES = [
             "\n"
             "  입력 방법\n"
             "\n"
-            "  \u2022 왼쪽 텍스트 입력란에 링크를 붙여넣기\n"
+            "  \u2022 [링크 입력] 페이지에서 링크를 붙여넣기\n"
             "  \u2022 한 줄에 하나씩 입력하세요\n"
             "  \u2022 유효한 링크만 자동 인식됩니다\n"
             "    (link.coupang.com 또는 www.coupang.com)\n"
@@ -122,16 +122,16 @@ TUTORIAL_PAGES = [
             "자동화 진행 상황을 실시간으로\n"
             "확인할 수 있습니다.\n"
             "\n"
-            "  [작업 내용] 탭\n"
+            "  [작업 로그] 페이지\n"
             "  \u2022 실시간 작업 진행 상황 표시\n"
             "  \u2022 오류 발생 시 빨간색으로 표시\n"
             "  \u2022 성공 시 초록색으로 표시\n"
             "\n"
-            "  [결과] 탭\n"
+            "  [결과 확인] 페이지\n"
             "  \u2022 성공/실패/전체 통계 카드\n"
             "  \u2022 처리된 항목 목록\n"
             "\n"
-            "  하단 상태바\n"
+            "  하단 상태바 / 사이드바 현황\n"
             "  \u2022 현재 상태 및 진행률 표시"
         ),
     },
@@ -167,15 +167,15 @@ TUTORIAL_PAGES = [
             "\n"
             "  빠른 시작 순서\n"
             "\n"
-            "  1. [설정]에서 Gemini API 키 입력\n"
-            "  2. [설정]에서 Threads 계정 로그인\n"
-            "  3. 메인 화면에서 쿠팡 링크 붙여넣기\n"
+            "  1. [설정] 페이지에서 Gemini API 키 입력\n"
+            "  2. [Threads 계정]에서 로그인\n"
+            "  3. [링크 입력]에서 쿠팡 링크 붙여넣기\n"
             "  4. [자동화 시작] 버튼 클릭\n"
             "\n"
             "  문제 해결\n"
             "\n"
-            "  \u2022 업로드 실패: 작업 내용 탭에서 오류 메시지 확인\n"
-            "  \u2022 로그인 만료: [설정]에서 다시 로그인\n"
+            "  \u2022 업로드 실패: [작업 로그]에서 오류 메시지 확인\n"
+            "  \u2022 로그인 만료: [Threads 계정]에서 다시 로그인\n"
             "  \u2022 API 오류: API 키가 유효한지 확인"
         ),
     },
@@ -350,7 +350,7 @@ class TutorialDialog(QDialog):
 # ─── Overlay Tutorial Steps (위젯 하이라이트 기반) ──────────
 
 # 각 단계는 메인 윈도우의 실제 위젯을 하이라이트하며 설명합니다.
-# "widget": MainWindow 속성 이름 (예: "settings_btn")
+# "widget": MainWindow 속성 이름 (예: "_sidebar")
 # "title": 단계 제목
 # "desc": 설명 텍스트
 # "tooltip_pos": 설명 카드 위치 ("right", "left", "bottom", "top")
@@ -382,14 +382,16 @@ OVERLAY_STEPS = [
         "tooltip_pos": "bottom",
     },
     {
-        "widget": "settings_btn",
-        "title": "설정 버튼",
+        "widget": "_sidebar",
+        "title": "사이드바 메뉴",
         "desc": (
-            "Gemini API 키, 업로드 간격,\n"
-            "Threads 계정 로그인 등\n"
-            "모든 설정을 이 버튼에서 관리합니다."
+            "왼쪽 사이드바에서 원하는 메뉴를\n"
+            "클릭하여 각 페이지로 이동합니다.\n"
+            "\n"
+            "링크 입력 → 작업 로그 → 결과 확인\n"
+            "→ Threads 계정 → 설정"
         ),
-        "tooltip_pos": "bottom",
+        "tooltip_pos": "right",
     },
     {
         "widget": "tutorial_btn",
@@ -457,17 +459,16 @@ OVERLAY_STEPS = [
         "tooltip_pos": "right",
     },
     {
-        "widget": "tabs",
-        "title": "작업 내용 / 결과 탭",
+        "widget": "_sidebar",
+        "title": "작업 로그 / 결과 확인",
         "desc": (
-            "[작업 내용] 탭: 실시간 진행 상황 표시\n"
-            "  - 오류: 빨간색 / 성공: 초록색\n"
+            "사이드바에서 [작업 로그]를 클릭하면\n"
+            "실시간 진행 상황을 확인할 수 있습니다.\n"
             "\n"
-            "[결과] 탭: 통계 카드와 처리 목록\n"
-            "  - 성공/실패/전체 카운트 표시"
+            "[결과 확인]에서 성공/실패/전체 통계와\n"
+            "처리된 항목 목록을 볼 수 있습니다."
         ),
-        "tooltip_pos": "left",
-        "padding": 4,
+        "tooltip_pos": "right",
     },
     {
         "widget": None,  # 마지막 - 빠른 시작 요약
@@ -475,9 +476,9 @@ OVERLAY_STEPS = [
         "desc": (
             "빠른 시작 순서:\n"
             "\n"
-            "1. [설정]에서 Gemini API 키 입력\n"
-            "2. [설정]에서 Threads 계정 로그인\n"
-            "3. 왼쪽 입력란에 쿠팡 링크 붙여넣기\n"
+            "1. [설정] 페이지에서 Gemini API 키 입력\n"
+            "2. [Threads 계정] 페이지에서 로그인\n"
+            "3. [링크 입력] 페이지에서 링크 붙여넣기\n"
             "4. [자동화 시작] 버튼 클릭"
         ),
         "tooltip_pos": "center",
@@ -518,7 +519,7 @@ class TutorialOverlay(QWidget):
         """부모 체인을 따라 MainWindow를 찾습니다."""
         widget = self.parent()
         while widget:
-            if hasattr(widget, 'settings_btn'):
+            if hasattr(widget, '_sidebar'):
                 return widget
             widget = widget.parent() if hasattr(widget, 'parent') else None
         return None
