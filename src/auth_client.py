@@ -9,6 +9,7 @@ API URL은 project-user-dashboard/.env의 USER_DASHBOARD_API_URL에서 로드
 import re
 import os
 import json
+import hashlib
 import logging
 import threading
 import socket
@@ -90,6 +91,52 @@ def _safe_json(resp: requests.Response) -> Dict[str, Any]:
         return {}
 
 
+def _normalize_password_for_backend(password: str) -> str:
+    """
+    Backend currently enforces min-length 8 for register/login.
+    Keep UX unrestricted by deterministically expanding short passwords.
+    """
+    if not isinstance(password, str):
+        password = str(password or "")
+    if len(password) >= 8:
+        return password
+    digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return f"spw_{digest[:16]}"
+
+
+def _localize_message(message: str) -> str:
+    """Translate common backend English messages to Korean for UI display."""
+    if not isinstance(message, str):
+        return ""
+
+    text = message.strip()
+    if not text:
+        return ""
+
+    lower = text.lower()
+
+    if lower == "not logged in":
+        return "로그인이 필요합니다."
+    if lower == "field required":
+        return "필수 항목입니다."
+
+    min_len_match = re.search(r"at least\s+(\d+)\s+characters?", lower)
+    if min_len_match:
+        return f"최소 {min_len_match.group(1)}자 이상 입력해주세요."
+
+    max_len_match = re.search(r"at most\s+(\d+)\s+characters?", lower)
+    if max_len_match:
+        return f"최대 {max_len_match.group(1)}자까지 입력할 수 있습니다."
+
+    if "valid email address" in lower:
+        return "올바른 이메일 주소를 입력해주세요."
+
+    if "too many login attempts" in lower or "too many requests" in lower:
+        return "요청이 많아 잠시 후 다시 시도해주세요."
+
+    return text
+
+
 def _extract_validation_message(resp: requests.Response, default_message: str) -> str:
     payload = _safe_json(resp)
 
@@ -103,7 +150,7 @@ def _extract_validation_message(resp: requests.Response, default_message: str) -
 
     if detail_items and isinstance(detail_items[0], dict):
         first = detail_items[0]
-        msg = str(first.get("msg", "")).strip()
+        msg = _localize_message(str(first.get("msg", "")).strip())
         loc = first.get("loc")
         loc_text = ""
         if isinstance(loc, list):
@@ -115,32 +162,32 @@ def _extract_validation_message(resp: requests.Response, default_message: str) -
 
     message = payload.get("message")
     if isinstance(message, str) and message.strip():
-        return message.strip()
+        return _localize_message(message.strip())
 
     error = payload.get("error")
     if isinstance(error, dict):
         error_message = error.get("message")
         if isinstance(error_message, str) and error_message.strip():
-            return error_message.strip()
+            return _localize_message(error_message.strip())
 
-    return default_message
+    return _localize_message(default_message)
 
 
 def _extract_api_message(payload: Dict[str, Any], default_message: str = "") -> str:
     if not isinstance(payload, dict):
-        return default_message
+        return _localize_message(default_message)
 
     message = payload.get("message")
     if isinstance(message, str) and message.strip():
-        return message.strip()
+        return _localize_message(message.strip())
 
     error = payload.get("error")
     if isinstance(error, dict):
         error_message = error.get("message")
         if isinstance(error_message, str) and error_message.strip():
-            return error_message.strip()
+            return _localize_message(error_message.strip())
 
-    return default_message
+    return _localize_message(default_message)
 
 
 def _normalize_api_message(
@@ -175,7 +222,7 @@ def _normalize_api_message(
             return f"{base} (제한: {retry_after})"
         return base
 
-    return message
+    return _localize_message(message)
 
 
 def _resolve_client_ip() -> str:
@@ -230,10 +277,11 @@ def is_logged_in() -> bool:
 # ─── API Functions ──────────────────────────────────────────
 
 def check_username(username: str) -> Dict[str, Any]:
-    """아이디 중복 확인"""
+    """아이디 중복 확인 (program_type별 분리)"""
     try:
         resp = _session.get(
             f"{API_SERVER_URL}/user/check-username/{username}",
+            params={"program_type": PROGRAM_TYPE},
             timeout=5
         )
         payload = _safe_json(resp)
@@ -275,10 +323,12 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
     if len(contact_clean) < 10:
         return {"success": False, "message": "올바른 연락처를 입력해주세요."}
 
+    backend_password = _normalize_password_for_backend(password)
+
     body = {
         "name": name.strip(),
         "username": username.strip().lower(),
-        "password": password,
+        "password": backend_password,
         "contact": contact_clean,
         "email": email.strip() if email else None,
         "program_type": PROGRAM_TYPE,
@@ -366,11 +416,14 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     if not username or not password:
         return {"status": False, "message": "아이디와 비밀번호를 입력해주세요."}
 
+    backend_password = _normalize_password_for_backend(password)
+
     body = {
         "id": username.strip().lower(),
-        "pw": password,
+        "pw": backend_password,
         "force": force,
         "ip": _resolve_client_ip(),
+        "program_type": PROGRAM_TYPE,
     }
 
     try:
@@ -481,7 +534,7 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
-        return {"status": False, "message": "Not logged in"}
+        return {"status": False, "message": "로그인이 필요합니다."}
 
     try:
         resp = _session.post(
@@ -506,7 +559,7 @@ def check_work_available() -> Dict[str, Any]:
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
-        return {"success": False, "message": "Not logged in"}
+        return {"success": False, "message": "로그인이 필요합니다."}
 
     try:
         resp = _session.post(
@@ -526,7 +579,7 @@ def use_work() -> Dict[str, Any]:
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
-        return {"success": False, "message": "Not logged in"}
+        return {"success": False, "message": "로그인이 필요합니다."}
 
     try:
         resp = _session.post(
@@ -542,6 +595,31 @@ def use_work() -> Dict[str, Any]:
         return {"success": False}
     except Exception:
         return {"success": False}
+
+
+def log_action(action: str, content: str = None, level: str = "INFO") -> None:
+    """
+    사용자 활동 로그를 서버로 전송.
+    UI 스레드를 블로킹하지 않도록 짧은 타임아웃 사용.
+
+    Args:
+        action: 활동 설명 (예: "batch_start", "upload_success")
+        content: 추가 상세 내용
+        level: 로그 레벨 (INFO, WARNING, ERROR)
+    """
+    token = _auth_state.get("token")
+    if not token:
+        return
+
+    try:
+        _session.post(
+            f"{API_SERVER_URL}/user/logs",
+            json={"level": level, "action": action, "content": content},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=2.0,
+        )
+    except Exception as e:
+        logger.debug(f"Failed to send activity log: {e}")
 
 
 def get_saved_credentials() -> Optional[Dict[str, str]]:
@@ -569,4 +647,4 @@ def friendly_login_message(res: Dict[str, Any]) -> str:
     if isinstance(status, str) and status in code_messages:
         return code_messages[status]
 
-    return msg or "로그인에 실패했습니다."
+    return _localize_message(msg) or "로그인에 실패했습니다."

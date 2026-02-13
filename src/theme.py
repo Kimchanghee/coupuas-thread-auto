@@ -61,8 +61,8 @@ class Colors:
 
 
 class Typography:
-    """Font definitions - Inter + JetBrains Mono"""
-    FAMILY = "Inter, Segoe UI, Pretendard, sans-serif"
+    """Font definitions - Pretendard + JetBrains Mono"""
+    FAMILY = "'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif"
     FAMILY_MONO = "JetBrains Mono, Cascadia Code, Consolas, monospace"
 
     TITLE_XL = f"font-family: {FAMILY}; font-size: 20pt; font-weight: 700; letter-spacing: -0.5px;"

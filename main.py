@@ -85,7 +85,7 @@ class SplashScreen(QSplashScreen):
         """테마 폴백 목록에서 사용 가능한 첫 번째 폰트를 찾습니다."""
         if cls._FONT_FAMILY is not None:
             return cls._FONT_FAMILY
-        candidates = ["Inter", "Segoe UI", "Pretendard"]
+        candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI"]
         available = QFontDatabase().families()
         for name in candidates:
             if name in available:

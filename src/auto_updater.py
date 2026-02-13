@@ -15,8 +15,8 @@ import shutil
 class AutoUpdater:
     """GitHub Releases를 사용한 자동 업데이트 관리자"""
 
-    # GitHub 저장소 정보 (실제 저장소로 변경 필요)
-    GITHUB_OWNER = "yourusername"  # GitHub 사용자명으로 변경
+    # GitHub 저장소 정보
+    GITHUB_OWNER = "Kimchanghee"
     GITHUB_REPO = "coupuas-thread-auto"  # 저장소명으로 변경
 
     # API 엔드포인트

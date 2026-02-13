@@ -548,6 +548,13 @@ class CoupangPartnersPipeline:
 
         log("업로드 시작", f"총 {total}개 상품, 간격: {interval_str}")
 
+        # 서버에 파이프라인 시작 로그 전송
+        try:
+            from src import auth_client
+            auth_client.log_action("pipeline_start", f"총 {total}개 상품, 간격: {interval_str}")
+        except Exception:
+            pass
+
         # 브라우저 시작 (한 번만)
         # 계정별 별도 프로필 사용 (여러 계정 동시 실행 지원)
         ig_username = config.instagram_username
@@ -688,6 +695,14 @@ class CoupangPartnersPipeline:
                             'success': True,
                             'error': None
                         })
+                        try:
+                            from src import auth_client
+                            auth_client.log_action(
+                                "upload_success",
+                                f"[{i}/{total}] {product_name}",
+                            )
+                        except Exception:
+                            pass
                     else:
                         results['failed'] += 1
                         log("업로드 실패", f"{product_name} 게시 실패")
@@ -699,6 +714,15 @@ class CoupangPartnersPipeline:
                             'success': False,
                             'error': '게시 실패'
                         })
+                        try:
+                            from src import auth_client
+                            auth_client.log_action(
+                                "upload_failed",
+                                f"[{i}/{total}] {product_name}",
+                                level="WARNING",
+                            )
+                        except Exception:
+                            pass
                         # 실패 시 바로 다음 상품으로 (대기 건너뜀)
                         log("다음 상품 진행", "실패한 상품은 건너뛰고 바로 다음 상품으로 이동합니다...")
                         time.sleep(2)  # 최소 대기 (페이지 안정화)
@@ -750,6 +774,11 @@ class CoupangPartnersPipeline:
 
         except Exception as e:
             log("치명적 오류", f"{str(e)}")
+            try:
+                from src import auth_client
+                auth_client.log_action("pipeline_error", str(e)[:200], level="ERROR")
+            except Exception:
+                pass
         finally:
             if agent:
                 try:
@@ -761,7 +790,15 @@ class CoupangPartnersPipeline:
         # 결과 요약
         log("=" * 40, "")
         skipped_str = f" / 중복스킵: {results['skipped']}" if results['skipped'] > 0 else ""
-        log("업로드 완료", f"성공: {results['uploaded']} / 실패: {results['failed']} / 파싱실패: {results['parse_failed']}{skipped_str}")
+        summary = f"성공: {results['uploaded']} / 실패: {results['failed']} / 파싱실패: {results['parse_failed']}{skipped_str}"
+        log("업로드 완료", summary)
+
+        # 서버에 파이프라인 완료 로그 전송
+        try:
+            from src import auth_client
+            auth_client.log_action("pipeline_complete", summary)
+        except Exception:
+            pass
 
         # 텔레그램 알림 전송 (설정되어 있으면)
         try:

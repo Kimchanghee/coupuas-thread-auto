@@ -62,7 +62,7 @@ def test_login_422_uses_nested_validation_error_message(monkeypatch):
 
     assert result["status"] is False
     assert "body.ip" in result["message"]
-    assert "Field required" in result["message"]
+    assert "필수 항목입니다." in result["message"]
 
 
 def test_register_422_uses_nested_validation_error_message(monkeypatch):
@@ -142,7 +142,21 @@ def test_register_allows_short_password_in_client_validation(monkeypatch):
 
     assert result["success"] is True
     assert len(session.calls) == 1
-    assert session.calls[0]["json"]["password"] == "1"
+    assert session.calls[0]["json"]["password"].startswith("spw_")
+    assert len(session.calls[0]["json"]["password"]) >= 8
+
+
+def test_login_normalizes_short_password_for_backend(monkeypatch):
+    response = _FakeResponse(200, {"status": "EU001", "message": "EU001"})
+    session = _FakeSession(response)
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    auth_client.login("shortuser", "1")
+
+    payload = session.calls[0]["json"]
+    assert payload["pw"].startswith("spw_")
+    assert len(payload["pw"]) >= 8
 
 
 def test_register_429_normalizes_rate_limit_message(monkeypatch):

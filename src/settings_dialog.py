@@ -6,7 +6,7 @@ import re
 import threading
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QFrame, QMessageBox, QSpinBox,
+    QPushButton, QCheckBox, QFrame, QSpinBox,
     QScrollArea, QWidget
 )
 from PyQt5.QtCore import Qt, QEvent
@@ -20,6 +20,7 @@ from src.theme import (
     input_style, muted_text_style, hint_text_style,
     scroll_area_style, dialog_style, global_stylesheet
 )
+from src.ui_messages import show_info, show_warning
 
 
 # ─── Events ─────────────────────────────────────────────────
@@ -370,7 +371,7 @@ class SettingsDialog(QDialog):
         )
         if interval < 30:
             interval = 30
-            QMessageBox.information(self, "알림", "최소 업로드 간격은 30초입니다.")
+            show_info(self, "알림", "최소 업로드 간격은 30초입니다.")
 
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
@@ -382,7 +383,7 @@ class SettingsDialog(QDialog):
 
         config.save()
 
-        QMessageBox.information(self, "저장 완료", "설정이 저장되었습니다.")
+        show_info(self, "저장 완료", "설정이 저장되었습니다.")
         self.accept()
 
     # ── Threads Login ──
@@ -403,7 +404,7 @@ class SettingsDialog(QDialog):
     def _open_threads_login(self):
         username = self.username_edit.text().strip()
         if not username:
-            QMessageBox.warning(self, "알림", "먼저 계정 이름을 입력하세요.")
+            show_warning(self, "알림", "먼저 계정 이름을 입력하세요.")
             return
 
         config.instagram_username = username

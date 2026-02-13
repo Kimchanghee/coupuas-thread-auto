@@ -12,7 +12,7 @@ from datetime import datetime
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
-    QMessageBox, QStatusBar, QTabWidget, QApplication
+    QStatusBar, QTabWidget, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QColor, QPainter, QLinearGradient
@@ -24,6 +24,7 @@ from src.theme import (Colors, Typography, Radius, Gradients, Spacing,
                        tab_widget_style, terminal_text_style, header_title_style,
                        muted_text_style, section_icon_style, accent_btn_style,
                        outline_btn_style)
+from src.ui_messages import ask_yes_no, show_error, show_info, show_warning
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +37,10 @@ def _format_interval(seconds):
     m = (seconds % 3600) // 60
     s = seconds % 60
     if h > 0:
-        return f"{h}h {m}m {s}s"
+        return f"{h}시간 {m}분 {s}초"
     if m > 0:
-        return f"{m}m {s}s"
-    return f"{s}s"
+        return f"{m}분 {s}초"
+    return f"{s}초"
 
 
 
@@ -763,7 +764,7 @@ class MainWindow(QMainWindow):
             )
             if parse_failed > 0:
                 msg += f"\n  분석 오류: {parse_failed}"
-            QMessageBox.information(self, "취소됨", msg)
+            show_info(self, "취소됨", msg)
         else:
             msg = (
                 "업로드가 완료되었습니다.\n\n"
@@ -772,7 +773,7 @@ class MainWindow(QMainWindow):
             )
             if parse_failed > 0:
                 msg += f"\n  분석 오류: {parse_failed}"
-            QMessageBox.information(self, "완료", msg)
+            show_info(self, "완료", msg)
 
     def _update_link_count(self):
         content = self.links_text.toPlainText()
@@ -816,34 +817,32 @@ class MainWindow(QMainWindow):
         content = self.links_text.toPlainText().strip()
         if not content:
             logger.warning("start_upload blocked: empty content")
-            QMessageBox.warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
+            show_warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
             return
 
         api_key = config.gemini_api_key
         if not api_key or len(api_key.strip()) < 10:
             logger.warning("start_upload blocked: invalid API key")
-            QMessageBox.critical(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
+            show_error(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
             return
 
         link_data = self._extract_links(content)
         if not link_data:
             logger.warning("start_upload blocked: no valid links found")
-            QMessageBox.warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
             return
 
         config.load()
         interval = max(config.upload_interval, 30)
         logger.info("start_upload prepared: links=%d interval=%d", len(link_data), interval)
 
-        reply = QMessageBox.question(
+        if not ask_yes_no(
             self,
             "확인",
             f"{len(link_data)}개 링크를 처리하고 업로드할까요?\n"
             f"업로드 간격: {_format_interval(interval)}\n\n"
             "(실행 중에 링크를 추가할 수 있습니다)",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
+        ):
             logger.info("start_upload cancelled by user")
             return
 
@@ -869,6 +868,13 @@ class MainWindow(QMainWindow):
         clean_links = "\n".join([item[0] for item in link_data])
         self.links_text.setPlainText(clean_links)
 
+        # 서버에 활동 로그 전송
+        try:
+            from src import auth_client
+            auth_client.log_action("batch_start", f"링크 {len(link_data)}개, 간격 {interval}초")
+        except Exception:
+            pass
+
         thread = threading.Thread(
             target=self._run_upload_queue,
             args=(interval,),
@@ -882,13 +888,13 @@ class MainWindow(QMainWindow):
         content = self.links_text.toPlainText().strip()
         if not content:
             logger.warning("add_links_to_queue blocked: empty content")
-            QMessageBox.warning(self, "알림", "추가할 링크를 입력하세요.")
+            show_warning(self, "알림", "추가할 링크를 입력하세요.")
             return
 
         link_data = self._extract_links(content)
         if not link_data:
             logger.warning("add_links_to_queue blocked: no valid links found")
-            QMessageBox.warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
             return
 
         added = 0
@@ -907,7 +913,7 @@ class MainWindow(QMainWindow):
             self.links_text.setPlainText(clean_links)
         else:
             logger.info("add_links_to_queue: no new links added")
-            QMessageBox.information(self, "알림", "모든 링크가 이미 대기열에 있거나 처리되었습니다.")
+            show_info(self, "알림", "모든 링크가 이미 대기열에 있거나 처리되었습니다.")
 
     def _run_upload_queue(self, interval):
         logger.info("upload queue worker started: interval=%s", interval)
@@ -1079,6 +1085,21 @@ class MainWindow(QMainWindow):
                 f"Parse failed: {results['parse_failed']}"
             )
 
+            # 서버에 배치 완료 로그 전송
+            try:
+                from src import auth_client
+                summary = (
+                    f"성공: {results['uploaded']}, "
+                    f"실패: {results['failed']}, "
+                    f"파싱실패: {results['parse_failed']}"
+                )
+                if results["cancelled"]:
+                    auth_client.log_action("batch_cancelled", summary)
+                else:
+                    auth_client.log_action("batch_complete", summary)
+            except Exception:
+                pass
+
             if results["cancelled"]:
                 self.signals.status.emit("Cancelled")
             else:
@@ -1091,6 +1112,11 @@ class MainWindow(QMainWindow):
             log(f"Fatal error: {exc}")
             self.signals.status.emit("Error")
             self.signals.finished.emit(results)
+            try:
+                from src import auth_client
+                auth_client.log_action("batch_error", str(exc)[:200], level="ERROR")
+            except Exception:
+                pass
 
     def stop_upload(self):
         logger.info("stop_upload invoked; is_running=%s", self.is_running)
@@ -1100,6 +1126,11 @@ class MainWindow(QMainWindow):
             self.status_badge.update_style(Colors.WARNING, "Stopping")
             self.is_running = False
             self.pipeline.cancel()
+            try:
+                from src import auth_client
+                auth_client.log_action("batch_stop", "사용자가 작업을 중지함")
+            except Exception:
+                pass
 
     def _send_heartbeat(self):
         """Send heartbeat and reflect server connectivity in the UI."""
@@ -1138,14 +1169,13 @@ class MainWindow(QMainWindow):
         """로그아웃 처리 후 앱 종료."""
         logger.info("logout requested")
         if self.is_running:
-            QMessageBox.warning(self, "알림", "작업 중에는 로그아웃할 수 없습니다.\n먼저 작업을 중지해주세요.")
+            show_warning(self, "알림", "작업 중에는 로그아웃할 수 없습니다.\n먼저 작업을 중지해주세요.")
             return
-        reply = QMessageBox.question(
-            self, "로그아웃",
+        if ask_yes_no(
+            self,
+            "로그아웃",
             "로그아웃하고 프로그램을 종료하시겠습니까?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
+        ):
             try:
                 from src import auth_client
                 auth_client.logout()
@@ -1174,16 +1204,12 @@ class MainWindow(QMainWindow):
 
             if update_info:
                 #
-                reply = QMessageBox.information(
+                if ask_yes_no(
                     self,
                     "업데이트 알림",
                     f"새 버전이 출시되었습니다. (v{update_info['version']})\n\n"
                     f"지금 업데이트하시겠습니까?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-
-                if reply == QMessageBox.Yes:
+                ):
                     self.check_for_updates()
         except Exception as e:
             #
@@ -1194,12 +1220,11 @@ class MainWindow(QMainWindow):
         """윈도우 종료 시 로그아웃 처리."""
         logger.info("closeEvent invoked; is_running=%s", self.is_running)
         if self.is_running:
-            reply = QMessageBox.question(
-                self, "종료 확인",
+            if not ask_yes_no(
+                self,
+                "종료 확인",
                 "작업이 진행 중입니다. 정말 종료하시겠습니까?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.No:
+            ):
                 event.ignore()
                 return
             self.stop_upload()

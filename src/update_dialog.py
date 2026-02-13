@@ -3,7 +3,7 @@
 """
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QProgressBar, QMessageBox
+    QTextEdit, QProgressBar
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -13,6 +13,7 @@ from src.theme import (
     dialog_style, header_title_style
 )
 from src.auto_updater import AutoUpdater
+from src.ui_messages import ask_yes_no, show_error, show_warning
 
 
 class UpdateCheckThread(QThread):
@@ -273,17 +274,13 @@ class UpdateDialog(QDialog):
             return
 
         # 다운로드 확인
-        reply = QMessageBox.question(
+        if not ask_yes_no(
             self,
             "업데이트 다운로드",
             f"v{self.update_info['version']} 버전을 다운로드하시겠습니까?\n\n"
             f"크기: {self.update_info['size_mb']:.1f} MB\n"
             f"다운로드 후 자동으로 설치됩니다.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-
-        if reply != QMessageBox.Yes:
+        ):
             return
 
         # UI 업데이트
@@ -321,17 +318,13 @@ class UpdateDialog(QDialog):
         """)
 
         # 설치 확인
-        reply = QMessageBox.question(
+        if ask_yes_no(
             self,
             "업데이트 설치",
             "다운로드가 완료되었습니다.\n지금 설치하시겠습니까?\n\n"
             "설치를 시작하면 프로그램이 종료되고,\n"
             "자동으로 업데이트가 적용됩니다.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
-        )
-
-        if reply == QMessageBox.Yes:
+        ):
             self._install_update()
         else:
             self.close_btn.setEnabled(True)
@@ -364,18 +357,14 @@ class UpdateDialog(QDialog):
                 import sys
                 sys.exit(0)
             else:
-                QMessageBox.warning(
+                show_warning(
                     self,
                     "업데이트 실패",
                     "업데이트 설치에 실패했습니다.\n"
-                    "개발 모드에서는 자동 업데이트가 지원되지 않습니다."
+                    "개발 모드에서는 자동 업데이트가 지원되지 않습니다.",
                 )
                 self.close_btn.setEnabled(True)
 
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "오류",
-                f"업데이트 설치 중 오류가 발생했습니다:\n{e}"
-            )
+            show_error(self, "오류", f"업데이트 설치 중 오류가 발생했습니다:\n{e}")
             self.close_btn.setEnabled(True)

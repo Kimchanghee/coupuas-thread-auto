@@ -7,7 +7,7 @@ import re
 import logging
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QMessageBox, QStackedWidget,
+    QPushButton, QCheckBox, QStackedWidget,
     QVBoxLayout, QHBoxLayout, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
@@ -19,6 +19,7 @@ from src.theme import (Colors, Typography, Radius, Gradients,
                        input_style, accent_btn_style, window_control_btn_style,
                        muted_text_style)
 from src import auth_client
+from src.ui_messages import ask_yes_no, show_info, show_warning
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ _FONT_FAMILY = None
 def _get_font():
     global _FONT_FAMILY
     if _FONT_FAMILY is None:
-        candidates = ["Inter", "Segoe UI", "맑은 고딕", "Pretendard"]
+        candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI"]
         available = QFontDatabase().families()
         for name in candidates:
             if name in available:
@@ -455,12 +456,11 @@ class LoginWindow(QMainWindow):
 
             self.login_success.emit(result)
         elif status == "EU003":
-            reply = QMessageBox.question(
-                self, "중복 로그인",
+            if ask_yes_no(
+                self,
+                "중복 로그인",
                 "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
+            ):
                 self._do_login(force=True)
         else:
             msg = auth_client.friendly_login_message(result)
@@ -545,7 +545,7 @@ class LoginWindow(QMainWindow):
         self.btn_register.setText("회원가입")
 
         if result.get("success"):
-            QMessageBox.information(self, "가입 완료", "회원가입이 완료되었습니다!\n바로 로그인해주세요.")
+            show_info(self, "가입 완료", "회원가입이 완료되었습니다!\n바로 로그인해주세요.")
             # Auto-fill login
             self.login_id.setText(self.reg_username.text().strip().lower())
             self.login_pw.setText(self.reg_pw.text())
@@ -555,7 +555,7 @@ class LoginWindow(QMainWindow):
 
     # ─── Helpers ────────────────────────────────────────────
     def _show_msg(self, msg):
-        QMessageBox.warning(self, "알림", msg)
+        show_warning(self, "알림", msg)
 
     def _close_app(self):
         QApplication.quit()

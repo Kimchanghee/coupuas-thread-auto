@@ -188,7 +188,7 @@ class TutorialDialog(QDialog):
     """사용법 안내 다이얼로그 - 좌표 기반 배치"""
 
     DLG_W = 620
-    DLG_H = 540
+    DLG_H = 620
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -207,7 +207,7 @@ class TutorialDialog(QDialog):
         self.step_label = QLabel(self)
         self.step_label.setGeometry(24, 16, 120, 20)
         self.step_label.setStyleSheet(
-            muted_text_style("9pt") + " font-weight: 600;"
+            muted_text_style("12pt") + " font-weight: 600;"
         )
 
         close_btn = QPushButton("\u2715", self)
@@ -221,24 +221,24 @@ class TutorialDialog(QDialog):
         self.icon_label.setAlignment(Qt.AlignCenter)
 
         self.title_label = QLabel(self)
-        self.title_label.setGeometry(24, 120, W - 48, 32)
+        self.title_label.setGeometry(24, 120, W - 48, 38)
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet(header_title_style("16pt"))
+        self.title_label.setStyleSheet(header_title_style("19pt"))
 
         self.subtitle_label = QLabel(self)
-        self.subtitle_label.setGeometry(24, 154, W - 48, 22)
+        self.subtitle_label.setGeometry(24, 160, W - 48, 24)
         self.subtitle_label.setAlignment(Qt.AlignCenter)
         self.subtitle_label.setStyleSheet(
-            f"color: {Colors.ACCENT}; font-size: 10pt; font-weight: 600; background: transparent;"
+            f"color: {Colors.ACCENT}; font-size: 13pt; font-weight: 600; background: transparent;"
         )
 
         self.content_label = QLabel(self)
-        self.content_label.setGeometry(36, 190, W - 72, 260)
+        self.content_label.setGeometry(36, 200, W - 72, 340)
         self.content_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.content_label.setWordWrap(True)
         self.content_label.setStyleSheet(f"""
             QLabel {{
-                color: {Colors.TEXT_SECONDARY}; font-size: 10pt;
+                color: {Colors.TEXT_SECONDARY}; font-size: 13pt;
                 background-color: {Colors.BG_CARD}; border: 1px solid {Colors.BORDER};
                 border-radius: {Radius.LG}; padding: 18px 22px;
             }}
@@ -251,35 +251,37 @@ class TutorialDialog(QDialog):
         dots_x = (W - dots_total_w) // 2
         for i in range(total):
             dot = QLabel(self)
-            dot.setGeometry(dots_x + i * (dot_sz + dot_gap), 464, dot_sz, dot_sz)
+            dot.setGeometry(dots_x + i * (dot_sz + dot_gap), 554, dot_sz, dot_sz)
             dot.setStyleSheet(f"background-color: {Colors.TEXT_MUTED}; border-radius: {dot_sz // 2}px;")
             self._dot_labels.append(dot)
 
         self.prev_btn = QPushButton("\u2190 이전", self)
-        self.prev_btn.setGeometry(24, 490, 100, 36)
+        self.prev_btn.setGeometry(24, 580, 100, 36)
         self.prev_btn.setCursor(Qt.PointingHandCursor)
-        self.prev_btn.setStyleSheet(ghost_btn_style())
+        self.prev_btn.setStyleSheet(
+            ghost_btn_style() + "\nQPushButton { font-size: 13pt; }"
+        )
         self.prev_btn.clicked.connect(self._prev_page)
 
         self.skip_btn = QPushButton("건너뛰기", self)
-        self.skip_btn.setGeometry(W // 2 - 55, 490, 110, 36)
+        self.skip_btn.setGeometry(W // 2 - 55, 580, 110, 36)
         self.skip_btn.setCursor(Qt.PointingHandCursor)
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {Colors.TEXT_MUTED};
-                border: none; border-radius: {Radius.MD}; font-size: 9pt;
+                border: none; border-radius: {Radius.MD}; font-size: 12pt;
             }}
             QPushButton:hover {{ color: {Colors.TEXT_SECONDARY}; }}
         """)
         self.skip_btn.clicked.connect(self.accept)
 
         self.next_btn = QPushButton("다음 \u2192", self)
-        self.next_btn.setGeometry(W - 124, 490, 100, 36)
+        self.next_btn.setGeometry(W - 124, 580, 100, 36)
         self.next_btn.setCursor(Qt.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
-                border: none; border-radius: {Radius.MD}; font-size: 10pt; font-weight: 600;
+                border: none; border-radius: {Radius.MD}; font-size: 13pt; font-weight: 600;
             }}
             QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
             QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
@@ -489,7 +491,7 @@ class TutorialOverlay(QWidget):
     """메인 윈도우의 실제 위젯을 하이라이트하는 튜토리얼 오버레이"""
 
     TOOLTIP_W = 340
-    TOOLTIP_H_MAX = 280
+    TOOLTIP_H_MAX = 340
     HIGHLIGHT_PAD = 6
     GLOW_WIDTH = 2
 
@@ -603,20 +605,20 @@ class TutorialOverlay(QWidget):
         # 단계 표시
         self.step_label = QLabel(self.tooltip_card)
         self.step_label.setStyleSheet(
-            muted_text_style("8pt") + " font-weight: 600; border: none;"
+            muted_text_style("11pt") + " font-weight: 600; border: none;"
         )
 
         # 제목
         self.title_label = QLabel(self.tooltip_card)
         self.title_label.setStyleSheet(
-            header_title_style("13pt") + " border: none;"
+            header_title_style("16pt") + " border: none;"
         )
 
         # 설명
         self.desc_label = QLabel(self.tooltip_card)
         self.desc_label.setWordWrap(True)
         self.desc_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; "
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 12pt; "
             f"background: transparent; border: none; line-height: 1.5;"
         )
 
@@ -624,7 +626,9 @@ class TutorialOverlay(QWidget):
         self.prev_btn = QPushButton("\u2190 이전", self)
         self.prev_btn.setFixedSize(86, 34)
         self.prev_btn.setCursor(Qt.PointingHandCursor)
-        self.prev_btn.setStyleSheet(ghost_btn_style())
+        self.prev_btn.setStyleSheet(
+            ghost_btn_style() + "\nQPushButton { font-size: 12pt; }"
+        )
         self.prev_btn.clicked.connect(self._prev_step)
 
         # 건너뛰기 버튼
@@ -634,7 +638,7 @@ class TutorialOverlay(QWidget):
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {Colors.TEXT_MUTED};
-                border: none; border-radius: {Radius.MD}; font-size: 9pt;
+                border: none; border-radius: {Radius.MD}; font-size: 12pt;
             }}
             QPushButton:hover {{ color: {Colors.TEXT_SECONDARY}; }}
         """)
@@ -648,7 +652,7 @@ class TutorialOverlay(QWidget):
             QPushButton {{
                 background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
                 border: none; border-radius: {Radius.MD};
-                font-size: 9pt; font-weight: 600;
+                font-size: 12pt; font-weight: 600;
             }}
             QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
             QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
@@ -666,7 +670,7 @@ class TutorialOverlay(QWidget):
         self.dont_show_check = QCheckBox("다시 보지 않기", self)
         self.dont_show_check.setStyleSheet(f"""
             QCheckBox {{
-                color: {Colors.TEXT_SECONDARY}; font-size: 8pt; spacing: 6px; background: transparent;
+                color: {Colors.TEXT_SECONDARY}; font-size: 11pt; spacing: 6px; background: transparent;
             }}
             QCheckBox::indicator {{
                 width: 16px; height: 16px;
@@ -691,16 +695,16 @@ class TutorialOverlay(QWidget):
         pad = 18
         inner_w = self.TOOLTIP_W - pad * 2
 
-        self.step_label.setGeometry(pad, pad, inner_w, 16)
-        self.title_label.setGeometry(pad, pad + 22, inner_w, 28)
+        self.step_label.setGeometry(pad, pad, inner_w, 18)
+        self.title_label.setGeometry(pad, pad + 24, inner_w, 32)
 
         # desc 높이: 줄 수 기반 계산 (adjustSize보다 안정적)
         desc_text = step.get("desc", "")
         line_count = desc_text.count('\n') + 1
-        desc_h = max(line_count * 20, 40)
-        self.desc_label.setGeometry(pad, pad + 56, inner_w, desc_h)
+        desc_h = max(line_count * 24, 48)
+        self.desc_label.setGeometry(pad, pad + 64, inner_w, desc_h)
 
-        card_h = min(pad + 56 + desc_h + pad, self.TOOLTIP_H_MAX)
+        card_h = min(pad + 64 + desc_h + pad, self.TOOLTIP_H_MAX)
 
         # ── 카드 아래 요소 높이 합산 ──
         # gap(12) + btn(34) + gap(10) + dots(6) + gap(12) + check(20) = 94
