@@ -22,12 +22,12 @@ HIDDEN_IMPORTS = [
     "google.protobuf",
     "grpc",
 
-    # PyQt5
-    "PyQt5",
-    "PyQt5.QtWidgets",
-    "PyQt5.QtCore",
-    "PyQt5.QtGui",
-    "PyQt5.sip",
+    # PyQt6
+    "PyQt6",
+    "PyQt6.QtWidgets",
+    "PyQt6.QtCore",
+    "PyQt6.QtGui",
+    "PyQt6.sip",
 
     # Playwright
     "playwright",

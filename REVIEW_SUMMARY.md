@@ -7,7 +7,7 @@
 #### 수정된 문제들
 - ✅ `src/auto_updater.py`: 불필요한 import 제거 (`json`, `zipfile`, `Tuple`)
 - ✅ `src/update_dialog.py`: 사용하지 않는 `QFont` import 제거
-- ✅ `requirements.txt`: **PyQt5 추가** (중요한 누락 사항)
+- ✅ `requirements.txt`: **PyQt6 추가** (중요한 누락 사항)
 
 #### 코드 리뷰 결과
 - ✅ 모든 import 문이 정리됨
@@ -48,7 +48,7 @@
 ### 4. 의존성 관리
 
 [requirements.txt](requirements.txt) 확인:
-- ✅ PyQt5>=5.15.0 추가 (누락되어 있었음)
+- ✅ PyQt6>=5.15.0 추가 (누락되어 있었음)
 - ✅ packaging>=23.0 추가
 - ✅ 모든 필수 의존성 포함
 
@@ -98,7 +98,7 @@ GITHUB_REPO = "coupuas-thread-auto"  # ← 실제 저장소명으로 변경
 
 ### 4. 라이선스
 
-PyQt5 사용으로 인한 GPL v3 라이선스 적용:
+PyQt6 사용으로 인한 GPL v3 라이선스 적용:
 - 상업용 사용 시 별도 라이선스 구매 필요
 - 또는 PySide6 (LGPL)로 전환 고려
 
@@ -109,7 +109,7 @@ PyQt5 사용으로 인한 GPL v3 라이선스 적용:
 ### 초기 설정 (1회만)
 - [ ] `src/auto_updater.py`에서 GitHub 저장소 정보 수정
 - [ ] `README.md`에서 릴리즈 URL 수정
-- [ ] PyQt5 설치: `pip install PyQt5>=5.15.0`
+- [ ] PyQt6 설치: `pip install PyQt6>=5.15.0`
 
 ### 빌드 및 테스트
 - [ ] 로컬 빌드 성공
@@ -144,7 +144,7 @@ PyQt5 사용으로 인한 GPL v3 라이선스 적용:
 
 ### 수정된 파일
 1. `src/main_window.py` - 업데이트 버튼 및 자동 체크 추가
-2. `requirements.txt` - PyQt5 및 packaging 추가
+2. `requirements.txt` - PyQt6 및 packaging 추가
 3. `build_exe.py` - 업데이트 모듈 포함 및 개선
 4. `README.md` - 자동 업데이트 가이드 추가
 

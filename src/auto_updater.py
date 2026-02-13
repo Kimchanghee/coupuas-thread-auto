@@ -34,58 +34,59 @@ class AutoUpdater:
             'User-Agent': f'CoupangThreadAuto/{self.current_version}',
             'Accept': 'application/vnd.github.v3+json'
         })
-
     def check_for_updates(self) -> Optional[Dict]:
         """
-        새 버전이 있는지 확인
+        ? ??? ??? ??
 
         Returns:
-            새 버전 정보 딕셔너리 또는 None (업데이트 없음)
+            ? ?? ?? ???? ?? None (???? ??)
             {
                 'version': '2.3.0',
                 'download_url': 'https://...',
-                'changelog': '변경사항...',
+                'changelog': '????..',
                 'published_at': '2025-02-12T...',
-                'size_mb': 50.5
+                'size_mb': 50.5,
+                'asset_name': '...exe'
             }
         """
-        try:
-            response = self.session.get(self.RELEASES_URL, timeout=10)
-            response.raise_for_status()
+        response = self.session.get(self.RELEASES_URL, timeout=10)
 
-            release_data = response.json()
-
-            # 최신 버전 정보
-            latest_version = release_data.get('tag_name', '').lstrip('v')
-
-            # 버전 비교
-            if version.parse(latest_version) > version.parse(self.current_version):
-                # Windows용 .exe 파일 찾기
-                assets = release_data.get('assets', [])
-                exe_asset = None
-
-                for asset in assets:
-                    if asset['name'].endswith('.exe'):
-                        exe_asset = asset
-                        break
-
-                if not exe_asset:
-                    return None
-
-                return {
-                    'version': latest_version,
-                    'download_url': exe_asset['browser_download_url'],
-                    'changelog': release_data.get('body', ''),
-                    'published_at': release_data.get('published_at', ''),
-                    'size_mb': exe_asset['size'] / (1024 * 1024),
-                    'asset_name': exe_asset['name']
-                }
-
+        # GitHub? ???? ??? /releases/latest? 404? ?????.
+        # ? ??? ??? ??? "???? ??"?? ?????.
+        if response.status_code == 404:
             return None
 
-        except Exception as e:
-            print(f"업데이트 확인 중 오류: {e}")
+        response.raise_for_status()
+        release_data = response.json()
+
+        latest_version = release_data.get('tag_name', '').lstrip('v')
+        if not latest_version:
             return None
+
+        if version.parse(latest_version) <= version.parse(self.current_version):
+            return None
+
+        assets = release_data.get('assets', [])
+        exe_asset = None
+        for asset in assets:
+            name = asset.get('name', '')
+            if isinstance(name, str) and name.lower().endswith('.exe'):
+                exe_asset = asset
+                break
+
+        if not exe_asset:
+            return None
+
+        size = exe_asset.get('size') or 0
+        return {
+            'version': latest_version,
+            'download_url': exe_asset.get('browser_download_url', ''),
+            'changelog': release_data.get('body', ''),
+            'published_at': release_data.get('published_at', ''),
+            'size_mb': size / (1024 * 1024),
+            'asset_name': exe_asset.get('name', ''),
+        }
+
 
     def download_update(self, update_info: Dict, progress_callback=None) -> Optional[str]:
         """

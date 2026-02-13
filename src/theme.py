@@ -12,7 +12,7 @@ class Colors:
     # Backgrounds (deep navy-slate gradient)
     BG_DARK = "#101622"
     BG_CARD = "#1B2740"
-    BG_INPUT = "#141C2B"
+    BG_INPUT = "#1A2332"
     BG_ELEVATED = "#222D40"
     BG_HOVER = "#283448"
     BG_TERMINAL = "#080C14"
@@ -40,16 +40,17 @@ class Colors:
     INFO_BG = "rgba(59, 130, 246, 0.10)"
     INFO_BORDER = "rgba(59, 130, 246, 0.25)"
 
-    # Text (slate tones)
-    TEXT_PRIMARY = "#E2E8F0"
-    TEXT_SECONDARY = "#94A3B8"
-    TEXT_MUTED = "#4A5568"
+    # Text (고대비 - 어두운 배경에서 선명하게)
+    TEXT_PRIMARY = "#FFFFFF"
+    TEXT_SECONDARY = "#CFD8DC"
+    TEXT_MUTED = "#90A4AE"
+    TEXT_PLACEHOLDER = "#6B7F8E"
     TEXT_ACCENT = "#3B82F6"
-    TEXT_BRIGHT = "#F8FAFC"
+    TEXT_BRIGHT = "#FFFFFF"
 
     # Borders (밝은 톤 - Stitch 디자인)
-    BORDER = "#354460"
-    BORDER_LIGHT = "#445578"
+    BORDER = "#3D4F6A"
+    BORDER_LIGHT = "#506080"
     BORDER_ACTIVE = "#0D59F2"
     BORDER_SUBTLE = "#232D3F"
 
@@ -61,18 +62,18 @@ class Colors:
 
 
 class Typography:
-    """Font definitions - Pretendard + JetBrains Mono"""
-    FAMILY = "'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif"
-    FAMILY_MONO = "JetBrains Mono, Cascadia Code, Consolas, monospace"
+    """Font definitions - resolved at runtime by resolve_fonts()"""
+    FAMILY = "Segoe UI"
+    FAMILY_MONO = "Consolas"
 
-    TITLE_XL = f"font-family: {FAMILY}; font-size: 20pt; font-weight: 700; letter-spacing: -0.5px;"
-    TITLE_LG = f"font-family: {FAMILY}; font-size: 16pt; font-weight: 700; letter-spacing: -0.3px;"
-    TITLE_MD = f"font-family: {FAMILY}; font-size: 13pt; font-weight: 600;"
-    TITLE_SM = f"font-family: {FAMILY}; font-size: 11pt; font-weight: 600;"
-    BODY = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 400;"
-    BODY_SM = f"font-family: {FAMILY}; font-size: 9pt; font-weight: 400;"
-    CAPTION = f"font-family: {FAMILY}; font-size: 8pt; font-weight: 500; letter-spacing: 0.5px;"
-    MONO = f"font-family: {FAMILY_MONO}; font-size: 9.5pt;"
+    TITLE_XL = f"font-family: {FAMILY}; font-size: 24pt; font-weight: 700; letter-spacing: -0.5px;"
+    TITLE_LG = f"font-family: {FAMILY}; font-size: 18pt; font-weight: 700; letter-spacing: -0.3px;"
+    TITLE_MD = f"font-family: {FAMILY}; font-size: 14pt; font-weight: 600;"
+    TITLE_SM = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 600;"
+    BODY = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 400;"
+    BODY_SM = f"font-family: {FAMILY}; font-size: 11pt; font-weight: 400;"
+    CAPTION = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 500; letter-spacing: 0.3px;"
+    MONO = f"font-family: {FAMILY_MONO}; font-size: 11pt;"
 
 
 class Radius:
@@ -185,7 +186,7 @@ def badge_style(color):
             border: 1px solid {border};
             border-radius: 12px;
             padding: 0 12px;
-            font-size: 8pt;
+            font-size: 10pt;
             font-weight: 600;
         }}
     """
@@ -215,7 +216,7 @@ def ghost_btn_style():
             border-radius: {Radius.MD};
             padding: 8px 20px;
             font-weight: 600;
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QPushButton:hover {{
             background-color: {Colors.BG_ELEVATED};
@@ -239,7 +240,7 @@ def accent_btn_style(use_gradient=True):
                 border-radius: {Radius.MD};
                 padding: 10px 28px;
                 font-weight: 600;
-                font-size: 10pt;
+                font-size: 12pt;
             }}
             QPushButton:hover {{
                 background: {Gradients.ACCENT_BTN_HOVER};
@@ -260,7 +261,7 @@ def accent_btn_style(use_gradient=True):
             border-radius: {Radius.MD};
             padding: 10px 28px;
             font-weight: 600;
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QPushButton:hover {{
             background-color: {Colors.ACCENT_LIGHT};
@@ -285,7 +286,7 @@ def outline_btn_style(color):
             border-radius: {Radius.MD};
             padding: 10px 20px;
             font-weight: 600;
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QPushButton:hover {{
             background-color: {color};
@@ -312,7 +313,7 @@ def input_style():
             border-radius: {Radius.MD};
             padding: 10px 14px;
             color: {Colors.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QLineEdit:focus {{
             border: 1.5px solid {Colors.ACCENT};
@@ -322,7 +323,7 @@ def input_style():
             color: {Colors.TEXT_MUTED};
         }}
         QLineEdit::placeholder {{
-            color: {Colors.TEXT_MUTED};
+            color: {Colors.TEXT_PLACEHOLDER};
         }}
     """
 
@@ -330,7 +331,7 @@ def input_style():
 def section_title_style():
     """섹션 제목 스타일"""
     return (
-        f"color: {Colors.TEXT_PRIMARY}; font-size: 11pt; font-weight: 700; "
+        f"color: {Colors.TEXT_PRIMARY}; font-size: 13pt; font-weight: 700; "
         f"background: transparent; border: none; padding: 0;"
     )
 
@@ -358,7 +359,7 @@ def muted_text_style(size="9pt"):
 
 def hint_text_style():
     """힌트/안내 텍스트 스타일"""
-    return f"color: {Colors.TEXT_MUTED}; font-size: 8pt; background: transparent;"
+    return f"color: {Colors.TEXT_MUTED}; font-size: 9pt; background: transparent;"
 
 
 def close_btn_style():
@@ -393,7 +394,7 @@ def tab_widget_style():
             margin: 4px 2px;
             border: none;
             border-radius: {Radius.MD};
-            font-size: 10pt;
+            font-size: 12pt;
             font-weight: 600;
         }}
         QTabBar::tab:hover {{
@@ -434,7 +435,7 @@ def progress_bar_style():
             height: 24px;
             text-align: center;
             color: {Colors.TEXT_SECONDARY};
-            font-size: 8pt;
+            font-size: 9pt;
             font-weight: 600;
         }}
         QProgressBar::chunk {{
@@ -492,7 +493,7 @@ def global_stylesheet():
         }}
         QWidget {{
             font-family: {t.FAMILY};
-            font-size: 10pt;
+            font-size: 12pt;
             color: {c.TEXT_PRIMARY};
         }}
         QLabel {{
@@ -547,7 +548,7 @@ def global_stylesheet():
             selection-background-color: {c.ACCENT};
             selection-color: #FFFFFF;
             font-family: {t.FAMILY_MONO};
-            font-size: 10pt;
+            font-size: 11pt;
         }}
         QTextEdit:focus, QPlainTextEdit:focus {{
             border-color: {c.ACCENT};
@@ -559,7 +560,7 @@ def global_stylesheet():
             border-radius: {r.MD};
             padding: 10px 14px;
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QLineEdit:focus {{
             border-color: {c.ACCENT};
@@ -570,7 +571,7 @@ def global_stylesheet():
             color: {c.TEXT_MUTED};
         }}
         QLineEdit::placeholder {{
-            color: {c.TEXT_MUTED};
+            color: {c.TEXT_PLACEHOLDER};
         }}
 
         /* ===== Buttons ===== */
@@ -581,7 +582,7 @@ def global_stylesheet():
             border-radius: {r.MD};
             padding: 10px 28px;
             font-weight: 600;
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QPushButton:hover {{
             background: {g.ACCENT_BTN_HOVER};
@@ -655,7 +656,7 @@ def global_stylesheet():
             border-radius: {r.MD};
             padding: 8px 10px;
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QSpinBox:focus {{
             border-color: {c.ACCENT};
@@ -673,7 +674,7 @@ def global_stylesheet():
         /* ===== Checkbox ===== */
         QCheckBox {{
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
             spacing: 10px;
         }}
         QCheckBox::indicator {{
@@ -694,7 +695,7 @@ def global_stylesheet():
         /* ===== RadioButton ===== */
         QRadioButton {{
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
             spacing: 10px;
         }}
         QRadioButton::indicator {{
@@ -719,7 +720,7 @@ def global_stylesheet():
             border-radius: {r.MD};
             padding: 8px 12px;
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
         }}
         QComboBox:focus {{
             border-color: {c.ACCENT};
@@ -746,7 +747,7 @@ def global_stylesheet():
             height: 24px;
             text-align: center;
             color: {c.TEXT_SECONDARY};
-            font-size: 8pt;
+            font-size: 9pt;
             font-weight: 600;
         }}
         QProgressBar::chunk {{
@@ -768,7 +769,7 @@ def global_stylesheet():
             left: 16px;
             padding: 2px 10px;
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
         }}
 
         /* ===== Splitter ===== */
@@ -786,7 +787,7 @@ def global_stylesheet():
             color: {c.TEXT_SECONDARY};
             border-top: 1px solid {c.BORDER};
             padding: 4px 16px;
-            font-size: 9pt;
+            font-size: 11pt;
         }}
 
         /* ===== MessageBox ===== */
@@ -795,7 +796,7 @@ def global_stylesheet():
         }}
         QMessageBox QLabel {{
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 12pt;
             min-width: 280px;
         }}
         QMessageBox QPushButton {{
@@ -818,6 +819,39 @@ def global_stylesheet():
             border: 1px solid {c.BORDER};
             border-radius: {r.SM};
             padding: 8px 12px;
-            font-size: 9pt;
+            font-size: 11pt;
         }}
     """
+
+
+def resolve_fonts():
+    """Resolve best available system fonts. Must call after QApplication is created."""
+    from PyQt6.QtGui import QFontDatabase
+    available = set(QFontDatabase.families())
+
+    # UI font
+    ui_candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic",
+                     "Apple SD Gothic Neo", "Segoe UI"]
+    for name in ui_candidates:
+        if name in available:
+            Typography.FAMILY = name
+            break
+
+    # Mono font
+    mono_candidates = ["JetBrains Mono", "Cascadia Code", "Consolas", "Courier New"]
+    for name in mono_candidates:
+        if name in available:
+            Typography.FAMILY_MONO = name
+            break
+
+    # Regenerate inline style strings with resolved single font name
+    f = Typography.FAMILY
+    fm = Typography.FAMILY_MONO
+    Typography.TITLE_XL = f"font-family: {f}; font-size: 24pt; font-weight: 700; letter-spacing: -0.5px;"
+    Typography.TITLE_LG = f"font-family: {f}; font-size: 18pt; font-weight: 700; letter-spacing: -0.3px;"
+    Typography.TITLE_MD = f"font-family: {f}; font-size: 14pt; font-weight: 600;"
+    Typography.TITLE_SM = f"font-family: {f}; font-size: 12pt; font-weight: 600;"
+    Typography.BODY = f"font-family: {f}; font-size: 12pt; font-weight: 400;"
+    Typography.BODY_SM = f"font-family: {f}; font-size: 11pt; font-weight: 400;"
+    Typography.CAPTION = f"font-family: {f}; font-size: 10pt; font-weight: 500; letter-spacing: 0.3px;"
+    Typography.MONO = f"font-family: {fm}; font-size: 11pt;"

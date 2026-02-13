@@ -1,16 +1,16 @@
 """
-설정 다이얼로그 (PyQt5)
+설정 다이얼로그 (PyQt6)
 Stitch Blue 디자인 - 좌표 기반 배치
 """
 import re
 import threading
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QFrame, QSpinBox,
     QScrollArea, QWidget
 )
-from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtGui import QColor, QPainter, QLinearGradient
+from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
 from src.theme import (
@@ -73,7 +73,7 @@ class SectionCard(QFrame):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QColor(Colors.BORDER))
         painter.setBrush(QColor(Colors.BG_CARD))
         painter.drawRoundedRect(
@@ -118,7 +118,7 @@ class DialogHeader(QFrame):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         grad = QLinearGradient(0, 0, self.width(), 0)
         grad.setColorAt(0, QColor(Colors.BG_CARD))
         grad.setColorAt(0.5, QColor("#131A2A"))
@@ -165,7 +165,7 @@ class SettingsDialog(QDialog):
 
         close_btn = QPushButton("\u2715", header)
         close_btn.setGeometry(12, 11, 32, 32)
-        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(close_btn_style())
         close_btn.clicked.connect(self.reject)
 
@@ -184,7 +184,7 @@ class SettingsDialog(QDialog):
         scroll = QScrollArea(self)
         scroll.setGeometry(0, self.HEADER_H, self.DLG_W, scroll_h)
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(scroll_area_style())
 
         scroll_content = QWidget()
@@ -214,13 +214,13 @@ class SettingsDialog(QDialog):
         # 저장 버튼 (오른쪽)
         self.save_btn = QPushButton("저장", footer)
         self.save_btn.setGeometry(self.DLG_W - 20 - 100, 12, 100, 38)
-        self.save_btn.setCursor(Qt.PointingHandCursor)
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.clicked.connect(self._save_settings)
 
         # 취소 버튼
         self.cancel_btn = QPushButton("취소", footer)
         self.cancel_btn.setGeometry(self.DLG_W - 20 - 100 - 10 - 90, 12, 90, 38)
-        self.cancel_btn.setCursor(Qt.PointingHandCursor)
+        self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_btn.setProperty("class", "ghost")
         self.cancel_btn.clicked.connect(self.reject)
 
@@ -231,7 +231,7 @@ class SettingsDialog(QDialog):
         layout = section.content_layout()
 
         self.gemini_key_edit = QLineEdit()
-        self.gemini_key_edit.setEchoMode(QLineEdit.Password)
+        self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.gemini_key_edit.setPlaceholderText("Gemini API 키를 입력하세요")
         layout.addWidget(FormField("마스터 API 키", self.gemini_key_edit, "Google AI Studio에서 발급"))
 
@@ -282,7 +282,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.telegram_check)
 
         self.bot_token_edit = QLineEdit()
-        self.bot_token_edit.setEchoMode(QLineEdit.Password)
+        self.bot_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.bot_token_edit.setPlaceholderText("BotFather 토큰")
         layout.addWidget(FormField("봇 토큰", self.bot_token_edit))
 
@@ -327,13 +327,13 @@ class SettingsDialog(QDialog):
 
         self.threads_login_btn = QPushButton("Threads 로그인")
         self.threads_login_btn.setFixedHeight(40)
-        self.threads_login_btn.setCursor(Qt.PointingHandCursor)
+        self.threads_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.threads_login_btn.clicked.connect(self._open_threads_login)
         btn_row.addWidget(self.threads_login_btn)
 
         self.check_login_btn = QPushButton("상태 확인")
         self.check_login_btn.setFixedHeight(40)
-        self.check_login_btn.setCursor(Qt.PointingHandCursor)
+        self.check_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_login_btn.setProperty("class", "ghost")
         self.check_login_btn.clicked.connect(self._check_login_status)
         btn_row.addWidget(self.check_login_btn)
@@ -452,7 +452,7 @@ class SettingsDialog(QDialog):
         thread = threading.Thread(target=open_browser, daemon=True)
         thread.start()
 
-        from PyQt5.QtCore import QTimer
+        from PyQt6.QtCore import QTimer
         QTimer.singleShot(3000, self._restore_login_btn)
 
     def _restore_login_btn(self):
@@ -503,7 +503,7 @@ class SettingsDialog(QDialog):
             result = check_status()
             if self._closed:
                 return
-            from PyQt5.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app:
                 app.postEvent(self, LoginStatusEvent(result))

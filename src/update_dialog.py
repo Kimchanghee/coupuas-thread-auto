@@ -1,11 +1,11 @@
 """
 쿠팡 파트너스 스레드 자동화 - 업데이트 다이얼로그
 """
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QProgressBar
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from src.theme import (
     Colors, Gradients, Typography,
@@ -161,7 +161,7 @@ class UpdateDialog(QDialog):
 
         self.close_btn = QPushButton("닫기")
         self.close_btn.setFixedHeight(40)
-        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
@@ -182,7 +182,7 @@ class UpdateDialog(QDialog):
 
         self.download_btn = QPushButton("다운로드 및 설치")
         self.download_btn.setFixedHeight(40)
-        self.download_btn.setCursor(Qt.PointingHandCursor)
+        self.download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.download_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {Gradients.ACCENT_BTN};

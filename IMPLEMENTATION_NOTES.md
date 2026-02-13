@@ -100,7 +100,7 @@
 
 ### 2. QThread 사용
 
-**이유**: PyQt5에서 네트워크 작업이나 긴 작업을 메인 스레드에서 실행하면 UI가 멈춤
+**이유**: PyQt6에서 네트워크 작업이나 긴 작업을 메인 스레드에서 실행하면 UI가 멈춤
 
 **구현**:
 - `UpdateCheckThread`: 백그라운드 업데이트 확인
@@ -279,7 +279,7 @@ print(f"Response: {response.text[:500]}")
 ### 런타임 의존성
 - `requests`: HTTP 클라이언트
 - `packaging`: 버전 비교
-- `PyQt5`: GUI 프레임워크
+- `PyQt6`: GUI 프레임워크
 
 ### 빌드 의존성
 - `pyinstaller`: EXE 빌드
@@ -293,18 +293,18 @@ print(f"Response: {response.text[:500]}")
 ## 라이선스 고려사항
 
 사용된 오픈소스 라이브러리:
-- PyQt5: GPL v3 (주의!)
+- PyQt6: GPL v3 (주의!)
 - requests: Apache 2.0
 - packaging: Apache 2.0 / BSD
 
-**주의**: PyQt5는 GPL 라이선스이므로 상업용 사용 시 별도 라이선스 구매 필요
+**주의**: PyQt6는 GPL 라이선스이므로 상업용 사용 시 별도 라이선스 구매 필요
 
 ## 참고 자료
 
 - [GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
 - [PyInstaller Documentation](https://pyinstaller.org/)
 - [Semantic Versioning](https://semver.org/)
-- [PyQt5 Documentation](https://www.riverbankcomputing.com/static/Docs/PyQt5/)
+- [PyQt6 Documentation](https://www.riverbankcomputing.com/static/Docs/PyQt6/)
 
 ## 기여자 가이드
 

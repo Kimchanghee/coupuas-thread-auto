@@ -25,9 +25,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # ── DPI 스케일링 ──
 os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '1'
 
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPalette, QColor
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPalette, QColor
 
 from src.theme import Colors, global_stylesheet
 from src.main_window import MainWindow
@@ -41,30 +41,32 @@ def main():
     logger.info("Test main startup")
     logger.info("Log file path: %s", log_file)
 
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    if hasattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling"):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps"):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
     # Dark palette base
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor(Colors.BG_DARK))
-    palette.setColor(QPalette.WindowText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Base, QColor(Colors.BG_INPUT))
-    palette.setColor(QPalette.AlternateBase, QColor(Colors.BG_CARD))
-    palette.setColor(QPalette.Text, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Button, QColor(Colors.BG_ELEVATED))
-    palette.setColor(QPalette.ButtonText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Highlight, QColor(Colors.ACCENT))
-    palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.Window, QColor(Colors.BG_DARK))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.ColorRole.Base, QColor(Colors.BG_INPUT))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(Colors.BG_CARD))
+    palette.setColor(QPalette.ColorRole.Text, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.ColorRole.Button, QColor(Colors.BG_ELEVATED))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(Colors.ACCENT))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
     app.setPalette(palette)
 
     # 메인 윈도우 직접 실행
     main_win = MainWindow()
     main_win.show()
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

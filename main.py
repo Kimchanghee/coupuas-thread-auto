@@ -44,14 +44,14 @@ if _DASHBOARD_ENV.exists():
 # DPI 스케일링: 모든 화면에서 동일한 물리 크기로 표시
 os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '1'
 
-from PyQt5.QtWidgets import QApplication, QSplashScreen
-from PyQt5.QtCore import Qt, QRectF
-from PyQt5.QtGui import (
+from PyQt6.QtWidgets import QApplication, QSplashScreen
+from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtGui import (
     QPixmap, QFont, QPainter, QColor, QLinearGradient,
     QPainterPath, QPen, QBrush, QFontDatabase
 )
 
-from src.theme import Colors
+from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
 VERSION = "v2.2.0"
@@ -68,6 +68,8 @@ def _create_main_window(login_win, auth_result, main_window_cls=None):
     main_win = main_window_cls()
     main_win._auth_data = auth_result
     main_win._login_ref = login_win
+    if hasattr(main_win, '_update_account_display'):
+        main_win._update_account_display()
     main_win.show()
     logger.info("Main window visible")
     return main_win
@@ -86,7 +88,7 @@ class SplashScreen(QSplashScreen):
         if cls._FONT_FAMILY is not None:
             return cls._FONT_FAMILY
         candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI"]
-        available = QFontDatabase().families()
+        available = QFontDatabase.families()
         for name in candidates:
             if name in available:
                 cls._FONT_FAMILY = name
@@ -98,13 +100,13 @@ class SplashScreen(QSplashScreen):
         pixmap = QPixmap(self.WIDTH, self.HEIGHT)
         pixmap.fill(QColor(Colors.BG_DARK))
         super().__init__(pixmap)
-        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
         self.progress = 0
         self._status_msg = ""
 
     def drawContents(self, painter):
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         w, h = self.WIDTH, self.HEIGHT
         fn = self._resolve_font()
 
@@ -120,7 +122,7 @@ class SplashScreen(QSplashScreen):
         glow.setColorAt(0, QColor(13, 89, 242, 18))
         glow.setColorAt(1, QColor(13, 89, 242, 0))
         painter.setBrush(QBrush(glow))
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(QRectF(w * 0.1, 5, w * 0.8, 150))
 
         # ---- Top accent line ----
@@ -135,33 +137,33 @@ class SplashScreen(QSplashScreen):
         cx, cy, cr = w // 2, 72, 26
         ring_pen = QPen(QColor(Colors.ACCENT), 3)
         painter.setPen(ring_pen)
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawArc(cx - cr, cy - cr, cr * 2, cr * 2, 30 * 16, 300 * 16)
 
         # Letter inside
         painter.setPen(QColor("#FFFFFF"))
-        painter.setFont(QFont(fn, 19, QFont.Bold))
-        painter.drawText(QRectF(cx - cr, cy - cr, cr * 2, cr * 2), Qt.AlignCenter, "C")
+        painter.setFont(QFont(fn, 19, QFont.Weight.Bold))
+        painter.drawText(QRectF(cx - cr, cy - cr, cr * 2, cr * 2), Qt.AlignmentFlag.AlignCenter, "C")
 
         # ---- Title ----
         painter.setPen(QColor(Colors.TEXT_PRIMARY))
-        painter.setFont(QFont(fn, 18, QFont.Bold))
-        painter.drawText(0, 112, w, 30, Qt.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4")
+        painter.setFont(QFont(fn, 18, QFont.Weight.Bold))
+        painter.drawText(0, 112, w, 30, Qt.AlignmentFlag.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4")
 
         # ---- Subtitle ----
         painter.setPen(QColor(Colors.ACCENT))
-        painter.setFont(QFont(fn, 12, QFont.DemiBold))
-        painter.drawText(0, 142, w, 22, Qt.AlignCenter, "\uc2a4\ub808\ub4dc \uc790\ub3d9\ud654")
+        painter.setFont(QFont(fn, 12, QFont.Weight.DemiBold))
+        painter.drawText(0, 142, w, 22, Qt.AlignmentFlag.AlignCenter, "\uc2a4\ub808\ub4dc \uc790\ub3d9\ud654")
 
         # ---- Tagline ----
         painter.setPen(QColor(Colors.TEXT_MUTED))
         painter.setFont(QFont(fn, 9))
-        painter.drawText(0, 172, w, 18, Qt.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4 Threads \uc790\ub3d9 \uc5c5\ub85c\ub4dc")
+        painter.drawText(0, 172, w, 18, Qt.AlignmentFlag.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4 Threads \uc790\ub3d9 \uc5c5\ub85c\ub4dc")
 
         # ---- Status message ----
         painter.setPen(QColor(Colors.TEXT_SECONDARY))
         painter.setFont(QFont(fn, 9))
-        painter.drawText(0, 210, w, 18, Qt.AlignCenter, self._status_msg)
+        painter.drawText(0, 210, w, 18, Qt.AlignmentFlag.AlignCenter, self._status_msg)
 
         # ---- Progress bar ----
         bar_x = 90
@@ -187,7 +189,7 @@ class SplashScreen(QSplashScreen):
         # ---- Version ----
         painter.setPen(QColor(Colors.TEXT_MUTED))
         painter.setFont(QFont(fn, 8))
-        painter.drawText(0, 262, w, 16, Qt.AlignCenter, VERSION)
+        painter.drawText(0, 262, w, 16, Qt.AlignmentFlag.AlignCenter, VERSION)
 
         # ---- Bottom accent line ----
         bot_grad = QLinearGradient(0, 0, w, 0)
@@ -212,24 +214,32 @@ def main():
     logger.info("Log file path: %s", log_file)
 
     # 모든 모니터에서 동일한 물리적 크기 보장
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    if hasattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling"):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps"):
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
 
+    # Resolve system fonts for consistent rendering (fixes broken font-family in QSS)
+    resolve_fonts()
+    base_font = QFont(Typography.FAMILY, 12)
+    base_font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
+    app.setFont(base_font)
+
     # Dark palette base
-    from PyQt5.QtGui import QPalette
+    from PyQt6.QtGui import QPalette
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor(Colors.BG_DARK))
-    palette.setColor(QPalette.WindowText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Base, QColor(Colors.BG_INPUT))
-    palette.setColor(QPalette.AlternateBase, QColor(Colors.BG_CARD))
-    palette.setColor(QPalette.Text, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Button, QColor(Colors.BG_ELEVATED))
-    palette.setColor(QPalette.ButtonText, QColor(Colors.TEXT_PRIMARY))
-    palette.setColor(QPalette.Highlight, QColor(Colors.ACCENT))
-    palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
+    palette.setColor(QPalette.ColorRole.Window, QColor(Colors.BG_DARK))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.ColorRole.Base, QColor(Colors.BG_INPUT))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(Colors.BG_CARD))
+    palette.setColor(QPalette.ColorRole.Text, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.ColorRole.Button, QColor(Colors.BG_ELEVATED))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(Colors.TEXT_PRIMARY))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(Colors.ACCENT))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
     app.setPalette(palette)
 
     # Splash
@@ -269,7 +279,7 @@ def main():
     login_win.show()
     splash.finish(login_win)
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

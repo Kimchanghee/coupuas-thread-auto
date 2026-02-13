@@ -5,9 +5,9 @@
 오버레이 모드: 메인 윈도우의 실제 버튼/입력창 위치를 직접 하이라이트하여 안내합니다.
 다이얼로그 모드: [사용법] 버튼으로 열리는 독립 안내 창입니다.
 """
-from PyQt5.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox
-from PyQt5.QtCore import Qt, QRectF, QRect, QPoint
-from PyQt5.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox
+from PyQt6.QtCore import Qt, QRectF, QRect, QPoint
+from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion, QPainterPath
 
 from src.theme import (
     Colors, Radius, Gradients,
@@ -212,29 +212,29 @@ class TutorialDialog(QDialog):
 
         close_btn = QPushButton("\u2715", self)
         close_btn.setGeometry(W - 48, 12, 32, 32)
-        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(close_btn_style())
         close_btn.clicked.connect(self.accept)
 
         self.icon_label = QLabel(self)
         self.icon_label.setGeometry(W // 2 - 28, 50, 56, 56)
-        self.icon_label.setAlignment(Qt.AlignCenter)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.title_label = QLabel(self)
         self.title_label.setGeometry(24, 120, W - 48, 38)
-        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setStyleSheet(header_title_style("19pt"))
 
         self.subtitle_label = QLabel(self)
         self.subtitle_label.setGeometry(24, 160, W - 48, 24)
-        self.subtitle_label.setAlignment(Qt.AlignCenter)
+        self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitle_label.setStyleSheet(
             f"color: {Colors.ACCENT}; font-size: 13pt; font-weight: 600; background: transparent;"
         )
 
         self.content_label = QLabel(self)
         self.content_label.setGeometry(36, 200, W - 72, 340)
-        self.content_label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.content_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.content_label.setWordWrap(True)
         self.content_label.setStyleSheet(f"""
             QLabel {{
@@ -257,7 +257,7 @@ class TutorialDialog(QDialog):
 
         self.prev_btn = QPushButton("\u2190 이전", self)
         self.prev_btn.setGeometry(24, 580, 100, 36)
-        self.prev_btn.setCursor(Qt.PointingHandCursor)
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.prev_btn.setStyleSheet(
             ghost_btn_style() + "\nQPushButton { font-size: 13pt; }"
         )
@@ -265,7 +265,7 @@ class TutorialDialog(QDialog):
 
         self.skip_btn = QPushButton("건너뛰기", self)
         self.skip_btn.setGeometry(W // 2 - 55, 580, 110, 36)
-        self.skip_btn.setCursor(Qt.PointingHandCursor)
+        self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {Colors.TEXT_MUTED};
@@ -277,7 +277,7 @@ class TutorialDialog(QDialog):
 
         self.next_btn = QPushButton("다음 \u2192", self)
         self.next_btn.setGeometry(W - 124, 580, 100, 36)
-        self.next_btn.setCursor(Qt.PointingHandCursor)
+        self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
@@ -329,7 +329,7 @@ class TutorialDialog(QDialog):
 
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.DLG_W, self.DLG_H
         painter.fillRect(self.rect(), QColor(Colors.BG_DARK))
 
@@ -503,7 +503,7 @@ class TutorialOverlay(QWidget):
         self._dont_show_again = False
         self._highlight_rect = None  # 현재 하이라이트 영역 (QRect, overlay 좌표)
 
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
 
         self._build_ui()
@@ -556,41 +556,37 @@ class TutorialOverlay(QWidget):
 
     # ── Paint ──
 
+
     def paintEvent(self, _event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.TextAntialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         W, H = self.width(), self.height()
         hl = self._highlight_rect
 
+        # Strongly dim everything except the current highlighted widget.
+        dim = QColor(0, 0, 0, 245)
         if hl:
-            # 하이라이트 영역을 제외한 어두운 오버레이 (스포트라이트 효과)
-            overlay_region = QRegion(0, 0, W, H)
-            spotlight = QRegion(hl)
-            dark_region = overlay_region.subtracted(spotlight)
-
-            painter.setClipRegion(dark_region)
-            painter.fillRect(0, 0, W, H, QColor(0, 0, 0, 180))
-            painter.setClipping(False)
-
-            # 하이라이트 테두리 (글로우)
-            glow_pen = QPen(QColor(Colors.ACCENT), self.GLOW_WIDTH)
-            glow_pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(glow_pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(QRectF(hl), 8, 8)
-
-            # 은은한 글로우 (바깥쪽 2px)
-            outer = QRectF(hl).adjusted(-2, -2, 2, 2)
-            glow2_pen = QPen(QColor(13, 89, 242, 60), 1)
-            painter.setPen(glow2_pen)
-            painter.drawRoundedRect(outer, 10, 10)
+            full = QPainterPath()
+            full.addRect(QRectF(0, 0, W, H))
+            hole = QPainterPath()
+            hole.addRoundedRect(QRectF(hl), 10, 10)
+            painter.fillPath(full.subtracted(hole), dim)
         else:
-            # 하이라이트 없음 - 전체 어둡게
-            painter.fillRect(0, 0, W, H, QColor(0, 0, 0, 180))
+            painter.fillRect(0, 0, W, H, dim)
 
-    # ── Build UI ──
+        if hl:
+            glow_pen = QPen(QColor(Colors.ACCENT), self.GLOW_WIDTH)
+            glow_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(glow_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(QRectF(hl), 10, 10)
+
+            outer = QRectF(hl).adjusted(-2, -2, 2, 2)
+            glow2_pen = QPen(QColor(13, 89, 242, 90), 1)
+            painter.setPen(glow2_pen)
+            painter.drawRoundedRect(outer, 12, 12)
 
     def _build_ui(self):
         # 설명 카드 (tooltip)
@@ -626,7 +622,7 @@ class TutorialOverlay(QWidget):
         # 이전 버튼
         self.prev_btn = QPushButton("\u2190 이전", self)
         self.prev_btn.setFixedSize(86, 34)
-        self.prev_btn.setCursor(Qt.PointingHandCursor)
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.prev_btn.setStyleSheet(
             ghost_btn_style() + "\nQPushButton { font-size: 12pt; }"
         )
@@ -635,7 +631,7 @@ class TutorialOverlay(QWidget):
         # 건너뛰기 버튼
         self.skip_btn = QPushButton("건너뛰기", self)
         self.skip_btn.setFixedSize(96, 34)
-        self.skip_btn.setCursor(Qt.PointingHandCursor)
+        self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {Colors.TEXT_MUTED};
@@ -648,7 +644,7 @@ class TutorialOverlay(QWidget):
         # 다음 버튼
         self.next_btn = QPushButton("다음 \u2192", self)
         self.next_btn.setFixedSize(96, 34)
-        self.next_btn.setCursor(Qt.PointingHandCursor)
+        self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
