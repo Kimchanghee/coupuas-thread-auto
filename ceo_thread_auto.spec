@@ -211,6 +211,7 @@ a = Analysis(
     binaries=binaries,
     datas=datas + [
         ('src', 'src'),  # src 폴더 전체 포함
+        ('fonts', 'fonts'),  # UI fonts (Pretendard 등)
     ],
     hiddenimports=list(set(hidden_imports)),  # 중복 제거
     hookspath=[],

@@ -80,6 +80,7 @@ HIDDEN_IMPORTS = [
 DATAS = [
     # (소스 경로, 대상 폴더)
     ("src", "src"),
+    ("fonts", "fonts"),
 ]
 
 # 제외할 모듈

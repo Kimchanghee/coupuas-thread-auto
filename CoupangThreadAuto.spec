@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('src', 'src'), ('C:\\Users\\HOME\\Documents\\GitHub\\coupuas-thread-auto\\.venv\\Lib\\site-packages\\playwright\\driver', 'playwright/driver')],
+    datas=[('src', 'src'), ('fonts', 'fonts'), ('C:\\Users\\HOME\\Documents\\GitHub\\coupuas-thread-auto\\.venv\\Lib\\site-packages\\playwright\\driver', 'playwright/driver')],
     hiddenimports=['google.generativeai', 'google.ai.generativelanguage', 'google.api_core', 'google.auth', 'google.protobuf', 'grpc', 'PyQt6', 'PyQt6.QtWidgets', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.sip', 'playwright', 'playwright.sync_api', 'playwright.async_api', 'playwright._impl', 'PIL', 'PIL.Image', 'requests', 'urllib3', 'json', 'hashlib', 're', 'asyncio', 'src', 'src.main_window', 'src.config', 'src.coupang_uploader', 'src.settings_dialog', 'src.threads_playwright_helper', 'src.computer_use_agent', 'src.services', 'src.services.aggro_generator', 'src.services.image_search', 'src.services.link_history', 'src.services.coupang_parser', 'src.services.telegram_service'],
     hookspath=[],
     hooksconfig={},

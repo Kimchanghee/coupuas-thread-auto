@@ -695,7 +695,7 @@ class TutorialOverlay(QWidget):
         self.step_label.setGeometry(pad, pad, inner_w, 18)
         self.title_label.setGeometry(pad, pad + 24, inner_w, 32)
 
-        # desc 높이: 줄 수 기반 계산 (adjustSize보다 안정적)
+        # desc 높이: 실제 워드랩 렌더링 높이에 맞춰 계산 (줄 수 추정은 폰트/폭에 따라 오차가 큼)
         desc_text = step.get("desc", "")
         line_count = desc_text.count('\n') + 1
         desc_h = max(line_count * 24, 48)

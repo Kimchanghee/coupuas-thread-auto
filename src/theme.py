@@ -63,6 +63,7 @@ class Colors:
 
 class Typography:
     """Font definitions - resolved at runtime by resolve_fonts()"""
+    # Default fallbacks; resolve_fonts() replaces these with the best available system font.
     FAMILY = "Segoe UI"
     FAMILY_MONO = "Consolas"
 
@@ -580,7 +581,8 @@ def global_stylesheet():
             color: #FFFFFF;
             border: none;
             border-radius: {r.MD};
-            padding: 10px 28px;
+            /* This app uses many fixed geometries; keep padding modest to avoid clipped text. */
+            padding: 6px 14px;
             font-weight: 600;
             font-size: 12pt;
         }}
@@ -600,6 +602,8 @@ def global_stylesheet():
             background-color: transparent;
             color: {c.TEXT_SECONDARY};
             border: 1px solid {c.BORDER};
+            padding: 6px 12px;
+            font-size: 9pt;
         }}
         QPushButton[class="ghost"]:hover {{
             background-color: {c.BG_ELEVATED};

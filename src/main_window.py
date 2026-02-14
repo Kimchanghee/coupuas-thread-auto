@@ -1295,15 +1295,16 @@ class MainWindow(QMainWindow):
         self.status_label.setText(message)
 
         lower_message = str(message).lower()
-        if any(kw in lower_message for kw in ("error", "fail", "cancel")):
+        if any(kw in lower_message for kw in ("error", "fail", "cancel", "오류", "취소", "실패", "중단")):
             self.status_badge.update_style(Colors.ERROR, str(message)[:14])
-        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success")):
+        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success", "완료", "대기")):
             self.status_badge.update_style(Colors.SUCCESS, str(message)[:14])
         else:
             self.status_badge.update_style(Colors.WARNING, str(message)[:14])
 
     def _set_progress(self, message):
         self.progress_label.setText(message)
+        self.progress_label.setVisible(bool(message.strip()))
 
     def _set_results(self, success, failed):
         total = success + failed

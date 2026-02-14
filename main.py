@@ -75,6 +75,34 @@ def _create_main_window(login_win, auth_result, main_window_cls=None):
     return main_win
 
 
+def _init_qt_app_font(app: QApplication) -> None:
+    """
+    Make UI font match D:\\Dithub\\NewshoppingShorts-1 defaults:
+    Pretendard -> Malgun Gothic -> Apple SD Gothic Neo (fallback).
+
+    Also try loading bundled fonts from ./fonts if present.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    fonts_dir = os.path.join(base_dir, "fonts")
+    if os.path.isdir(fonts_dir):
+        for name in os.listdir(fonts_dir):
+            if name.lower().endswith((".ttf", ".otf")):
+                try:
+                    QFontDatabase.addApplicationFont(os.path.join(fonts_dir, name))
+                except Exception:
+                    pass
+
+    available = set(QFontDatabase().families())
+    candidates = ["Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Segoe UI"]
+    family = next((n for n in candidates if n in available), "")
+    qf = QFont(family, 10) if family else QFont()
+    try:
+        qf.setHintingPreference(QFont.PreferFullHinting)
+    except Exception:
+        pass
+    app.setFont(qf)
+
+
 class SplashScreen(QSplashScreen):
     """프리미엄 스플래시 화면 - Stitch Blue 테마"""
 
@@ -87,7 +115,8 @@ class SplashScreen(QSplashScreen):
         """테마 폴백 목록에서 사용 가능한 첫 번째 폰트를 찾습니다."""
         if cls._FONT_FAMILY is not None:
             return cls._FONT_FAMILY
-        candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI"]
+        # Korean-first, match NewshoppingShorts-1 typography defaults.
+        candidates = ["Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Segoe UI"]
         available = QFontDatabase.families()
         for name in candidates:
             if name in available:
@@ -213,6 +242,11 @@ def main():
     logger.info("Application startup")
     logger.info("Log file path: %s", log_file)
 
+    # High-DPI: avoid OS bitmap scaling blur on Windows.
+    if sys.platform == "win32":
+        os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
+        os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+
     # 모든 모니터에서 동일한 물리적 크기 보장
     if hasattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling"):
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
@@ -221,6 +255,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
+    _init_qt_app_font(app)
 
     # Resolve system fonts for consistent rendering (fixes broken font-family in QSS)
     resolve_fonts()
