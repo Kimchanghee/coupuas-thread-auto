@@ -15,6 +15,13 @@ project_root = os.path.dirname(os.path.abspath(SPEC))
 
 # 모든 숨겨진 imports 수집
 hidden_imports = [
+    # ============ PyQt6 (GUI) ============
+    'PyQt6',
+    'PyQt6.QtWidgets',
+    'PyQt6.QtCore',
+    'PyQt6.QtGui',
+    'PyQt6.sip',
+
     # ============ src 패키지 (쿠팡 파트너스 전용) ============
     'src',
     'src.main_window',
@@ -92,14 +99,6 @@ hidden_imports = [
     # ============ Pillow (PIL) ============
     'PIL',
     'PIL.Image',
-    'PIL.ImageTk',
-
-    # ============ Tkinter ============
-    'tkinter',
-    'tkinter.ttk',
-    'tkinter.messagebox',
-    'tkinter.filedialog',
-    'tkinter.scrolledtext',
 
     # ============ Pydantic ============
     'pydantic',
@@ -150,6 +149,13 @@ hidden_imports = [
 # 데이터 파일 수집
 datas = []
 binaries = []
+
+# PyQt6 전체 수집 (Qt plugin/platforms 포함)
+try:
+    tmp_ret = collect_all('PyQt6')
+    datas += tmp_ret[0]; binaries += tmp_ret[1]; hidden_imports += tmp_ret[2]
+except Exception as e:
+    print(f"Warning: PyQt6 collect failed: {e}")
 
 # Google 관련 전체 수집
 try:

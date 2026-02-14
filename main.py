@@ -98,7 +98,7 @@ def _init_qt_app_font(app: QApplication) -> None:
                 except Exception:
                     pass
 
-    available = set(QFontDatabase().families())
+    available = set(QFontDatabase.families())
     candidates = ["Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Segoe UI"]
     family = next((n for n in candidates if n in available), "")
     qf = QFont(family, 10) if family else QFont()
