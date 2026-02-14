@@ -36,8 +36,14 @@ if sys.platform == 'win32':
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# project-user-dashboard 백엔드의 .env 로드
-_DASHBOARD_ENV = Path(__file__).resolve().parent.parent / "project-user-dashboard" / ".env"
+# 프로젝트 루트 .env 우선 로드 (다른 PC에서도 동작)
+_PROJECT_ROOT = Path(__file__).resolve().parent
+_LOCAL_ENV = _PROJECT_ROOT / ".env"
+if _LOCAL_ENV.exists():
+    load_dotenv(_LOCAL_ENV, override=False)
+
+# project-user-dashboard 백엔드의 .env 로드 (형제 프로젝트)
+_DASHBOARD_ENV = _PROJECT_ROOT.parent / "project-user-dashboard" / ".env"
 if _DASHBOARD_ENV.exists():
     load_dotenv(_DASHBOARD_ENV, override=False)
 

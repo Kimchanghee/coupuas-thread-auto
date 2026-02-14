@@ -3,7 +3,7 @@ Themed UI feedback components:
 - ThemedPopup: replaces QMessageBox with a design-consistent dialog.
 """
 
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -13,8 +13,8 @@ from PyQt5.QtWidgets import (
     QWidget,
     QGraphicsDropShadowEffect,
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 
 from src.theme import Colors, Radius
 
@@ -45,9 +45,9 @@ class ThemedPopup(QDialog):
         self.setModal(True)
         self.setWindowTitle(title)
         # Frameless, theme-first popup (no OS chrome mismatch).
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         self._build_ui(title, message, ok_text, yes_text, no_text, show_cancel)
 
@@ -90,7 +90,7 @@ class ThemedPopup(QDialog):
         color = self._kind_color()
         icon = QLabel("!", card)
         icon.setFixedSize(34, 34)
-        icon.setAlignment(Qt.AlignCenter)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setStyleSheet(f"""
             QLabel {{
                 background-color: {color}22;
@@ -111,7 +111,7 @@ class ThemedPopup(QDialog):
 
         close_btn = QPushButton("\u2715", card)
         close_btn.setFixedSize(32, 32)
-        close_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
@@ -125,7 +125,7 @@ class ThemedPopup(QDialog):
             QPushButton:hover {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY}; }}
         """)
         close_btn.clicked.connect(self.reject)
-        header.addWidget(close_btn, 0, Qt.AlignRight)
+        header.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignRight)
 
         layout.addLayout(header)
 
@@ -142,7 +142,7 @@ class ThemedPopup(QDialog):
 
         def ghost_btn(text: str) -> QPushButton:
             b = QPushButton(text, card)
-            b.setCursor(Qt.PointingHandCursor)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFixedHeight(36)
             b.setStyleSheet(f"""
                 QPushButton {{
@@ -160,7 +160,7 @@ class ThemedPopup(QDialog):
 
         def primary_btn(text: str) -> QPushButton:
             b = QPushButton(text, card)
-            b.setCursor(Qt.PointingHandCursor)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setFixedHeight(36)
             b.setStyleSheet(f"""
                 QPushButton {{
@@ -213,15 +213,15 @@ class ThemedPopup(QDialog):
 
 
 def popup_info(parent, title: str, message: str) -> None:
-    ThemedPopup(parent, title=title, message=message, kind=ThemedPopup.KIND_INFO).exec_()
+    ThemedPopup(parent, title=title, message=message, kind=ThemedPopup.KIND_INFO).exec()
 
 
 def popup_warning(parent, title: str, message: str) -> None:
-    ThemedPopup(parent, title=title, message=message, kind=ThemedPopup.KIND_WARN).exec_()
+    ThemedPopup(parent, title=title, message=message, kind=ThemedPopup.KIND_WARN).exec()
 
 
 def popup_error(parent, title: str, message: str) -> None:
-    ThemedPopup(parent, title=title, message=message, kind=ThemedPopup.KIND_ERROR).exec_()
+    ThemedPopup(parent, title=title, message=message, kind=ThemedPopup.KIND_ERROR).exec()
 
 
 def popup_confirm(parent, title: str, message: str, *, yes_text: str = "예", no_text: str = "아니오") -> bool:
@@ -233,5 +233,5 @@ def popup_confirm(parent, title: str, message: str, *, yes_text: str = "예", no
         yes_text=yes_text,
         no_text=no_text,
     )
-    dlg.exec_()
+    dlg.exec()
     return dlg.result_yes

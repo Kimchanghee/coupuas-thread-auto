@@ -27,7 +27,12 @@ _DASHBOARD_ENV = _PROJECT_ROOT.parent / "project-user-dashboard" / ".env"
 if _DASHBOARD_ENV.exists():
     load_dotenv(_DASHBOARD_ENV, override=False)
 
-# 2) USER_DASHBOARD_API_URL → API_SERVER_URL 순서로 탐색
+# 2) 프로젝트 루트의 .env도 로드 (다른 PC에 project-user-dashboard가 없는 경우 대비)
+_LOCAL_ENV = _PROJECT_ROOT / ".env"
+if _LOCAL_ENV.exists():
+    load_dotenv(_LOCAL_ENV, override=False)
+
+# 3) USER_DASHBOARD_API_URL → API_SERVER_URL 순서로 탐색
 API_SERVER_URL = (
     os.getenv("USER_DASHBOARD_API_URL")
     or os.getenv("API_SERVER_URL", "")
@@ -35,7 +40,18 @@ API_SERVER_URL = (
 
 if not API_SERVER_URL:
     logger.warning("API_SERVER_URL이 설정되지 않았습니다. "
-                    "project-user-dashboard/.env를 확인하세요.")
+                    "project-user-dashboard/.env 또는 프로젝트 루트 .env를 확인하세요.")
+
+
+def _check_api_url() -> Optional[str]:
+    """API_SERVER_URL이 유효한지 검사. 유효하면 None, 아니면 에러 메시지 반환."""
+    if not API_SERVER_URL:
+        return ("서버 주소가 설정되지 않았습니다.\n"
+                "프로젝트 폴더에 .env 파일을 만들고\n"
+                "API_SERVER_URL=https://... 을 설정해주세요.")
+    if not API_SERVER_URL.startswith(("http://", "https://")):
+        return f"서버 주소가 올바르지 않습니다: {API_SERVER_URL}"
+    return None
 
 PROGRAM_TYPE = "stmaker"  # 쇼츠스레드메이커
 
@@ -278,6 +294,9 @@ def is_logged_in() -> bool:
 
 def check_username(username: str) -> Dict[str, Any]:
     """아이디 중복 확인 (program_type별 분리)"""
+    err = _check_api_url()
+    if err:
+        return {"available": False, "message": err}
     try:
         resp = _session.get(
             f"{API_SERVER_URL}/user/check-username/{username}",
@@ -309,6 +328,9 @@ def check_username(username: str) -> Dict[str, Any]:
 
 def register(name: str, username: str, password: str, contact: str, email: str) -> Dict[str, Any]:
     """회원가입 (program_type=stmaker 자동 포함)"""
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
     # Validation
     if not name or len(name.strip()) < 2:
         return {"success": False, "message": "이름을 2자 이상 입력해주세요."}
@@ -413,6 +435,9 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
 
 def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     """로그인"""
+    err = _check_api_url()
+    if err:
+        return {"status": False, "message": err}
     if not username or not password:
         return {"status": False, "message": "아이디와 비밀번호를 입력해주세요."}
 
@@ -531,6 +556,8 @@ def logout() -> bool:
 
 def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
     """세션 체크 (heartbeat)"""
+    if _check_api_url():
+        return {"status": False}
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
@@ -556,6 +583,8 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
 
 def check_work_available() -> Dict[str, Any]:
     """작업 가능 여부 확인"""
+    if _check_api_url():
+        return {"success": False}
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
@@ -576,6 +605,8 @@ def check_work_available() -> Dict[str, Any]:
 
 def use_work() -> Dict[str, Any]:
     """작업 사용 횟수 증가"""
+    if _check_api_url():
+        return {"success": False}
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
@@ -607,6 +638,8 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
         content: 추가 상세 내용
         level: 로그 레벨 (INFO, WARNING, ERROR)
     """
+    if _check_api_url():
+        return
     token = _auth_state.get("token")
     if not token:
         return
