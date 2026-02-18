@@ -5,7 +5,7 @@
 오버레이 모드: 메인 윈도우의 실제 버튼/입력창 위치를 직접 하이라이트하여 안내합니다.
 다이얼로그 모드: [사용법] 버튼으로 열리는 독립 안내 창입니다.
 """
-from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox
+from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox, QFrame
 from PyQt6.QtCore import Qt, QRectF, QRect, QPoint
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion, QPainterPath
 
@@ -565,8 +565,8 @@ class TutorialOverlay(QWidget):
         W, H = self.width(), self.height()
         hl = self._highlight_rect
 
-        # Strongly dim everything except the current highlighted widget.
-        dim = QColor(0, 0, 0, 245)
+        # Dim everything except the current highlighted widget (70% opacity).
+        dim = QColor(0, 0, 0, 179)
         if hl:
             full = QPainterPath()
             full.addRect(QRectF(0, 0, W, H))
@@ -589,15 +589,16 @@ class TutorialOverlay(QWidget):
             painter.drawRoundedRect(outer, 12, 12)
 
     def _build_ui(self):
-        # 설명 카드 (tooltip)
+        # 설명 카드 (tooltip) - 모든 요소를 카드 안에 배치
         self.tooltip_card = QWidget(self)
         self.tooltip_card.setStyleSheet(f"""
-            QWidget {{
+            QWidget#tooltipCard {{
                 background-color: {Colors.BG_DARK};
                 border: 1px solid {Colors.BORDER};
                 border-radius: 12px;
             }}
         """)
+        self.tooltip_card.setObjectName("tooltipCard")
 
         # 단계 표시
         self.step_label = QLabel(self.tooltip_card)
@@ -619,18 +620,14 @@ class TutorialOverlay(QWidget):
             f"background: transparent; border: none; line-height: 1.5;"
         )
 
-        # 이전 버튼
-        self.prev_btn = QPushButton("\u2190 이전", self)
-        self.prev_btn.setFixedSize(86, 34)
-        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.prev_btn.setStyleSheet(
-            ghost_btn_style() + "\nQPushButton { font-size: 12pt; }"
-        )
-        self.prev_btn.clicked.connect(self._prev_step)
+        # 구분선 (설명과 버튼 사이)
+        self.separator = QFrame(self.tooltip_card)
+        self.separator.setFrameShape(QFrame.Shape.HLine)
+        self.separator.setStyleSheet(f"background-color: {Colors.BORDER}; border: none; max-height: 1px;")
 
-        # 건너뛰기 버튼
-        self.skip_btn = QPushButton("건너뛰기", self)
-        self.skip_btn.setFixedSize(96, 34)
+        # 건너뛰기 버튼 (카드 안)
+        self.skip_btn = QPushButton("건너뛰기", self.tooltip_card)
+        self.skip_btn.setFixedHeight(34)
         self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
@@ -641,9 +638,18 @@ class TutorialOverlay(QWidget):
         """)
         self.skip_btn.clicked.connect(self._close_overlay)
 
-        # 다음 버튼
-        self.next_btn = QPushButton("다음 \u2192", self)
-        self.next_btn.setFixedSize(96, 34)
+        # 이전 버튼 (카드 안)
+        self.prev_btn = QPushButton("\u2190 이전", self.tooltip_card)
+        self.prev_btn.setFixedHeight(34)
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_btn.setStyleSheet(
+            ghost_btn_style() + "\nQPushButton { font-size: 12pt; border: none; }"
+        )
+        self.prev_btn.clicked.connect(self._prev_step)
+
+        # 다음 버튼 (카드 안)
+        self.next_btn = QPushButton("다음", self.tooltip_card)
+        self.next_btn.setFixedHeight(34)
         self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
@@ -656,18 +662,12 @@ class TutorialOverlay(QWidget):
         """)
         self.next_btn.clicked.connect(self._next_step)
 
-        # 페이지 표시 점
-        self._dot_labels = []
-        for _ in range(len(self._steps)):
-            dot = QLabel(self)
-            dot.setFixedSize(6, 6)
-            self._dot_labels.append(dot)
-
-        # 다시 보지 않기 체크박스
-        self.dont_show_check = QCheckBox("다시 보지 않기", self)
+        # 다시 보지 않기 체크박스 (카드 안)
+        self.dont_show_check = QCheckBox("다시 보지 않기", self.tooltip_card)
         self.dont_show_check.setStyleSheet(f"""
             QCheckBox {{
-                color: {Colors.TEXT_SECONDARY}; font-size: 11pt; spacing: 6px; background: transparent;
+                color: {Colors.TEXT_SECONDARY}; font-size: 11pt; spacing: 6px;
+                background: transparent; border: none;
             }}
             QCheckBox::indicator {{
                 width: 16px; height: 16px;
@@ -681,32 +681,59 @@ class TutorialOverlay(QWidget):
         """)
         self.dont_show_check.toggled.connect(self._on_dont_show_toggled)
 
+        # 페이지 표시 점은 제거 (카드 내부에서는 step_label로 충분)
+
     def _position_tooltip(self):
-        """하이라이트 영역에 따라 설명 카드와 버튼을 배치합니다."""
+        """하이라이트 영역에 따라 설명 카드를 배치합니다. 모든 요소가 카드 내부."""
         W, H = self.width(), self.height()
         step = self._steps[self._step_index]
         pos = step.get("tooltip_pos", "right")
         hl = self._highlight_rect
 
         # ── 카드 내부 레이아웃 ──
-        pad = 18
+        pad = 20
         inner_w = self.TOOLTIP_W - pad * 2
 
         self.step_label.setGeometry(pad, pad, inner_w, 18)
-        self.title_label.setGeometry(pad, pad + 24, inner_w, 32)
+        self.title_label.setGeometry(pad, pad + 26, inner_w, 28)
 
-        # desc 높이: 실제 워드랩 렌더링 높이에 맞춰 계산 (줄 수 추정은 폰트/폭에 따라 오차가 큼)
+        # desc 높이
         desc_text = step.get("desc", "")
         line_count = desc_text.count('\n') + 1
-        desc_h = max(line_count * 24, 48)
-        self.desc_label.setGeometry(pad, pad + 64, inner_w, desc_h)
+        desc_h = max(line_count * 22, 44)
+        desc_y = pad + 60
+        self.desc_label.setGeometry(pad, desc_y, inner_w, desc_h)
 
-        card_h = min(pad + 64 + desc_h + pad, self.TOOLTIP_H_MAX)
+        # 구분선
+        sep_y = desc_y + desc_h + 14
+        self.separator.setGeometry(pad, sep_y, inner_w, 1)
 
-        # ── 카드 아래 요소 높이 합산 ──
-        # gap(12) + btn(34) + gap(10) + dots(6) + gap(12) + check(20) = 94
-        BELOW_H = 94
-        total_h = card_h + BELOW_H
+        # 버튼 영역 (구분선 아래)
+        btn_y = sep_y + 14
+        btn_w = 80
+
+        # 건너뛰기: 좌측
+        self.skip_btn.setGeometry(pad, btn_y, btn_w, 34)
+
+        # 이전: 중앙
+        prev_x = pad + (inner_w - btn_w) // 2
+        self.prev_btn.setGeometry(prev_x, btn_y, btn_w, 34)
+
+        # 다음: 우측
+        self.next_btn.setGeometry(pad + inner_w - btn_w, btn_y, btn_w, 34)
+
+        # 체크박스 (마지막 단계에서만 표시, 버튼 아래)
+        check_y = btn_y + 42
+        self.dont_show_check.setGeometry(pad, check_y, inner_w, 20)
+
+        # 카드 높이 계산
+        is_last = self._step_index == len(self._steps) - 1
+        if is_last:
+            card_h = check_y + 20 + pad
+        else:
+            card_h = btn_y + 34 + pad
+
+        card_h = min(card_h, self.TOOLTIP_H_MAX)
 
         # ── 위치 결정 ──
         if hl and pos != "center":
@@ -726,41 +753,21 @@ class TutorialOverlay(QWidget):
             elif pos == "bottom":
                 tx = hl.left()
                 ty = hl.bottom() + margin
-                if ty + total_h > H - 10:
-                    ty = hl.top() - total_h - margin
+                if ty + card_h > H - 10:
+                    ty = hl.top() - card_h - margin
             elif pos == "top":
                 tx = hl.left()
-                ty = hl.top() - total_h - margin
+                ty = hl.top() - card_h - margin
                 if ty < 10:
                     ty = hl.bottom() + margin
 
-            # 화면 범위 내로 클램프 (전체 어셈블리 기준)
             tx = max(10, min(tx, W - self.TOOLTIP_W - 10))
-            ty = max(10, min(ty, H - total_h - 10))
+            ty = max(10, min(ty, H - card_h - 10))
         else:
             tx = (W - self.TOOLTIP_W) // 2
-            ty = (H - total_h) // 2
+            ty = (H - card_h) // 2
 
         self.tooltip_card.setGeometry(tx, ty, self.TOOLTIP_W, card_h)
-
-        # ── 버튼 배치 (카드 아래 12px 간격) ──
-        btn_y = ty + card_h + 12
-        self.prev_btn.move(tx, btn_y)
-        self.skip_btn.move(tx + (self.TOOLTIP_W - 96) // 2, btn_y)
-        self.next_btn.move(tx + self.TOOLTIP_W - 96, btn_y)
-
-        # ── 페이지 점 배치 ──
-        total_steps = len(self._steps)
-        dot_sz, dot_sp = 6, 4
-        dots_w = total_steps * dot_sz + (total_steps - 1) * dot_sp
-        dots_x = tx + (self.TOOLTIP_W - dots_w) // 2
-        dots_y = btn_y + 34 + 10
-
-        for i, dot in enumerate(self._dot_labels):
-            dot.move(dots_x + i * (dot_sz + dot_sp), dots_y)
-
-        # ── 체크박스 배치 ──
-        self.dont_show_check.setGeometry(dots_x - 10, dots_y + 18, 160, 20)
 
     def _update_step(self):
         """현재 단계의 정보를 업데이트합니다."""
@@ -772,14 +779,9 @@ class TutorialOverlay(QWidget):
         self._highlight_rect = self._get_highlight_rect()
 
         # 텍스트 업데이트
-        self.step_label.setText(f"{idx + 1} / {total} 단계")
+        self.step_label.setText(f"{idx + 1} / {total}")
         self.title_label.setText(step["title"])
         self.desc_label.setText(step["desc"])
-
-        # 점 업데이트
-        for i, dot in enumerate(self._dot_labels):
-            c = Colors.ACCENT if i == idx else Colors.TEXT_MUTED
-            dot.setStyleSheet(f"background-color: {c}; border-radius: 3px;")
 
         # 버튼 상태
         self.prev_btn.setVisible(idx > 0)
@@ -789,7 +791,7 @@ class TutorialOverlay(QWidget):
             self.skip_btn.setVisible(False)
             self.dont_show_check.setVisible(True)
         else:
-            self.next_btn.setText("다음 \u2192")
+            self.next_btn.setText("다음")
             self.skip_btn.setVisible(True)
             self.dont_show_check.setVisible(False)
 

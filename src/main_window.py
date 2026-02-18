@@ -384,46 +384,73 @@ class MainWindow(QMainWindow):
             nav_right -= nav_gap
 
 
-        # Vertical separator
-        sep_x = nav_right - 4
-        sep = QFrame(header)
-        sep.setGeometry(sep_x, 18, 1, 32)
-        sep.setStyleSheet(f"background-color: rgba(13, 89, 242, 0.25); border: none;")
+        # ── Account info card (compact horizontal bar) ──
+        acct_card = QWidget(header)
+        acct_card.setObjectName("acctInfoCard")
+        acct_card.setStyleSheet(f"""
+            QWidget#acctInfoCard {{
+                background-color: {Colors.BG_DARK};
+                border: 1px solid {Colors.BORDER};
+                border-radius: 14px;
+            }}
+        """)
 
-        # Plan badge (FREE / PRO)
-        self._plan_badge = QLabel("FREE", header)
-        plan_x = sep_x - 10 - 64
-        self._plan_badge.setGeometry(plan_x, 20, 64, 28)
-        self._plan_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._plan_badge.setStyleSheet(
-            f"QLabel {{ background-color: rgba(34, 197, 94, 0.12);"
-            f" color: {Colors.SUCCESS}; border: 1px solid rgba(34, 197, 94, 0.3);"
-            f" border-radius: 14px; font-size: 9pt; font-weight: 700;"
-            f" letter-spacing: 1px; }}"
-        )
-
-        # Work count label
-        self._work_label = QLabel("0 / 0 회", header)
-        work_x = plan_x - 10 - 90
-        self._work_label.setGeometry(work_x, 22, 90, 24)
-        self._work_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._work_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
-            " background: transparent;"
-        )
-
-        # Status badge
-        self.status_badge = Badge("대기중", Colors.SUCCESS, header)
-        status_x = work_x - 12 - 90
-        self.status_badge.setGeometry(status_x, 22, 90, 24)
+        # Card inner elements
+        cx = 12  # left padding inside card
 
         # Online dot
-        self._online_dot = QLabel("", header)
-        self._online_dot.setGeometry(status_x - 18, 27, 10, 10)
+        self._online_dot = QLabel("", acct_card)
+        self._online_dot.setGeometry(cx, 9, 10, 10)
         self._online_dot.setStyleSheet(
             f"background-color: {Colors.SUCCESS}; border-radius: 5px;"
             f" border: 2px solid rgba(34, 197, 94, 0.3);"
         )
+        cx += 16
+
+        # Status badge (compact text inside card)
+        self.status_badge = Badge("대기중", Colors.SUCCESS, acct_card)
+        self.status_badge.setGeometry(cx, 2, 70, 24)
+        cx += 74
+
+        # Separator 1
+        sep1 = QFrame(acct_card)
+        sep1.setGeometry(cx, 6, 1, 16)
+        sep1.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
+        cx += 10
+
+        # Plan badge (FREE / PRO)
+        self._plan_badge = QLabel("FREE", acct_card)
+        self._plan_badge.setGeometry(cx, 3, 52, 22)
+        self._plan_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._plan_badge.setStyleSheet(
+            f"QLabel {{ background-color: rgba(34, 197, 94, 0.12);"
+            f" color: {Colors.SUCCESS}; border: 1px solid rgba(34, 197, 94, 0.3);"
+            f" border-radius: 11px; font-size: 8pt; font-weight: 700;"
+            f" letter-spacing: 1px; }}"
+        )
+        cx += 58
+
+        # Separator 2
+        sep2 = QFrame(acct_card)
+        sep2.setGeometry(cx, 6, 1, 16)
+        sep2.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
+        cx += 10
+
+        # Work count label
+        self._work_label = QLabel("0 / 0 회", acct_card)
+        self._work_label.setGeometry(cx, 0, 72, 28)
+        self._work_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._work_label.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            " background: transparent; border: none;"
+        )
+        cx += 72 + 10  # right padding
+
+        # Position the card to the left of nav buttons
+        card_w = cx
+        card_x = nav_right - 4 - card_w
+        acct_card.setGeometry(card_x, 20, card_w, 28)
+        self._acct_info_card = acct_card
 
         self._header = header
         self._brand_icon = brand_icon
@@ -1446,13 +1473,13 @@ class MainWindow(QMainWindow):
 
         display_name = username or "사용자"
 
-        # Header plan badge
+        # Header plan badge (inside account info card)
         if work_count > 10:
             self._plan_badge.setText("PRO")
             self._plan_badge.setStyleSheet(
                 f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
                 f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(13, 89, 242, 0.3);"
-                f" border-radius: 14px; font-size: 9pt; font-weight: 700;"
+                f" border-radius: 11px; font-size: 8pt; font-weight: 700;"
                 f" letter-spacing: 1px; }}"
             )
         else:
@@ -1460,7 +1487,7 @@ class MainWindow(QMainWindow):
             self._plan_badge.setStyleSheet(
                 f"QLabel {{ background-color: rgba(34, 197, 94, 0.12);"
                 f" color: {Colors.SUCCESS}; border: 1px solid rgba(34, 197, 94, 0.3);"
-                f" border-radius: 14px; font-size: 9pt; font-weight: 700;"
+                f" border-radius: 11px; font-size: 8pt; font-weight: 700;"
                 f" letter-spacing: 1px; }}"
             )
 
@@ -1646,6 +1673,18 @@ class MainWindow(QMainWindow):
     #  UPLOAD LOGIC
     # ────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _is_work_allowed(work_response):
+        if not isinstance(work_response, dict):
+            return False
+        if "available" in work_response:
+            return bool(work_response.get("available"))
+        if "success" in work_response:
+            return bool(work_response.get("success"))
+        if "status" in work_response:
+            return bool(work_response.get("status"))
+        return False
+
     def start_upload(self):
         logger.info("start_upload invoked")
         content = self.links_text.toPlainText().strip()
@@ -1669,6 +1708,23 @@ class MainWindow(QMainWindow):
         config.load()
         interval = max(config.upload_interval, 30)
         logger.info("start_upload prepared: links=%d interval=%d", len(link_data), interval)
+
+        try:
+            from src import auth_client
+            work_check = auth_client.check_work_available()
+            if not self._is_work_allowed(work_check):
+                quota_message = (
+                    work_check.get("message", "사용 가능한 작업량이 없습니다.")
+                    if isinstance(work_check, dict)
+                    else "작업량 확인에 실패했습니다."
+                )
+                logger.warning("start_upload blocked: work unavailable message=%s", quota_message)
+                show_warning(self, "작업 제한", quota_message)
+                return
+        except Exception:
+            logger.exception("start_upload blocked: quota pre-check failed")
+            show_warning(self, "작업 제한", "작업량 확인에 실패했습니다. 잠시 후 다시 시도해주세요.")
+            return
 
         if not ask_yes_no(
             self,
@@ -1858,6 +1914,24 @@ class MainWindow(QMainWindow):
                     results["cancelled"] = True
                     break
 
+                try:
+                    from src import auth_client
+                    work_check = auth_client.check_work_available()
+                    if not self._is_work_allowed(work_check):
+                        quota_message = (
+                            work_check.get("message", "사용 가능한 작업량이 없습니다.")
+                            if isinstance(work_check, dict)
+                            else "작업량 확인에 실패했습니다."
+                        )
+                        log(f"Work quota check failed: {quota_message}")
+                        results["cancelled"] = True
+                        break
+                except Exception:
+                    logger.exception("work quota check failed in upload loop")
+                    log("Work quota check failed. Upload stopped.")
+                    results["cancelled"] = True
+                    break
+
                 processed_count += 1
                 url, keyword = item if isinstance(item, tuple) else (item, None)
                 results["total"] += 1
@@ -1921,12 +1995,38 @@ class MainWindow(QMainWindow):
                     ]
 
                     success = helper.create_thread_direct(posts_data)
+                    recorded_success = bool(success)
+                    stop_for_billing_sync = False
                     if success:
-                        results["uploaded"] += 1
-                        log(f"Upload success: {product_name}")
-                        self.signals.step_update.emit(2, "done")
-                        self.signals.step_update.emit(3, "done")
-                        self.signals.link_status.emit(url, "완료", product_name)
+                        try:
+                            from src import auth_client
+                            use_result = auth_client.use_work()
+                            if not isinstance(use_result, dict) or not bool(use_result.get("success")):
+                                billing_msg = (
+                                    use_result.get("message", "unknown")
+                                    if isinstance(use_result, dict)
+                                    else "unknown"
+                                )
+                                recorded_success = False
+                                stop_for_billing_sync = True
+                                results["failed"] += 1
+                                log(f"Work usage sync failed: {billing_msg}. Upload stopped for safety.")
+                                self.signals.step_update.emit(3, "error")
+                                self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
+                            else:
+                                results["uploaded"] += 1
+                                log(f"Upload success: {product_name}")
+                                self.signals.step_update.emit(2, "done")
+                                self.signals.step_update.emit(3, "done")
+                                self.signals.link_status.emit(url, "완료", product_name)
+                        except Exception:
+                            logger.exception("failed to sync work usage after successful upload")
+                            recorded_success = False
+                            stop_for_billing_sync = True
+                            results["failed"] += 1
+                            log("Work usage sync failed. Upload stopped for safety.")
+                            self.signals.step_update.emit(3, "error")
+                            self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
                     else:
                         results["failed"] += 1
                         log(f"Upload failed: {product_name}")
@@ -1937,9 +2037,12 @@ class MainWindow(QMainWindow):
                         {
                             "product_title": product_name,
                             "url": url,
-                            "success": success,
+                            "success": recorded_success,
                         }
                     )
+                    if stop_for_billing_sync:
+                        results["cancelled"] = True
+                        break
                 except Exception as exc:
                     results["failed"] += 1
                     log(f"Upload error: {str(exc)[:80]}")

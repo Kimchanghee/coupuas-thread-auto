@@ -23,12 +23,7 @@ class ThreadsPlaywrightHelper:
     # ========== 로그인 ==========
 
     def check_login_status(self) -> bool:
-        """
-        로그인 상태 확인 (DOM 기반)
-
-        Returns:
-            True: 로그인됨, False: 로그아웃
-        """
+        """로그인 상태 확인 (명시적 인증 신호 기반)."""
         try:
             # 방법 1: 로그인 입력창 존재 여부 (명확한 로그아웃 신호)
             login_input = self.page.locator('input[name="username"], input[type="text"][placeholder*="사용자"]').count()
@@ -65,13 +60,8 @@ class ThreadsPlaywrightHelper:
                 print("  로그인 확인 (프로필 버튼 존재)")
                 return True
 
-            # 방법 6: URL이 threads.net 또는 threads.com이고 로그인 페이지가 아니면 로그인된 것으로 간주
-            if ("threads.net" in url or "threads.com" in url) and "login" not in url.lower():
-                print(f"  로그인 확인 (Threads 메인 페이지 접속)")
-                return True
-
             # 모든 확인 실패
-            print("  로그인 상태 불확실")
+            print("  로그인 상태 불확실 -> 미로그인으로 처리")
             return False
 
         except Exception as e:
@@ -229,24 +219,31 @@ class ThreadsPlaywrightHelper:
             return None
 
     def verify_account(self, expected_username: str) -> bool:
-        """
-        로그인된 계정이 기대하는 계정과 일치하는지 확인
-        (persistent profile을 사용하므로 엄격한 검증 불필요)
+        """로그인 계정이 기대 계정과 실제로 일치하는지 확인."""
+        expected_raw = str(expected_username or "").strip()
+        if not expected_raw:
+            return self.check_login_status()
 
-        Args:
-            expected_username: 설정에 저장된 사용자명 또는 이메일
+        if not self.check_login_status():
+            print("  로그인되어 있지 않음")
+            return False
 
-        Returns:
-            True: 로그인되어 있으면 OK (계정별 프로필 사용하므로)
-        """
-        # persistent profile을 계정별로 사용하므로
-        # 로그인만 되어있으면 해당 계정이 맞는 것으로 간주
-        if self.check_login_status():
-            print(f"  로그인 확인됨 (계정: {expected_username or '미설정'})")
-            return True
+        actual_username = self.get_logged_in_username()
+        if not actual_username:
+            print("  현재 로그인된 사용자명을 확인하지 못함")
+            return False
 
-        print("  로그인되어 있지 않음")
-        return False
+        expected_norm = expected_raw.lstrip("@").lower()
+        if "@" in expected_norm and "." in expected_norm.split("@")[-1]:
+            expected_norm = expected_norm.split("@", 1)[0]
+
+        actual_norm = str(actual_username).lstrip("@").lower()
+        matched = actual_norm == expected_norm
+        if matched:
+            print(f"  계정 검증 성공: @{actual_norm}")
+        else:
+            print(f"  계정 불일치: expected=@{expected_norm}, actual=@{actual_norm}")
+        return matched
 
     def logout(self) -> bool:
         """

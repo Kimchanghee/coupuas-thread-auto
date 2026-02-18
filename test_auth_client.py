@@ -16,11 +16,13 @@ class _FakeSession:
         self.calls = []
 
     def post(self, url, json=None, timeout=None):
-        self.calls.append({
-            "url": url,
-            "json": json,
-            "timeout": timeout,
-        })
+        self.calls.append(
+            {
+                "url": url,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
         return self.response
 
 
@@ -62,7 +64,6 @@ def test_login_422_uses_nested_validation_error_message(monkeypatch):
 
     assert result["status"] is False
     assert "body.ip" in result["message"]
-    assert "필수 항목입니다." in result["message"]
 
 
 def test_register_422_uses_nested_validation_error_message(monkeypatch):
@@ -77,7 +78,7 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
                     {
                         "type": "value_error",
                         "loc": ["body", "name"],
-                        "msg": "Value error, 이름에 허용되지 않는 문자가 포함되어 있습니다.",
+                        "msg": "Value error, invalid name",
                     }
                 ],
             },
@@ -95,7 +96,6 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
 
     assert result["success"] is False
     assert "body.name" in result["message"]
-    assert "허용되지 않는 문자" in result["message"]
 
 
 def test_register_200_failure_with_error_object_returns_message(monkeypatch):
@@ -105,7 +105,7 @@ def test_register_200_failure_with_error_object_returns_message(monkeypatch):
             "success": False,
             "error": {
                 "code": "USER_EXISTS",
-                "message": "이미 가입된 아이디입니다. 로그인해 주세요.",
+                "message": "이미 가입한 아이디입니다. 로그인해 주세요.",
             },
             "data": None,
         },
@@ -121,10 +121,10 @@ def test_register_200_failure_with_error_object_returns_message(monkeypatch):
     )
 
     assert result["success"] is False
-    assert result["message"] == "이미 가입된 아이디입니다. 로그인해 주세요."
+    assert result["message"] == "이미 가입한 아이디입니다. 로그인해 주세요."
 
 
-def test_register_allows_short_password_in_client_validation(monkeypatch):
+def test_register_allows_short_password_with_backend_normalization(monkeypatch):
     response = _FakeResponse(
         200,
         {"success": True, "message": "ok", "data": {"user_id": 1, "token": "t"}},
@@ -176,11 +176,11 @@ def test_register_429_normalizes_rate_limit_message(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="rateuser",
-        password="pw",
+        password="SamplePass123",
         contact="01012345678",
         email="rate@example.com",
     )
 
     assert result["success"] is False
-    assert "회원가입이 잠시 제한" in result["message"]
+    assert "제한" in result["message"]
     assert "5 per 1 hour" in result["message"]

@@ -1,95 +1,207 @@
 # -*- coding: utf-8 -*-
-"""
-인증 API 클라이언트
-쇼츠스레드메이커(stmaker) 전용
+"""Auth client for dashboard API."""
 
-백엔드: project-user-dashboard
-API URL은 project-user-dashboard/.env의 USER_DASHBOARD_API_URL에서 로드
-"""
-import re
-import os
-import json
+import base64
 import hashlib
+import json
 import logging
-import threading
+import os
+import re
 import socket
-import requests
+import threading
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
+
+import requests
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# ─── project-user-dashboard 백엔드 연결 ─────────────────────
-# .env 로딩: main.py에서 이미 로드했을 수 있으므로 override=False로 안전하게 로드
+# Load .env files without overriding existing environment values.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 for _env_path in [
-    _PROJECT_ROOT.parent / "project-user-dashboard" / ".env",  # 형제 프로젝트
-    _PROJECT_ROOT / ".env",  # 프로젝트 루트
+    _PROJECT_ROOT.parent / "project-user-dashboard" / ".env",
+    _PROJECT_ROOT / ".env",
 ]:
     if _env_path.exists():
         load_dotenv(_env_path, override=False)
 
-# 3) USER_DASHBOARD_API_URL → API_SERVER_URL 순서로 탐색
 API_SERVER_URL = (
     os.getenv("USER_DASHBOARD_API_URL")
     or os.getenv("API_SERVER_URL", "")
 ).rstrip("/")
+PROGRAM_TYPE = "stmaker"
 
 if not API_SERVER_URL:
-    logger.warning("API_SERVER_URL이 설정되지 않았습니다. "
-                    "project-user-dashboard/.env 또는 프로젝트 루트 .env를 확인하세요.")
+    logger.warning("API_SERVER_URL is not configured.")
+
+# Credential storage
+_CRED_DIR = Path.home() / ".shorts_thread_maker"
+_CRED_FILE = _CRED_DIR / "auth.json"
+_LOCK = threading.RLock()
+_SENSITIVE_CRED_FIELDS = {"token", "remember_pw"}
+_MIN_PASSWORD_LENGTH = 8
 
 
 def _check_api_url() -> Optional[str]:
-    """API_SERVER_URL이 유효한지 검사. 유효하면 None, 아니면 에러 메시지 반환."""
     if not API_SERVER_URL:
-        return ("서버 주소가 설정되지 않았습니다.\n"
-                "프로젝트 폴더에 .env 파일을 만들고\n"
-                "API_SERVER_URL=https://... 을 설정해주세요.")
+        return "Server URL is not configured. Set API_SERVER_URL in .env."
     if not API_SERVER_URL.startswith(("http://", "https://")):
-        return f"서버 주소가 올바르지 않습니다: {API_SERVER_URL}"
+        return f"Invalid server URL: {API_SERVER_URL}"
+
+    parsed = urlparse(API_SERVER_URL)
+    if parsed.scheme == "http":
+        host = (parsed.hostname or "").lower()
+        if host not in {"localhost", "127.0.0.1", "::1"}:
+            return "Only HTTPS API URL is allowed for security."
     return None
 
-PROGRAM_TYPE = "stmaker"  # 쇼츠스레드메이커
 
-# ─── Credential Storage ─────────────────────────────────────
-_CRED_DIR = Path.home() / ".shorts_thread_maker"
-_CRED_FILE = _CRED_DIR / "auth.json"
-_lock = threading.RLock()
-
-
-def _ensure_cred_dir():
+def _ensure_cred_dir() -> None:
     _CRED_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _load_cred() -> dict:
-    """Load saved credentials (username, token, user_id)"""
-    try:
-        if _CRED_FILE.exists():
-            with open(_CRED_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {}
+def _protect_secret(value: str) -> Optional[str]:
+    if not isinstance(value, str) or not value or value.startswith("dpapi:"):
+        return value
 
+    if os.name != "nt":
+        return None
 
-def _save_cred(data: dict):
-    """Save credentials to disk"""
-    _ensure_cred_dir()
     try:
-        with open(_CRED_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        import ctypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [
+                ("cbData", ctypes.c_uint32),
+                ("pbData", ctypes.POINTER(ctypes.c_ubyte)),
+            ]
+
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+
+        plain_bytes = value.encode("utf-8")
+        in_buffer = ctypes.create_string_buffer(plain_bytes, len(plain_bytes))
+        in_blob = DATA_BLOB(
+            len(plain_bytes),
+            ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_ubyte)),
+        )
+        out_blob = DATA_BLOB()
+
+        if not crypt32.CryptProtectData(
+            ctypes.byref(in_blob),
+            "shorts_thread_maker",
+            None,
+            None,
+            None,
+            0,
+            ctypes.byref(out_blob),
+        ):
+            raise ctypes.WinError()
+
         try:
-            os.chmod(_CRED_FILE, 0o600)
-        except OSError:
+            protected = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            kernel32.LocalFree(out_blob.pbData)
+
+        return f"dpapi:{base64.b64encode(protected).decode('ascii')}"
+    except Exception:
+        logger.warning("Failed to protect credential secret")
+        return None
+
+
+def _unprotect_secret(value: str) -> str:
+    if not isinstance(value, str) or not value.startswith("dpapi:"):
+        return value
+
+    if os.name != "nt":
+        return ""
+
+    try:
+        import ctypes
+
+        class DATA_BLOB(ctypes.Structure):
+            _fields_ = [
+                ("cbData", ctypes.c_uint32),
+                ("pbData", ctypes.POINTER(ctypes.c_ubyte)),
+            ]
+
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+
+        encoded = value.split(":", 1)[1]
+        protected = base64.b64decode(encoded.encode("ascii"))
+        in_buffer = ctypes.create_string_buffer(protected, len(protected))
+        in_blob = DATA_BLOB(
+            len(protected),
+            ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_ubyte)),
+        )
+        out_blob = DATA_BLOB()
+
+        if not crypt32.CryptUnprotectData(
+            ctypes.byref(in_blob),
+            None,
+            None,
+            None,
+            None,
+            0,
+            ctypes.byref(out_blob),
+        ):
+            raise ctypes.WinError()
+
+        try:
+            plain = ctypes.string_at(out_blob.pbData, out_blob.cbData).decode("utf-8")
+        finally:
+            kernel32.LocalFree(out_blob.pbData)
+
+        return plain
+    except Exception:
+        logger.exception("Failed to unprotect credential secret")
+        return ""
+
+
+def _load_cred() -> dict:
+    with _LOCK:
+        try:
+            if _CRED_FILE.exists():
+                with open(_CRED_FILE, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                if isinstance(payload, dict):
+                    for field in _SENSITIVE_CRED_FIELDS:
+                        if field in payload:
+                            payload[field] = _unprotect_secret(payload.get(field))
+                    return payload
+        except Exception:
             pass
-    except Exception as e:
-        logger.error(f"Failed to save credentials: {e}")
+        return {}
 
 
-def _clear_cred():
-    """Clear saved credentials"""
+def _save_cred(data: dict) -> None:
+    _ensure_cred_dir()
+    serialized = dict(data or {})
+    for field in _SENSITIVE_CRED_FIELDS:
+        if field in serialized:
+            protected = _protect_secret(serialized.get(field, ""))
+            if protected is None:
+                logger.warning("Skipping sensitive credential field '%s' (secure storage unavailable)", field)
+                serialized.pop(field, None)
+            else:
+                serialized[field] = protected
+
+    with _LOCK:
+        try:
+            with open(_CRED_FILE, "w", encoding="utf-8") as f:
+                json.dump(serialized, f, ensure_ascii=False, indent=2)
+            try:
+                os.chmod(_CRED_FILE, 0o600)
+            except OSError:
+                pass
+        except Exception as e:
+            logger.error("Failed to save credentials: %s", e)
+
+
+def _clear_cred() -> None:
     try:
         if _CRED_FILE.exists():
             _CRED_FILE.unlink()
@@ -107,19 +219,17 @@ def _safe_json(resp: requests.Response) -> Dict[str, Any]:
 
 def _normalize_password_for_backend(password: str) -> str:
     """
-    Backend currently enforces min-length 8 for register/login.
-    Keep UX unrestricted by deterministically expanding short passwords.
+    일부 기존 계정 호환을 위해 짧은 비밀번호는 백엔드 형식으로 확장합니다.
     """
     if not isinstance(password, str):
         password = str(password or "")
-    if len(password) >= 8:
+    if len(password) >= _MIN_PASSWORD_LENGTH:
         return password
     digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
     return f"spw_{digest[:16]}"
 
 
 def _localize_message(message: str) -> str:
-    """Translate common backend English messages to Korean for UI display."""
     if not isinstance(message, str):
         return ""
 
@@ -128,7 +238,6 @@ def _localize_message(message: str) -> str:
         return ""
 
     lower = text.lower()
-
     if lower == "not logged in":
         return "로그인이 필요합니다."
     if lower == "field required":
@@ -140,13 +249,13 @@ def _localize_message(message: str) -> str:
 
     max_len_match = re.search(r"at most\s+(\d+)\s+characters?", lower)
     if max_len_match:
-        return f"최대 {max_len_match.group(1)}자까지 입력할 수 있습니다."
+        return f"최대 {max_len_match.group(1)}자까지 입력 가능합니다."
 
     if "valid email address" in lower:
         return "올바른 이메일 주소를 입력해주세요."
 
     if "too many login attempts" in lower or "too many requests" in lower:
-        return "요청이 많아 잠시 후 다시 시도해주세요."
+        return "요청이 많습니다. 잠시 후 다시 시도해주세요."
 
     return text
 
@@ -228,10 +337,11 @@ def _normalize_api_message(
         or "too many requests" in message_lower
     )
     if is_rate_limited:
-        if context == "register":
-            base = "요청이 많아 회원가입이 잠시 제한되었습니다. 잠시 후 다시 시도해주세요."
-        else:
-            base = "요청이 많아 로그인이 잠시 제한되었습니다. 잠시 후 다시 시도해주세요."
+        base = (
+            "요청이 많아 회원가입이 일시 제한되었습니다. 잠시 후 다시 시도해주세요."
+            if context == "register"
+            else "요청이 많아 로그인이 일시 제한되었습니다. 잠시 후 다시 시도해주세요."
+        )
         if retry_after:
             return f"{base} (제한: {retry_after})"
         return base
@@ -263,14 +373,12 @@ def _resolve_client_ip() -> str:
     return "127.0.0.1"
 
 
-# ─── Session ────────────────────────────────────────────────
 _session = requests.Session()
 _session.headers.update({
     "Content-Type": "application/json",
-    "User-Agent": "ShortsThreadMaker/2.0"
+    "User-Agent": "ShortsThreadMaker/2.0",
 })
 
-# ─── Auth state ─────────────────────────────────────────────
 _auth_state: Dict[str, Any] = {
     "user_id": None,
     "username": None,
@@ -288,35 +396,25 @@ def is_logged_in() -> bool:
     return _auth_state.get("token") is not None and _auth_state.get("user_id") is not None
 
 
-# ─── API Functions ──────────────────────────────────────────
-
 def check_username(username: str) -> Dict[str, Any]:
-    """아이디 중복 확인 (program_type별 분리)"""
     err = _check_api_url()
     if err:
         return {"available": False, "message": err}
+
+    username = str(username or "").strip().lower()
     try:
         resp = _session.get(
             f"{API_SERVER_URL}/user/check-username/{username}",
             params={"program_type": PROGRAM_TYPE},
-            timeout=5
+            timeout=5,
         )
         payload = _safe_json(resp)
-        logger.debug(
-            "Check username response status=%s username=%s available=%s message=%s",
-            resp.status_code,
-            username,
-            payload.get("available"),
-            _extract_api_message(payload, ""),
-        )
         if resp.status_code == 200:
             if payload:
-                if "available" not in payload:
-                    payload["available"] = False
-                if "message" not in payload:
-                    payload["message"] = _extract_api_message(payload, "아이디 확인에 실패했습니다.")
+                payload.setdefault("available", False)
+                payload.setdefault("message", _extract_api_message(payload, "아이디 확인 실패"))
                 return payload
-            return {"available": False, "message": "아이디 확인 응답이 비어 있습니다."}
+            return {"available": False, "message": "아이디 확인 응답이 비었습니다."}
         return {"available": False, "message": f"서버 오류 ({resp.status_code})"}
     except requests.exceptions.ConnectionError:
         return {"available": False, "message": "서버 연결 실패"}
@@ -325,64 +423,51 @@ def check_username(username: str) -> Dict[str, Any]:
 
 
 def register(name: str, username: str, password: str, contact: str, email: str) -> Dict[str, Any]:
-    """회원가입 (program_type=stmaker 자동 포함)"""
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
-    # Validation
-    if not name or len(name.strip()) < 2:
-        return {"success": False, "message": "이름을 2자 이상 입력해주세요."}
-    if not username or len(username.strip()) < 4:
-        return {"success": False, "message": "아이디는 4자 이상이어야 합니다."}
-    if not re.match(r'^[a-zA-Z0-9_]+$', username):
-        return {"success": False, "message": "아이디는 영문, 숫자, 밑줄(_)만 사용 가능합니다."}
+
+    name = str(name or "").strip()
+    username = str(username or "").strip().lower()
+    password = str(password or "")
+    email = str(email or "").strip()
+
+    if len(name) < 2:
+        return {"success": False, "message": "이름은 2자 이상 입력해주세요."}
+    if len(username) < 4:
+        return {"success": False, "message": "아이디는 4자 이상 입력해주세요."}
+    if not re.match(r"^[a-zA-Z0-9_]+$", username):
+        return {"success": False, "message": "아이디는 영문/숫자/밑줄만 허용됩니다."}
     if not password:
         return {"success": False, "message": "비밀번호를 입력해주세요."}
 
-    contact_clean = re.sub(r'[^0-9]', '', contact)
+    contact_clean = re.sub(r"[^0-9]", "", str(contact or ""))
     if len(contact_clean) < 10:
         return {"success": False, "message": "올바른 연락처를 입력해주세요."}
 
     backend_password = _normalize_password_for_backend(password)
 
     body = {
-        "name": name.strip(),
-        "username": username.strip().lower(),
+        "name": name,
+        "username": username,
         "password": backend_password,
         "contact": contact_clean,
-        "email": email.strip() if email else None,
+        "email": email if email else None,
         "program_type": PROGRAM_TYPE,
     }
 
     try:
-        logger.debug(
-            "Register request prepared username=%s contact_len=%s program_type=%s",
-            body.get("username"),
-            len(contact_clean),
-            body.get("program_type"),
-        )
         resp = _session.post(
             f"{API_SERVER_URL}/user/register/request",
             json=body,
-            timeout=30
+            timeout=30,
         )
-        logger.info("Register response status=%s", resp.status_code)
         payload = _safe_json(resp)
-        normalized_message = _normalize_api_message(
-            payload=payload,
-            status_code=resp.status_code,
-            context="register",
-            default_message="",
-        )
-        logger.debug(
-            "Register response payload success=%s message=%s",
-            payload.get("success"),
-            normalized_message,
-        )
+
         if resp.status_code == 200:
             data = payload
             if not data:
-                return {"success": False, "message": "회원가입 응답이 비어 있습니다."}
+                return {"success": False, "message": "회원가입 응답이 비었습니다."}
             if data.get("success") is False and not data.get("message"):
                 data["message"] = _normalize_api_message(
                     payload=data,
@@ -391,13 +476,12 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
                     default_message="회원가입에 실패했습니다.",
                 )
             if data.get("success"):
-                # 자동 로그인 처리
                 result_data = data.get("data", {})
                 token = result_data.get("token")
                 user_id = result_data.get("user_id")
                 if token and user_id:
                     _auth_state["user_id"] = user_id
-                    _auth_state["username"] = username.strip().lower()
+                    _auth_state["username"] = username
                     _auth_state["token"] = token
                     _auth_state["work_count"] = result_data.get("work_count", 0)
                     _auth_state["work_used"] = 0
@@ -407,42 +491,44 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
                         "token": token,
                     })
             return data
-        elif resp.status_code == 422:
+
+        if resp.status_code == 422:
             return {
                 "success": False,
                 "message": _extract_validation_message(resp, "입력값이 올바르지 않습니다."),
             }
-        elif resp.status_code == 429:
+        if resp.status_code == 429:
             return {
                 "success": False,
                 "message": _normalize_api_message(
                     payload=payload,
                     status_code=resp.status_code,
                     context="register",
-                    default_message="요청이 많아 회원가입이 잠시 제한되었습니다. 잠시 후 다시 시도해주세요.",
+                    default_message="요청이 많아 회원가입이 제한되었습니다.",
                 ),
             }
-        else:
-            return {"success": False, "message": f"서버 오류 ({resp.status_code})"}
+        return {"success": False, "message": f"서버 오류 ({resp.status_code})"}
     except requests.exceptions.ConnectionError:
-        return {"success": False, "message": "서버에 연결할 수 없습니다.\n인터넷 연결을 확인해주세요."}
+        return {"success": False, "message": "서버 연결에 실패했습니다."}
     except Exception as e:
         logger.exception("Registration error")
         return {"success": False, "message": f"오류 발생: {str(e)}"}
 
 
 def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
-    """로그인"""
     err = _check_api_url()
     if err:
         return {"status": False, "message": err}
+
+    username = str(username or "").strip().lower()
+    password = str(password or "")
     if not username or not password:
         return {"status": False, "message": "아이디와 비밀번호를 입력해주세요."}
 
     backend_password = _normalize_password_for_backend(password)
 
     body = {
-        "id": username.strip().lower(),
+        "id": username,
         "pw": backend_password,
         "force": force,
         "ip": _resolve_client_ip(),
@@ -450,37 +536,18 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     }
 
     try:
-        logger.debug(
-            "Login request prepared user=%s force=%s ip=%s",
-            body.get("id"),
-            body.get("force"),
-            body.get("ip"),
-        )
         resp = _session.post(
             f"{API_SERVER_URL}/user/login/god",
             json=body,
-            timeout=15
+            timeout=15,
         )
-        logger.info("Login response status=%s user=%s", resp.status_code, body.get("id"))
         if resp.status_code == 200:
             data = _safe_json(resp)
-            normalized_message = _normalize_api_message(
-                payload=data,
-                status_code=resp.status_code,
-                context="login",
-                default_message="",
-            )
-            logger.debug(
-                "Login response payload status=%s message=%s user=%s",
-                data.get("status"),
-                normalized_message,
-                body.get("id"),
-            )
             if not data:
-                return {"status": False, "message": "로그인 응답이 비어 있습니다."}
+                return {"status": False, "message": "로그인 응답이 비었습니다."}
             if data.get("status") is True:
                 _auth_state["user_id"] = data.get("id")
-                _auth_state["username"] = username.strip().lower()
+                _auth_state["username"] = username
                 _auth_state["token"] = data.get("key")
                 _auth_state["work_count"] = data.get("work_count", 0)
                 _auth_state["work_used"] = data.get("work_used", 0)
@@ -497,12 +564,13 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                     default_message="로그인에 실패했습니다.",
                 )
             return data
-        elif resp.status_code == 422:
+
+        if resp.status_code == 422:
             return {
                 "status": False,
                 "message": _extract_validation_message(resp, "입력값이 올바르지 않습니다."),
             }
-        elif resp.status_code == 429:
+        if resp.status_code == 429:
             payload = _safe_json(resp)
             return {
                 "status": False,
@@ -510,52 +578,47 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                     payload=payload,
                     status_code=resp.status_code,
                     context="login",
-                    default_message="요청이 많아 로그인이 잠시 제한되었습니다. 잠시 후 다시 시도해주세요.",
+                    default_message="요청이 많아 로그인이 제한되었습니다.",
                 ),
             }
-        else:
-            return {"status": False, "message": f"서버 오류 ({resp.status_code})"}
+        return {"status": False, "message": f"서버 오류 ({resp.status_code})"}
     except requests.exceptions.ConnectionError:
-        return {"status": False, "message": "서버에 연결할 수 없습니다.\n인터넷 연결을 확인해주세요."}
+        return {"status": False, "message": "서버 연결에 실패했습니다."}
     except Exception as e:
         logger.exception("Login error")
         return {"status": False, "message": f"오류: {str(e)}"}
 
 
 def logout() -> bool:
-    """로그아웃"""
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
-    
+
     if user_id and token:
         try:
             _session.post(
                 f"{API_SERVER_URL}/user/logout/god",
                 json={"id": user_id, "key": token},
-                timeout=10
+                timeout=10,
             )
         except Exception as e:
-            logger.warning(f"Logout API error (ignored): {e}")
+            logger.warning("Logout API error (ignored): %s", e)
 
-    # 메모리 초기화 (토큰만 제거)
     _auth_state["user_id"] = None
     _auth_state["token"] = None
-    # username은 유지 (UI 등에서 사용 가능)
 
-    # 파일 업데이트: 토큰 삭제, 아이디/비번은 저장된 경우 유지
     cred = _load_cred()
     if cred:
         cred.pop("token", None)
         cred.pop("user_id", None)
         _save_cred(cred)
-    
+
     return True
 
 
 def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
-    """세션 체크 (heartbeat)"""
     if _check_api_url():
         return {"status": False}
+
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
@@ -570,19 +633,19 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
                 "current_task": current_task,
                 "app_version": app_version,
             },
-            timeout=10
+            timeout=10,
         )
         if resp.status_code == 200:
-            return resp.json()
+            return _safe_json(resp)
         return {"status": False}
     except Exception:
         return {"status": False}
 
 
 def check_work_available() -> Dict[str, Any]:
-    """작업 가능 여부 확인"""
     if _check_api_url():
         return {"success": False}
+
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
@@ -592,19 +655,19 @@ def check_work_available() -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/check",
             json={"user_id": user_id, "token": token},
-            timeout=10
+            timeout=10,
         )
         if resp.status_code == 200:
-            return resp.json()
+            return _safe_json(resp)
         return {"success": False}
     except Exception:
         return {"success": False}
 
 
 def use_work() -> Dict[str, Any]:
-    """작업 사용 횟수 증가"""
     if _check_api_url():
         return {"success": False}
+
     user_id = _auth_state.get("user_id")
     token = _auth_state.get("token")
     if not user_id or not token:
@@ -614,10 +677,10 @@ def use_work() -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/use",
             json={"user_id": user_id, "token": token},
-            timeout=10
+            timeout=10,
         )
         if resp.status_code == 200:
-            data = resp.json()
+            data = _safe_json(resp)
             if data.get("success"):
                 _auth_state["work_used"] = data.get("work_used", _auth_state["work_used"] + 1)
             return data
@@ -627,15 +690,6 @@ def use_work() -> Dict[str, Any]:
 
 
 def log_action(action: str, content: str = None, level: str = "INFO") -> None:
-    """
-    사용자 활동 로그를 서버로 전송.
-    UI 스레드를 블로킹하지 않도록 짧은 타임아웃 사용.
-
-    Args:
-        action: 활동 설명 (예: "batch_start", "upload_success")
-        content: 추가 상세 내용
-        level: 로그 레벨 (INFO, WARNING, ERROR)
-    """
     if _check_api_url():
         return
     token = _auth_state.get("token")
@@ -650,17 +704,15 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
             timeout=2.0,
         )
     except Exception as e:
-        logger.debug(f"Failed to send activity log: {e}")
+        logger.debug("Failed to send activity log: %s", e)
 
 
 def get_saved_credentials() -> Optional[Dict[str, str]]:
-    """저장된 로그인 정보 반환 (username, remember)"""
     cred = _load_cred()
     return cred if cred.get("username") else None
 
 
 def friendly_login_message(res: Dict[str, Any]) -> str:
-    """로그인 결과를 사용자 친화적 메시지로 변환"""
     status = res.get("status")
     msg = res.get("message", "")
 
@@ -669,9 +721,9 @@ def friendly_login_message(res: Dict[str, Any]) -> str:
 
     code_messages = {
         "EU001": "아이디 또는 비밀번호가 일치하지 않습니다.",
-        "EU002": "계정이 비활성화되었습니다.\n관리자에게 문의해주세요.",
+        "EU002": "계정이 비활성화되었습니다. 관리자에게 문의해주세요.",
         "EU003": "다른 곳에서 이미 로그인되어 있습니다.",
-        "EU004": "구독이 만료되었습니다.\n관리자에게 문의해주세요.",
+        "EU004": "구독이 만료되었습니다. 관리자에게 문의해주세요.",
         "EU005": "사용 가능한 작업 횟수가 없습니다.",
     }
 

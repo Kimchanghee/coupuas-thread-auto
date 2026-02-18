@@ -57,7 +57,7 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.2.0"
+VERSION = "v2.2.1"
 logger = logging.getLogger(__name__)
 
 

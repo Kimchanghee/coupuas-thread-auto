@@ -1,131 +1,184 @@
-"""
-쿠팡 파트너스 스레드 자동화 - 자동 업데이트 모듈
-GitHub Releases를 사용한 자동 업데이트 기능
-"""
+"""Auto-updater with release checksum verification."""
+
+import hashlib
 import os
-import sys
-import requests
-import tempfile
-import subprocess
-from typing import Optional, Dict
-from packaging import version
+import re
 import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Dict, Optional
+from urllib.parse import urlparse
+
+import requests
+from packaging import version
 
 
 class AutoUpdater:
-    """GitHub Releases를 사용한 자동 업데이트 관리자"""
+    """Manage auto update flow via GitHub Releases."""
 
-    # GitHub 저장소 정보
     GITHUB_OWNER = "Kimchanghee"
-    GITHUB_REPO = "coupuas-thread-auto"  # 저장소명으로 변경
+    GITHUB_REPO = "coupuas-thread-auto"
 
-    # API 엔드포인트
     API_BASE = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
     RELEASES_URL = f"{API_BASE}/releases/latest"
+    ALLOWED_DOWNLOAD_HOSTS = {
+        "github.com",
+        "objects.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    }
 
     def __init__(self, current_version: str):
-        """
-        Args:
-            current_version: 현재 애플리케이션 버전 (예: "v2.2.0")
-        """
-        self.current_version = current_version.lstrip('v')  # v 접두사 제거
+        self.current_version = str(current_version or "").lstrip("v")
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': f'CoupangThreadAuto/{self.current_version}',
-            'Accept': 'application/vnd.github.v3+json'
-        })
-    def check_for_updates(self) -> Optional[Dict]:
-        """
-        ? ??? ??? ??
-
-        Returns:
-            ? ?? ?? ???? ?? None (???? ??)
+        self.session.headers.update(
             {
-                'version': '2.3.0',
-                'download_url': 'https://...',
-                'changelog': '????..',
-                'published_at': '2025-02-12T...',
-                'size_mb': 50.5,
-                'asset_name': '...exe'
+                "User-Agent": f"CoupangThreadAuto/{self.current_version or 'unknown'}",
+                "Accept": "application/vnd.github.v3+json",
             }
-        """
-        response = self.session.get(self.RELEASES_URL, timeout=10)
+        )
 
-        # GitHub? ???? ??? /releases/latest? 404? ?????.
-        # ? ??? ??? ??? "???? ??"?? ?????.
+    @staticmethod
+    def _is_allowed_download_url(download_url: str) -> bool:
+        try:
+            parsed = urlparse(str(download_url or ""))
+            if parsed.scheme != "https":
+                return False
+            host = (parsed.hostname or "").lower()
+            return host in AutoUpdater.ALLOWED_DOWNLOAD_HOSTS
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_sha256_text(content: str) -> Optional[str]:
+        if not isinstance(content, str):
+            return None
+        match = re.search(r"\b[a-fA-F0-9]{64}\b", content)
+        return match.group(0).lower() if match else None
+
+    @staticmethod
+    def _compute_sha256(path: str) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                digest.update(chunk)
+        return digest.hexdigest().lower()
+
+    @staticmethod
+    def _find_checksum_asset(assets, exe_name: str):
+        names = {
+            f"{exe_name}.sha256",
+            f"{exe_name}.sha256.txt",
+        }
+        for asset in assets:
+            name = str(asset.get("name", ""))
+            lower_name = name.lower()
+            if name in names:
+                return asset
+            if lower_name.endswith(".sha256") and exe_name.lower() in lower_name:
+                return asset
+            if lower_name.endswith(".sha256.txt") and exe_name.lower() in lower_name:
+                return asset
+        return None
+
+    def check_for_updates(self) -> Optional[Dict]:
+        response = self.session.get(self.RELEASES_URL, timeout=10)
         if response.status_code == 404:
             return None
 
         response.raise_for_status()
         release_data = response.json()
 
-        latest_version = release_data.get('tag_name', '').lstrip('v')
+        latest_version = str(release_data.get("tag_name", "")).lstrip("v")
         if not latest_version:
             return None
 
-        if version.parse(latest_version) <= version.parse(self.current_version):
+        if version.parse(latest_version) <= version.parse(self.current_version or "0"):
             return None
 
-        assets = release_data.get('assets', [])
+        assets = release_data.get("assets", []) or []
         exe_asset = None
         for asset in assets:
-            name = asset.get('name', '')
-            if isinstance(name, str) and name.lower().endswith('.exe'):
+            name = str(asset.get("name", ""))
+            if name.lower().endswith(".exe"):
                 exe_asset = asset
                 break
 
         if not exe_asset:
             return None
 
-        size = exe_asset.get('size') or 0
+        checksum_asset = self._find_checksum_asset(assets, str(exe_asset.get("name", "")))
+        if not checksum_asset:
+            return None
+
+        download_url = str(exe_asset.get("browser_download_url", ""))
+        checksum_url = str(checksum_asset.get("browser_download_url", ""))
+        if not self._is_allowed_download_url(download_url):
+            return None
+        if not self._is_allowed_download_url(checksum_url):
+            return None
+
+        size = exe_asset.get("size") or 0
         return {
-            'version': latest_version,
-            'download_url': exe_asset.get('browser_download_url', ''),
-            'changelog': release_data.get('body', ''),
-            'published_at': release_data.get('published_at', ''),
-            'size_mb': size / (1024 * 1024),
-            'asset_name': exe_asset.get('name', ''),
+            "version": latest_version,
+            "download_url": download_url,
+            "checksum_download_url": checksum_url,
+            "changelog": release_data.get("body", ""),
+            "published_at": release_data.get("published_at", ""),
+            "size_mb": size / (1024 * 1024),
+            "asset_name": str(exe_asset.get("name", "")),
+            "checksum_asset_name": str(checksum_asset.get("name", "")),
         }
 
-
     def download_update(self, update_info: Dict, progress_callback=None) -> Optional[str]:
-        """
-        업데이트 파일 다운로드
-
-        Args:
-            update_info: check_for_updates()에서 반환된 정보
-            progress_callback: 진행률 콜백 함수 (percent: float)
-
-        Returns:
-            다운로드된 파일 경로 또는 None (실패)
-        """
         try:
-            download_url = update_info['download_url']
+            download_url = str(update_info.get("download_url", ""))
+            checksum_url = str(update_info.get("checksum_download_url", ""))
+            if not self._is_allowed_download_url(download_url):
+                raise ValueError("Disallowed update download URL")
+            if not self._is_allowed_download_url(checksum_url):
+                raise ValueError("Disallowed checksum download URL")
 
-            # 임시 디렉토리에 다운로드
-            temp_dir = tempfile.gettempdir()
-            temp_file = os.path.join(temp_dir, update_info['asset_name'])
+            checksum_resp = self.session.get(checksum_url, timeout=20)
+            checksum_resp.raise_for_status()
+            expected_sha256 = self._parse_sha256_text(checksum_resp.text)
+            if not expected_sha256:
+                raise ValueError("Checksum file does not contain SHA-256 hash")
 
-            # 기존 파일 삭제
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
+            safe_name = os.path.basename(str(update_info.get("asset_name", "update.exe")))
+            if not safe_name.lower().endswith(".exe"):
+                safe_name = f"{safe_name}.exe"
 
-            # 다운로드
+            with tempfile.NamedTemporaryFile(
+                prefix="coupuas_update_",
+                suffix=".exe",
+                delete=False,
+            ) as tmp:
+                temp_file = tmp.name
+
             response = self.session.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
+            total_size = int(response.headers.get("content-length", 0))
             downloaded = 0
 
-            with open(temp_file, 'wb') as f:
+            with open(temp_file, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback and total_size > 0:
+                        progress_callback((downloaded / total_size) * 100)
 
-                        if progress_callback and total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            progress_callback(percent)
+            actual_sha256 = self._compute_sha256(temp_file)
+            if actual_sha256 != expected_sha256:
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
+                raise ValueError("Downloaded update checksum mismatch")
 
             return temp_file
 
@@ -134,47 +187,23 @@ class AutoUpdater:
             return None
 
     def install_update(self, update_file: str) -> bool:
-        """
-        업데이트 설치 (현재 실행 파일을 새 버전으로 교체)
-
-        Args:
-            update_file: 다운로드된 업데이트 파일 경로
-
-        Returns:
-            성공 여부
-        """
         try:
             current_exe = sys.executable
-
-            # .exe로 실행 중인지 확인 (PyInstaller로 빌드된 경우)
-            if not getattr(sys, 'frozen', False):
+            if not getattr(sys, "frozen", False):
                 print("개발 모드에서는 자동 업데이트를 지원하지 않습니다.")
                 return False
 
-            # 백업 파일 경로
-            backup_exe = current_exe + '.backup'
-
-            # 기존 백업 삭제
+            backup_exe = current_exe + ".backup"
             if os.path.exists(backup_exe):
                 try:
                     os.remove(backup_exe)
-                except:
+                except OSError:
                     pass
 
-            # 현재 실행 파일을 백업
             shutil.copy2(current_exe, backup_exe)
+            update_script = self._create_update_script(current_exe, update_file, backup_exe)
 
-            # 업데이트 스크립트 생성 (배치 파일)
-            update_script = self._create_update_script(
-                current_exe,
-                update_file,
-                backup_exe
-            )
-
-            # 업데이트 스크립트 실행 후 현재 프로세스 종료
-            subprocess.Popen([update_script], shell=True)
-
-            # 성공 (스크립트가 실행되면 애플리케이션 종료)
+            subprocess.Popen(["cmd", "/c", update_script], shell=False)
             return True
 
         except Exception as e:
@@ -182,128 +211,96 @@ class AutoUpdater:
             return False
 
     def _create_update_script(self, current_exe: str, update_file: str, backup_exe: str) -> str:
-        """
-        업데이트를 수행할 배치 스크립트 생성
+        current_exe_q = current_exe.replace('"', '""')
+        update_file_q = update_file.replace('"', '""')
+        backup_exe_q = backup_exe.replace('"', '""')
 
-        Returns:
-            생성된 스크립트 파일 경로
-        """
-        script_path = os.path.join(tempfile.gettempdir(), 'update_coupang_thread.bat')
+        script_content = f"""@echo off
+setlocal
 
-        script_content = f'''@echo off
-echo 쿠팡 파트너스 스레드 자동화 - 업데이트 설치 중...
-echo.
-
-REM 프로세스 종료 대기 (5초)
+echo Update install in progress...
 timeout /t 5 /nobreak >nul
 
-REM 현재 실행 파일 삭제 시도 (최대 10회)
 set retry=0
 :delete_loop
-del /f "{current_exe}" 2>nul
-if exist "{current_exe}" (
+del /f \"{current_exe_q}\" 2>nul
+if exist \"{current_exe_q}\" (
     set /a retry+=1
     if %retry% lss 10 (
         timeout /t 1 /nobreak >nul
         goto delete_loop
     ) else (
-        echo 기존 파일 삭제 실패. 백업에서 복원합니다.
-        copy /y "{backup_exe}" "{current_exe}"
+        copy /y \"{backup_exe_q}\" \"{current_exe_q}\" >nul
         goto cleanup
     )
 )
 
-REM 새 버전 복사
-copy /y "{update_file}" "{current_exe}"
+copy /y \"{update_file_q}\" \"{current_exe_q}\" >nul
 if errorlevel 1 (
-    echo 업데이트 실패. 백업에서 복원합니다.
-    copy /y "{backup_exe}" "{current_exe}"
+    copy /y \"{backup_exe_q}\" \"{current_exe_q}\" >nul
     goto cleanup
 )
 
-echo 업데이트가 완료되었습니다!
-echo 프로그램을 다시 시작합니다...
-
-REM 백업 파일 삭제
-del /f "{backup_exe}" 2>nul
-
-REM 다운로드 파일 삭제
-del /f "{update_file}" 2>nul
-
-REM 프로그램 재시작
-start "" "{current_exe}"
+del /f \"{backup_exe_q}\" 2>nul
+del /f \"{update_file_q}\" 2>nul
+start \"\" \"{current_exe_q}\"
 goto end
 
 :cleanup
-REM 임시 파일 정리
-del /f "{update_file}" 2>nul
-echo.
-echo 업데이트에 실패했습니다. 이전 버전으로 복구되었습니다.
+del /f \"{update_file_q}\" 2>nul
+echo Update failed and previous version was restored.
 pause
 
 :end
-REM 스크립트 자체 삭제
-del /f "%~f0"
-'''
+del /f \"%~f0\"
+endlocal
+"""
 
-        with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(script_content)
-
-        return script_path
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".bat",
+            prefix="update_coupuas_",
+            delete=False,
+        ) as script_file:
+            script_file.write(script_content)
+            return script_file.name
 
     @staticmethod
     def get_changelog_summary(changelog: str, max_lines: int = 10) -> str:
-        """
-        변경사항 요약 (처음 N줄만)
-
-        Args:
-            changelog: 전체 변경사항
-            max_lines: 최대 라인 수
-
-        Returns:
-            요약된 변경사항
-        """
-        lines = changelog.split('\n')
+        lines = str(changelog or "").split("\n")
         if len(lines) <= max_lines:
             return changelog
 
         summary_lines = lines[:max_lines]
-        summary_lines.append(f"\n... (나머지 {len(lines) - max_lines}줄 생략)")
-        return '\n'.join(summary_lines)
+        summary_lines.append(f"\n... (remaining {len(lines) - max_lines} lines omitted)")
+        return "\n".join(summary_lines)
 
 
-# 사용 예제
 if __name__ == "__main__":
-    # 테스트용 코드
     from main import VERSION
 
     updater = AutoUpdater(VERSION)
-
-    print(f"현재 버전: {VERSION}")
-    print("업데이트 확인 중...")
+    print(f"Current version: {VERSION}")
+    print("Checking for updates...")
 
     update_info = updater.check_for_updates()
-
     if update_info:
-        print(f"\n새 버전 발견: v{update_info['version']}")
-        print(f"크기: {update_info['size_mb']:.1f} MB")
-        print(f"\n변경사항:")
-        print(AutoUpdater.get_changelog_summary(update_info['changelog']))
+        print(f"\nNew version found: v{update_info['version']}")
+        print(f"Size: {update_info['size_mb']:.1f} MB")
+        print("\nChangelog:")
+        print(AutoUpdater.get_changelog_summary(update_info["changelog"]))
 
-        response = input("\n다운로드하시겠습니까? (y/n): ")
-
-        if response.lower() == 'y':
-            print("\n다운로드 중...")
-
+        response = input("\nDownload now? (y/n): ").strip().lower()
+        if response == "y":
             def progress(percent):
-                print(f"\r진행률: {percent:.1f}%", end='')
+                print(f"\rProgress: {percent:.1f}%", end="")
 
             file_path = updater.download_update(update_info, progress)
-
             if file_path:
-                print(f"\n\n다운로드 완료: {file_path}")
-                print("\n업데이트를 설치하려면 애플리케이션을 재시작하세요.")
+                print(f"\n\nDownloaded: {file_path}")
+                print("Restart app to install the update.")
             else:
-                print("\n다운로드 실패")
+                print("\nDownload failed")
     else:
-        print("\n최신 버전을 사용 중입니다.")
+        print("\nAlready on latest version.")
