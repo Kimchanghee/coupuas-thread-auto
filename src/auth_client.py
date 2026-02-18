@@ -42,6 +42,7 @@ _CRED_FILE = _CRED_DIR / "auth.json"
 _LOCK = threading.RLock()
 _SENSITIVE_CRED_FIELDS = {"token", "remember_pw"}
 _MIN_PASSWORD_LENGTH = 8
+_WORK_RESERVATION_SUPPORTED: Optional[bool] = None
 
 
 def _check_api_url() -> Optional[str]:
@@ -385,7 +386,115 @@ _auth_state: Dict[str, Any] = {
     "token": None,
     "work_count": 0,
     "work_used": 0,
+    "remaining_count": None,
+    "plan_type": None,
+    "is_paid": None,
+    "subscription_status": None,
+    "expires_at": None,
 }
+
+
+def _coerce_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "paid", "pro", "premium", "active"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "free", "trial", "inactive", "expired"}:
+            return False
+    return None
+
+
+def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
+    if not isinstance(payload, dict):
+        return None
+
+    candidate_maps = [payload]
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidate_maps.insert(0, data)
+    account = payload.get("account")
+    if isinstance(account, dict):
+        candidate_maps.insert(0, account)
+    subscription = payload.get("subscription")
+    if isinstance(subscription, dict):
+        candidate_maps.insert(0, subscription)
+
+    for mapping in candidate_maps:
+        for key in keys:
+            value = mapping.get(key)
+            if value is not None:
+                return value
+    return None
+
+
+def _merge_account_state(payload: Dict[str, Any]) -> None:
+    if not isinstance(payload, dict):
+        return
+
+    user_id = _extract_state_value(payload, "user_id", "id")
+    if user_id is not None:
+        _auth_state["user_id"] = user_id
+
+    username = _extract_state_value(payload, "username", "id")
+    if isinstance(username, str) and username.strip():
+        _auth_state["username"] = username.strip()
+
+    token = _extract_state_value(payload, "token", "key")
+    if token:
+        _auth_state["token"] = token
+
+    work_count = _extract_state_value(payload, "work_count", "quota_total", "limit_count")
+    if isinstance(work_count, (int, float)):
+        _auth_state["work_count"] = int(work_count)
+
+    work_used = _extract_state_value(payload, "work_used", "quota_used", "used_count")
+    if isinstance(work_used, (int, float)):
+        _auth_state["work_used"] = int(work_used)
+
+    remaining_count = _extract_state_value(payload, "remaining_count", "remaining", "quota_remaining")
+    if isinstance(remaining_count, (int, float)):
+        _auth_state["remaining_count"] = int(remaining_count)
+        if isinstance(_auth_state.get("work_count"), int):
+            computed_used = _auth_state["work_count"] - int(remaining_count)
+            if computed_used >= 0:
+                _auth_state["work_used"] = computed_used
+
+    plan_type = _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier")
+    if isinstance(plan_type, str) and plan_type.strip():
+        _auth_state["plan_type"] = plan_type.strip()
+
+    subscription_status = _extract_state_value(payload, "subscription_status", "plan_status", "status")
+    if isinstance(subscription_status, str) and subscription_status.strip():
+        _auth_state["subscription_status"] = subscription_status.strip()
+
+    expires_at = _extract_state_value(
+        payload,
+        "expires_at",
+        "expire_at",
+        "subscription_expires_at",
+        "period_end",
+        "period_end_at",
+    )
+    if isinstance(expires_at, str) and expires_at.strip():
+        _auth_state["expires_at"] = expires_at.strip()
+
+    is_paid_value = _extract_state_value(payload, "is_paid", "paid", "pro")
+    coerced_is_paid = _coerce_bool(is_paid_value)
+    if coerced_is_paid is not None:
+        _auth_state["is_paid"] = coerced_is_paid
+
+    if _auth_state.get("is_paid") is None:
+        plan_value = str(_auth_state.get("plan_type") or "").strip().lower()
+        if plan_value:
+            _auth_state["is_paid"] = plan_value not in {"free", "trial", "basic", "starter"}
+
+    status_value = str(_auth_state.get("subscription_status") or "").strip().lower()
+    if status_value in {"expired", "inactive", "cancelled"}:
+        _auth_state["is_paid"] = False
 
 
 def get_auth_state() -> Dict[str, Any]:
@@ -468,6 +577,7 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
             data = payload
             if not data:
                 return {"success": False, "message": "회원가입 응답이 비었습니다."}
+            _merge_account_state(data)
             if data.get("success") is False and not data.get("message"):
                 data["message"] = _normalize_api_message(
                     payload=data,
@@ -490,6 +600,7 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
                         "username": _auth_state["username"],
                         "token": token,
                     })
+                    _merge_account_state(result_data)
             return data
 
         if resp.status_code == 422:
@@ -545,6 +656,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
             data = _safe_json(resp)
             if not data:
                 return {"status": False, "message": "로그인 응답이 비었습니다."}
+            _merge_account_state(data)
             if data.get("status") is True:
                 _auth_state["user_id"] = data.get("id")
                 _auth_state["username"] = username
@@ -556,6 +668,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                     "username": _auth_state["username"],
                     "token": _auth_state["token"],
                 })
+                _merge_account_state(data)
             elif data.get("status") is False and not data.get("message"):
                 data["message"] = _normalize_api_message(
                     payload=data,
@@ -604,7 +717,15 @@ def logout() -> bool:
             logger.warning("Logout API error (ignored): %s", e)
 
     _auth_state["user_id"] = None
+    _auth_state["username"] = None
     _auth_state["token"] = None
+    _auth_state["work_count"] = 0
+    _auth_state["work_used"] = 0
+    _auth_state["remaining_count"] = None
+    _auth_state["plan_type"] = None
+    _auth_state["is_paid"] = None
+    _auth_state["subscription_status"] = None
+    _auth_state["expires_at"] = None
 
     cred = _load_cred()
     if cred:
@@ -636,7 +757,9 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
             timeout=10,
         )
         if resp.status_code == 200:
-            return _safe_json(resp)
+            payload = _safe_json(resp)
+            _merge_account_state(payload)
+            return payload
         return {"status": False}
     except Exception:
         return {"status": False}
@@ -658,7 +781,9 @@ def check_work_available() -> Dict[str, Any]:
             timeout=10,
         )
         if resp.status_code == 200:
-            return _safe_json(resp)
+            payload = _safe_json(resp)
+            _merge_account_state(payload)
+            return payload
         return {"success": False}
     except Exception:
         return {"success": False}
@@ -683,10 +808,117 @@ def use_work() -> Dict[str, Any]:
             data = _safe_json(resp)
             if data.get("success"):
                 _auth_state["work_used"] = data.get("work_used", _auth_state["work_used"] + 1)
+            _merge_account_state(data)
             return data
         return {"success": False}
     except Exception:
         return {"success": False}
+
+
+def _reservation_body(user_id: Any, token: Any, reservation_id: Optional[str] = None) -> Dict[str, Any]:
+    body: Dict[str, Any] = {"user_id": user_id, "token": token}
+    if reservation_id:
+        body["reservation_id"] = reservation_id
+        body["reserve_id"] = reservation_id
+        body["work_token"] = reservation_id
+    return body
+
+
+def reserve_work() -> Dict[str, Any]:
+    global _WORK_RESERVATION_SUPPORTED
+
+    if _check_api_url():
+        return {"success": False}
+
+    user_id = _auth_state.get("user_id")
+    token = _auth_state.get("token")
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+
+    try:
+        resp = _session.post(
+            f"{API_SERVER_URL}/user/work/reserve",
+            json=_reservation_body(user_id, token),
+            timeout=10,
+        )
+        if resp.status_code in {404, 405, 501}:
+            _WORK_RESERVATION_SUPPORTED = False
+            return {"success": False, "unsupported": True, "message": "work reservation not supported"}
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            _WORK_RESERVATION_SUPPORTED = True
+            _merge_account_state(payload)
+            return payload
+        return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
+    except Exception:
+        return {"success": False}
+
+
+def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
+    if not reservation_id:
+        return {"success": False, "message": "reservation id is required"}
+
+    if _check_api_url():
+        return {"success": False}
+
+    user_id = _auth_state.get("user_id")
+    token = _auth_state.get("token")
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+
+    try:
+        resp = _session.post(
+            f"{API_SERVER_URL}/user/work/commit",
+            json=_reservation_body(user_id, token, reservation_id),
+            timeout=10,
+        )
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            _merge_account_state(payload)
+            return payload
+        return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
+    except Exception:
+        return {"success": False}
+
+
+def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
+    if not reservation_id:
+        return {"success": False, "message": "reservation id is required"}
+
+    if _check_api_url():
+        return {"success": False}
+
+    user_id = _auth_state.get("user_id")
+    token = _auth_state.get("token")
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+
+    try:
+        resp = _session.post(
+            f"{API_SERVER_URL}/user/work/release",
+            json=_reservation_body(user_id, token, reservation_id),
+            timeout=10,
+        )
+        if resp.status_code in {404, 405, 501}:
+            return {"success": False, "unsupported": True}
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            _merge_account_state(payload)
+            return payload
+        return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
+    except Exception:
+        return {"success": False}
+
+
+def refresh_account_state(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
+    hb = heartbeat(current_task=current_task, app_version=app_version)
+    work = check_work_available()
+    return {
+        "success": bool(hb.get("status")) and bool(work.get("success") or work.get("available")),
+        "heartbeat": hb,
+        "work": work,
+        "state": get_auth_state(),
+    }
 
 
 def log_action(action: str, content: str = None, level: str = "INFO") -> None:

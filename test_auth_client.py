@@ -26,7 +26,25 @@ class _FakeSession:
         return self.response
 
 
+def _reset_auth_state():
+    auth_client._auth_state.update(
+        {
+            "user_id": None,
+            "username": None,
+            "token": None,
+            "work_count": 0,
+            "work_used": 0,
+            "remaining_count": None,
+            "plan_type": None,
+            "is_paid": None,
+            "subscription_status": None,
+            "expires_at": None,
+        }
+    )
+
+
 def test_login_payload_includes_required_ip(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(200, {"status": "EU001", "message": "EU001"})
     session = _FakeSession(response)
     monkeypatch.setattr(auth_client, "_session", session)
@@ -44,6 +62,7 @@ def test_login_payload_includes_required_ip(monkeypatch):
 
 
 def test_login_422_uses_nested_validation_error_message(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(
         422,
         {
@@ -67,6 +86,7 @@ def test_login_422_uses_nested_validation_error_message(monkeypatch):
 
 
 def test_register_422_uses_nested_validation_error_message(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(
         422,
         {
@@ -99,6 +119,7 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
 
 
 def test_register_200_failure_with_error_object_returns_message(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(
         200,
         {
@@ -125,6 +146,7 @@ def test_register_200_failure_with_error_object_returns_message(monkeypatch):
 
 
 def test_register_allows_short_password_with_backend_normalization(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(
         200,
         {"success": True, "message": "ok", "data": {"user_id": 1, "token": "t"}},
@@ -147,6 +169,7 @@ def test_register_allows_short_password_with_backend_normalization(monkeypatch):
 
 
 def test_login_normalizes_short_password_for_backend(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(200, {"status": "EU001", "message": "EU001"})
     session = _FakeSession(response)
     monkeypatch.setattr(auth_client, "_session", session)
@@ -160,6 +183,7 @@ def test_login_normalizes_short_password_for_backend(monkeypatch):
 
 
 def test_register_429_normalizes_rate_limit_message(monkeypatch):
+    _reset_auth_state()
     response = _FakeResponse(
         429,
         {
@@ -184,3 +208,46 @@ def test_register_429_normalizes_rate_limit_message(monkeypatch):
     assert result["success"] is False
     assert "제한" in result["message"]
     assert "5 per 1 hour" in result["message"]
+
+
+def test_login_merges_plan_and_expiry_fields(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(
+        200,
+        {
+            "status": True,
+            "id": 1001,
+            "key": "token-1",
+            "work_count": 50,
+            "work_used": 3,
+            "plan_type": "pro",
+            "is_paid": True,
+            "subscription_status": "active",
+            "expires_at": "2026-12-31T23:59:59Z",
+            "remaining_count": 47,
+        },
+    )
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("paiduser", "SamplePass123")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["plan_type"] == "pro"
+    assert state["is_paid"] is True
+    assert state["subscription_status"] == "active"
+    assert state["expires_at"] == "2026-12-31T23:59:59Z"
+    assert state["remaining_count"] == 47
+
+
+def test_reserve_work_returns_unsupported_on_404(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = 1
+    auth_client._auth_state["token"] = "token-1"
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(_FakeResponse(404, {})))
+
+    result = auth_client.reserve_work()
+
+    assert result["success"] is False
+    assert result.get("unsupported") is True

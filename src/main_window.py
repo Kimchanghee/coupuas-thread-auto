@@ -338,6 +338,8 @@ class MainWindow(QMainWindow):
             f" padding: 4px 12px; }}"
             f" QPushButton:hover {{ background: rgba(13, 89, 242, 0.20);"
             f" color: #FFFFFF; border-color: rgba(13, 89, 242, 0.40); }}"
+            f" QPushButton:focus {{ outline: none;"
+            f" border-color: rgba(13, 89, 242, 0.15); }}"
         )
 
         # Logout button (far right)
@@ -352,6 +354,8 @@ class MainWindow(QMainWindow):
             f" padding: 4px 12px; }}"
             f" QPushButton:hover {{ background: rgba(239, 68, 68, 0.25);"
             f" color: {Colors.ERROR}; border-color: {Colors.ERROR}; }}"
+            f" QPushButton:focus {{ outline: none;"
+            f" border-color: rgba(239, 68, 68, 0.15); }}"
         )
         self.logout_btn.clicked.connect(self._do_logout)
 
@@ -376,9 +380,11 @@ class MainWindow(QMainWindow):
         nav_right = WIN_W - 16
         for btn in (self.logout_btn, self.tutorial_btn, self.update_btn):
             btn.ensurePolished()
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.setFixedHeight(nav_h)
             # Add a bit of slack to avoid left/right clipping when font rendering differs.
-            w = max(btn.sizeHint().width() + 10, 56)
+            text_w = btn.fontMetrics().horizontalAdvance(btn.text())
+            w = max(btn.sizeHint().width() + 16, text_w + 30, 68)
             nav_right -= w
             btn.setGeometry(nav_right, nav_y, w, nav_h)
             nav_right -= nav_gap
@@ -403,7 +409,6 @@ class MainWindow(QMainWindow):
         self._online_dot.setGeometry(cx, 9, 10, 10)
         self._online_dot.setStyleSheet(
             f"background-color: {Colors.SUCCESS}; border-radius: 5px;"
-            f" border: 2px solid rgba(34, 197, 94, 0.3);"
         )
         cx += 16
 
@@ -416,6 +421,7 @@ class MainWindow(QMainWindow):
         sep1 = QFrame(acct_card)
         sep1.setGeometry(cx, 6, 1, 16)
         sep1.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
+        self._acct_sep1 = sep1
         cx += 10
 
         # Plan badge (FREE / PRO)
@@ -434,26 +440,118 @@ class MainWindow(QMainWindow):
         sep2 = QFrame(acct_card)
         sep2.setGeometry(cx, 6, 1, 16)
         sep2.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
+        self._acct_sep2 = sep2
         cx += 10
 
         # Work count label
         self._work_label = QLabel("0 / 0 회", acct_card)
-        self._work_label.setGeometry(cx, 0, 72, 28)
-        self._work_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._work_label.setGeometry(cx, 0, 90, 28)
+        self._work_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
         self._work_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
             " background: transparent; border: none;"
         )
-        cx += 72 + 10  # right padding
+        cx += 90 + 10  # right padding
 
         # Position the card to the left of nav buttons
         card_w = cx
         card_x = nav_right - 4 - card_w
         acct_card.setGeometry(card_x, 20, card_w, 28)
         self._acct_info_card = acct_card
+        self._header_nav_buttons = (self.logout_btn, self.tutorial_btn, self.update_btn)
+        self._relayout_header_account_card()
 
         self._header = header
         self._brand_icon = brand_icon
+
+    def _relayout_header_account_card(self):
+        """Resize/reposition account card to prevent right-top clipping."""
+        if not hasattr(self, "_acct_info_card"):
+            return
+
+        nav_buttons = getattr(self, "_header_nav_buttons", ())
+        nav_left = min((btn.x() for btn in nav_buttons), default=WIN_W - 16)
+        min_card_x = 340  # keep safe distance from brand title zone
+
+        card = self._acct_info_card
+        cx = 12
+
+        if hasattr(self, "_online_dot"):
+            self._online_dot.setGeometry(cx, 9, 10, 10)
+        cx += 16
+
+        status_w = max(self.status_badge.sizeHint().width() + 10, 70)
+        self.status_badge.setGeometry(cx, 2, status_w, 24)
+        cx += status_w + 4
+
+        self._acct_sep1.setGeometry(cx, 6, 1, 16)
+        cx += 10
+
+        plan_w = max(
+            self._plan_badge.fontMetrics().horizontalAdvance(self._plan_badge.text()) + 20,
+            52
+        )
+        self._plan_badge.setGeometry(cx, 3, plan_w, 22)
+        cx += plan_w + 6
+
+        self._acct_sep2.setGeometry(cx, 6, 1, 16)
+        cx += 10
+
+        work_text = self._work_label.text() or "0 / 0 회"
+        work_w = max(self._work_label.fontMetrics().horizontalAdvance(work_text) + 16, 90)
+        status_min_w = 58
+        plan_min_w = 46
+        work_min_w = 64
+
+        fixed_w = 12 + 16 + 4 + 10 + 6 + 10 + 10  # paddings + separators + gaps
+        dynamic_w = status_w + plan_w + work_w
+        desired_card_w = fixed_w + dynamic_w
+        max_card_w = max(nav_left - 12 - min_card_x, fixed_w + status_min_w + plan_min_w + work_min_w)
+
+        if desired_card_w > max_card_w:
+            overflow = desired_card_w - max_card_w
+
+            reduce_work = min(max(work_w - work_min_w, 0), overflow)
+            work_w -= reduce_work
+            overflow -= reduce_work
+
+            if overflow > 0:
+                reduce_status = min(max(status_w - status_min_w, 0), overflow)
+                status_w -= reduce_status
+                overflow -= reduce_status
+                self.status_badge.setGeometry(28, 2, status_w, 24)
+
+            if overflow > 0:
+                reduce_plan = min(max(plan_w - plan_min_w, 0), overflow)
+                plan_w -= reduce_plan
+                overflow -= reduce_plan
+                self._plan_badge.setGeometry(0, 3, plan_w, 22)
+
+        # Rebuild positions after any width compression.
+        cx = 12
+        if hasattr(self, "_online_dot"):
+            self._online_dot.setGeometry(cx, 9, 10, 10)
+        cx += 16
+
+        self.status_badge.setGeometry(cx, 2, status_w, 24)
+        cx += status_w + 4
+
+        self._acct_sep1.setGeometry(cx, 6, 1, 16)
+        cx += 10
+
+        self._plan_badge.setGeometry(cx, 3, plan_w, 22)
+        cx += plan_w + 6
+
+        self._acct_sep2.setGeometry(cx, 6, 1, 16)
+        cx += 10
+
+        self._work_label.setGeometry(cx, 0, work_w, 28)
+        self._work_label.setToolTip(work_text)
+        cx += work_w + 10
+
+        card_w = cx
+        card_x = max(min_card_x, nav_left - 12 - card_w)
+        card.setGeometry(card_x, 20, card_w, 28)
 
     # ── Sidebar ─────────────────────────────────────────────
 
@@ -1458,6 +1556,11 @@ class MainWindow(QMainWindow):
         """Update header and settings page with auth data."""
         auth = getattr(self, '_auth_data', None) or {}
         username = auth.get("username") or getattr(self, '_auth_data', {}).get("id", "")
+        plan_type = None
+        is_paid = None
+        subscription_status = None
+        expires_at = None
+        remaining_count = None
 
         # Resolve from auth_client state if not in auth_data
         try:
@@ -1467,14 +1570,47 @@ class MainWindow(QMainWindow):
                 username = state.get("username", "")
             work_count = state.get("work_count", 0)
             work_used = state.get("work_used", 0)
+            plan_type = state.get("plan_type")
+            is_paid = state.get("is_paid")
+            subscription_status = state.get("subscription_status")
+            expires_at = state.get("expires_at")
+            remaining_count = state.get("remaining_count")
         except Exception:
             work_count = auth.get("work_count", 0)
             work_used = auth.get("work_used", 0)
+            plan_type = auth.get("plan_type")
+            is_paid = auth.get("is_paid")
+            subscription_status = auth.get("subscription_status")
+            expires_at = auth.get("expires_at")
+            remaining_count = auth.get("remaining_count")
 
         display_name = username or "사용자"
+        plan_text = str(plan_type or "").strip().lower()
+        status_text = str(subscription_status or "").strip().lower()
+        if isinstance(is_paid, str):
+            normalized = is_paid.strip().lower()
+            if normalized in {"1", "true", "yes", "y", "paid", "pro", "premium", "active"}:
+                paid_account = True
+            elif normalized in {"0", "false", "no", "n", "free", "trial", "inactive", "expired"}:
+                paid_account = False
+            else:
+                paid_account = None
+        elif isinstance(is_paid, (int, float)):
+            paid_account = bool(is_paid)
+        elif isinstance(is_paid, bool):
+            paid_account = is_paid
+        else:
+            paid_account = None
+
+        if paid_account is None and plan_text:
+            paid_account = plan_text not in {"free", "trial", "basic", "starter"}
+        if status_text in {"expired", "inactive", "cancelled"}:
+            paid_account = False
+        if paid_account is None:
+            paid_account = work_count > 10
 
         # Header plan badge (inside account info card)
-        if work_count > 10:
+        if paid_account:
             self._plan_badge.setText("PRO")
             self._plan_badge.setStyleSheet(
                 f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
@@ -1491,13 +1627,16 @@ class MainWindow(QMainWindow):
                 f" letter-spacing: 1px; }}"
             )
 
+        if isinstance(remaining_count, (int, float)) and work_count <= 0:
+            work_count = int(work_used) + int(remaining_count)
+
         self._work_label.setText(f"{work_used} / {work_count} 회")
 
         # Settings page account card
         self._acct_username_label.setText(display_name)
         self._acct_work_label.setText(f"{work_used} / {work_count} 회 사용")
 
-        if work_count > 10:
+        if paid_account:
             self._acct_plan_badge.setText("프로 구독")
             self._acct_plan_badge.setStyleSheet(
                 f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
@@ -1505,7 +1644,17 @@ class MainWindow(QMainWindow):
                 f" border-radius: 13px; font-size: 9pt; font-weight: 700; }}"
             )
         else:
-            self._acct_plan_badge.setText("무료 체험")
+            if status_text == "expired":
+                self._acct_plan_badge.setText("구독 만료")
+            else:
+                self._acct_plan_badge.setText("무료 체험")
+
+        if expires_at:
+            self._acct_plan_badge.setToolTip(f"만료: {expires_at}")
+        else:
+            self._acct_plan_badge.setToolTip("")
+
+        self._relayout_header_account_card()
 
         # Version label
         self._version_label.setText(f"현재 버전: {self._app_version}")
@@ -1978,6 +2127,8 @@ class MainWindow(QMainWindow):
                 # Step 2: Upload to Threads
                 self.signals.step_update.emit(2, "active")
                 log("Uploading thread post...")
+                reserved_work_id = None
+                reservation_supported = False
 
                 try:
                     agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
@@ -1994,13 +2145,53 @@ class MainWindow(QMainWindow):
                         },
                     ]
 
+                    # Reserve work token when backend supports atomic quota flow.
+                    try:
+                        from src import auth_client
+                        reserve_result = auth_client.reserve_work()
+                        if isinstance(reserve_result, dict) and reserve_result.get("unsupported"):
+                            reservation_supported = False
+                        elif not self._is_work_allowed(reserve_result):
+                            quota_message = (
+                                reserve_result.get("message", "사용 가능한 작업량이 없습니다.")
+                                if isinstance(reserve_result, dict)
+                                else "작업량 확인에 실패했습니다."
+                            )
+                            log(f"Work reservation failed: {quota_message}")
+                            results["cancelled"] = True
+                            break
+                        else:
+                            reservation_supported = True
+                            reserved_work_id = (
+                                str(
+                                    reserve_result.get("reservation_id")
+                                    or reserve_result.get("reserve_id")
+                                    or reserve_result.get("work_token")
+                                    or ""
+                                ).strip()
+                                if isinstance(reserve_result, dict)
+                                else ""
+                            )
+                            if not reserved_work_id:
+                                log("Work reservation id missing. Upload stopped for safety.")
+                                results["cancelled"] = True
+                                break
+                    except Exception:
+                        logger.exception("work reservation failed in upload loop")
+                        log("Work reservation failed. Upload stopped.")
+                        results["cancelled"] = True
+                        break
+
                     success = helper.create_thread_direct(posts_data)
                     recorded_success = bool(success)
                     stop_for_billing_sync = False
                     if success:
                         try:
                             from src import auth_client
-                            use_result = auth_client.use_work()
+                            if reservation_supported and reserved_work_id:
+                                use_result = auth_client.commit_reserved_work(reserved_work_id)
+                            else:
+                                use_result = auth_client.use_work()
                             if not isinstance(use_result, dict) or not bool(use_result.get("success")):
                                 billing_msg = (
                                     use_result.get("message", "unknown")
@@ -2028,6 +2219,12 @@ class MainWindow(QMainWindow):
                             self.signals.step_update.emit(3, "error")
                             self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
                     else:
+                        if reservation_supported and reserved_work_id:
+                            try:
+                                from src import auth_client
+                                auth_client.release_reserved_work(reserved_work_id)
+                            except Exception:
+                                logger.exception("failed to release reserved work after upload failure")
                         results["failed"] += 1
                         log(f"Upload failed: {product_name}")
                         self.signals.step_update.emit(2, "error")
@@ -2044,6 +2241,12 @@ class MainWindow(QMainWindow):
                         results["cancelled"] = True
                         break
                 except Exception as exc:
+                    if reservation_supported and reserved_work_id:
+                        try:
+                            from src import auth_client
+                            auth_client.release_reserved_work(reserved_work_id)
+                        except Exception:
+                            logger.exception("failed to release reserved work on upload exception")
                     results["failed"] += 1
                     log(f"Upload error: {str(exc)[:80]}")
                     self.signals.step_update.emit(2, "error")
@@ -2148,6 +2351,8 @@ class MainWindow(QMainWindow):
                 current_task=task,
                 app_version=self._app_version
             )
+            if isinstance(result, dict):
+                self._update_account_display()
             if result.get("status") is True:
                 self._online_dot.setStyleSheet(
                     f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
