@@ -1,12 +1,9 @@
 name: Build and Release
 
-# 태그가 푸시될 때 자동으로 빌드 및 릴리즈
 on:
   push:
     tags:
-      - 'v*.*.*'  # v2.2.0, v2.3.0 등
-
-# 수동 실행도 가능
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
@@ -56,17 +53,20 @@ jobs:
           grep "VERSION =" main.py
 
       - name: Build executable
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: 1
         run: |
           python build_exe.py
 
       - name: Verify build
         run: |
           if (Test-Path "dist\CoupangThreadAuto.exe") {
-            Write-Host "✅ Build successful!"
+            Write-Host "Build successful!"
             $size = (Get-Item "dist\CoupangThreadAuto.exe").Length / 1MB
-            Write-Host "📦 File size: $([math]::Round($size, 2)) MB"
+            Write-Host "File size: $([math]::Round($size, 2)) MB"
           } else {
-            Write-Error "❌ Build failed - EXE not found"
+            Write-Error "Build failed - EXE not found"
             exit 1
           }
 
@@ -76,26 +76,19 @@ jobs:
           tag_name: ${{ steps.get_version.outputs.VERSION }}
           name: Release ${{ steps.get_version.outputs.VERSION }}
           body: |
-            ## 쿠팡 파트너스 스레드 자동화 ${{ steps.get_version.outputs.VERSION }}
+            ## Coupang Partners Thread Auto ${{ steps.get_version.outputs.VERSION }}
 
-            ### 다운로드
+            ### Download
             - [CoupangThreadAuto.exe](https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/CoupangThreadAuto.exe)
 
-            ### 설치 방법
-            1. 위의 `CoupangThreadAuto.exe` 파일을 다운로드하세요
-            2. 다운로드한 파일을 실행하세요
-            3. 자동으로 업데이트가 설치됩니다
+            ### Installation
+            1. Download CoupangThreadAuto.exe
+            2. Run the downloaded file
+            3. Updates will be installed automatically
 
-            ### 변경사항
-            - 새로운 기능 및 버그 수정 내용을 여기에 작성하세요
-
-            ### 시스템 요구사항
-            - Windows 10 이상
-            - 인터넷 연결
-
-            ---
-
-            **자동 업데이트**: 프로그램 실행 시 자동으로 최신 버전을 확인합니다.
+            ### System Requirements
+            - Windows 10 or later
+            - Internet connection
           draft: false
           prerelease: false
           files: |
