@@ -29,13 +29,12 @@ hidden_imports = [
     'src.coupang_uploader',
     'src.settings_dialog',
     'src.computer_use_agent',
+    'src.events',
     'src.threads_playwright_helper',
-    'src.threads_uploader',
 
     # services 패키지 (쿠팡 파트너스)
     'src.services',
     'src.services.coupang_parser',
-    'src.services.alibaba1688_service',
     'src.services.aggro_generator',
     'src.services.telegram_service',
 

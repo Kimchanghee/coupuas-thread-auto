@@ -47,9 +47,6 @@ _DASHBOARD_ENV = _PROJECT_ROOT.parent / "project-user-dashboard" / ".env"
 if _DASHBOARD_ENV.exists():
     load_dotenv(_DASHBOARD_ENV, override=False)
 
-# DPI 스케일링: 모든 화면에서 동일한 물리 크기로 표시
-os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '1'
-
 from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import (
@@ -118,17 +115,10 @@ class SplashScreen(QSplashScreen):
 
     @classmethod
     def _resolve_font(cls):
-        """테마 폴백 목록에서 사용 가능한 첫 번째 폰트를 찾습니다."""
+        """theme.resolve_fonts()에서 설정된 Typography.FAMILY를 반환"""
         if cls._FONT_FAMILY is not None:
             return cls._FONT_FAMILY
-        # Korean-first, match NewshoppingShorts-1 typography defaults.
-        candidates = ["Pretendard", "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Segoe UI"]
-        available = QFontDatabase.families()
-        for name in candidates:
-            if name in available:
-                cls._FONT_FAMILY = name
-                return name
-        cls._FONT_FAMILY = ""
+        cls._FONT_FAMILY = Typography.FAMILY
         return cls._FONT_FAMILY
 
     def __init__(self):

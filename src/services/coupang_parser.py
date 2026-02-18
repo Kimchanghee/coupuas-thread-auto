@@ -259,17 +259,6 @@ JSON만 출력하세요."""
             print(f"  [!] Gemini REST API error: {e}")
             return None
 
-    def _get_coupang_image_url(self, product_id: str, final_url: str) -> Optional[str]:
-        """
-        쿠팡 상품 이미지 URL 추출 시도
-
-        Note: 쿠팡은 강력한 봇 탐지를 사용하여 대부분의 자동화 접근을 차단합니다.
-        이미지 URL을 가져오지 못하면 1688 서비스에서 키워드 검색으로 대체합니다.
-        """
-        # 쿠팡의 봇 탐지가 매우 강력하여 대부분 403 반환
-        # 이미지 URL 없이도 1688 검색이 가능하도록 설계됨
-        return None
-
     def _analyze_screenshot_with_gemini(self, screenshot_bytes: bytes) -> Optional[Dict]:
         """Gemini Vision API로 스크린샷에서 상품 정보 추출"""
         if not self.google_api_key:
@@ -341,55 +330,6 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
             except Exception as e:
                 print(f"  [!] Redirect error: {e}")
                 return None
-
-    def _extract_product_info(self, url: str) -> Optional[Dict]:
-        """상품 페이지에서 정보 추출 (requests)"""
-        try:
-            response = self.session.get(url, timeout=15)
-            response.raise_for_status()
-            html = response.text
-
-            info = {}
-
-            # 상품명 추출
-            title_match = re.search(r'<title>([^<]+)</title>', html, re.IGNORECASE)
-            if title_match:
-                title = title_match.group(1)
-                title = re.sub(r'\s*[-|]\s*쿠팡!?\s*$', '', title)
-                info['title'] = title.strip()
-
-            # 상품 ID 추출
-            product_id_match = re.search(r'/products/(\d+)', url)
-            if product_id_match:
-                info['product_id'] = product_id_match.group(1)
-
-            # 가격 추출
-            price_match = re.search(r'"originalPrice":\s*(\d+)', html)
-            if price_match:
-                info['price'] = int(price_match.group(1))
-
-            sale_price_match = re.search(r'"salePrice":\s*(\d+)', html)
-            if sale_price_match:
-                info['sale_price'] = int(sale_price_match.group(1))
-
-            # 상품 이미지 URL 추출
-            img_match = re.search(r'"image"\s*:\s*"([^"]+)"', html)
-            if img_match:
-                info['image_url'] = img_match.group(1)
-            else:
-                og_img_match = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html, re.IGNORECASE)
-                if og_img_match:
-                    info['image_url'] = og_img_match.group(1)
-
-            # 검색용 키워드 생성
-            if info.get('title'):
-                info['search_keywords'] = self._extract_keywords(info['title'])
-
-            return info if info.get('title') else None
-
-        except Exception as e:
-            print(f"  [!] Extract error: {e}")
-            return None
 
     def _extract_keywords(self, title: str) -> str:
         """상품명에서 검색 키워드 추출"""

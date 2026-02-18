@@ -21,16 +21,7 @@ from src.theme import (
     scroll_area_style, dialog_style, global_stylesheet
 )
 from src.ui_messages import show_info, show_warning
-
-
-# ─── Events ─────────────────────────────────────────────────
-
-class LoginStatusEvent(QEvent):
-    EventType = QEvent.Type(QEvent.registerEventType())
-
-    def __init__(self, result):
-        super().__init__(LoginStatusEvent.EventType)
-        self.result = result
+from src.events import LoginStatusEvent
 
 
 # ─── Section Card ────────────────────────────────────────────

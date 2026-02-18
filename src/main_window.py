@@ -29,6 +29,7 @@ from src.theme import (Colors, Typography, Radius, Gradients,
                        muted_text_style,
                        hint_text_style, section_title_style)
 from src.ui_messages import ask_yes_no, show_error, show_info, show_warning
+from src.events import LoginStatusEvent
 
 logger = logging.getLogger(__name__)
 
@@ -69,16 +70,6 @@ class Signals(QObject):
     finished = pyqtSignal(dict)
     step_update = pyqtSignal(int, str)       # step_index, status
     link_status = pyqtSignal(str, str, str)  # url, status, product_name
-
-
-# ─── LoginStatusEvent ──────────────────────────────────────
-
-class LoginStatusEvent(QEvent):
-    EventType = QEvent.Type(QEvent.registerEventType())
-
-    def __init__(self, result):
-        super().__init__(LoginStatusEvent.EventType)
-        self.result = result
 
 
 # ─── Badge ──────────────────────────────────────────────────

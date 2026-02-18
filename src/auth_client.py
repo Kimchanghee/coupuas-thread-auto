@@ -21,16 +21,14 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # ─── project-user-dashboard 백엔드 연결 ─────────────────────
-# 1) project-user-dashboard/.env 로드 (개발 환경)
+# .env 로딩: main.py에서 이미 로드했을 수 있으므로 override=False로 안전하게 로드
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DASHBOARD_ENV = _PROJECT_ROOT.parent / "project-user-dashboard" / ".env"
-if _DASHBOARD_ENV.exists():
-    load_dotenv(_DASHBOARD_ENV, override=False)
-
-# 2) 프로젝트 루트의 .env도 로드 (다른 PC에 project-user-dashboard가 없는 경우 대비)
-_LOCAL_ENV = _PROJECT_ROOT / ".env"
-if _LOCAL_ENV.exists():
-    load_dotenv(_LOCAL_ENV, override=False)
+for _env_path in [
+    _PROJECT_ROOT.parent / "project-user-dashboard" / ".env",  # 형제 프로젝트
+    _PROJECT_ROOT / ".env",  # 프로젝트 루트
+]:
+    if _env_path.exists():
+        load_dotenv(_env_path, override=False)
 
 # 3) USER_DASHBOARD_API_URL → API_SERVER_URL 순서로 탐색
 API_SERVER_URL = (

@@ -23,21 +23,10 @@ from src.ui_messages import ask_yes_no, show_info, show_warning
 
 logger = logging.getLogger(__name__)
 
-# ─── Font helper ────────────────────────────────────────────
-_FONT_FAMILY = None
 
 def _get_font():
-    global _FONT_FAMILY
-    if _FONT_FAMILY is None:
-        candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI"]
-        available = QFontDatabase.families()
-        for name in candidates:
-            if name in available:
-                _FONT_FAMILY = name
-                break
-        if _FONT_FAMILY is None:
-            _FONT_FAMILY = ""
-    return _FONT_FAMILY
+    """theme.resolve_fonts()에서 설정된 Typography.FAMILY를 반환"""
+    return Typography.FAMILY
 
 
 # ─── Username Check Worker ──────────────────────────────────
@@ -169,7 +158,8 @@ class LoginWindow(QMainWindow):
         # Version
         painter.setPen(QColor(255, 255, 255, 180))
         painter.setFont(QFont(fn, 9))
-        painter.drawText(0, 488, 300, 20, Qt.AlignmentFlag.AlignCenter, "v2.2.0")
+        from main import VERSION
+        painter.drawText(0, 488, 300, 20, Qt.AlignmentFlag.AlignCenter, VERSION)
 
         # Border right
         painter.setPen(QColor(Colors.BORDER))

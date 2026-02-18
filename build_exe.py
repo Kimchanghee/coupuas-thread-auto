@@ -67,6 +67,7 @@ HIDDEN_IMPORTS = [
     "src.login_window",
     "src.auth_client",
     "src.theme",
+    "src.events",
     "src.tutorial",
     "src.services",
     "src.services.aggro_generator",

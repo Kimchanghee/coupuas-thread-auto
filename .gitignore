@@ -51,6 +51,9 @@ config.json
 debug_screenshot.png
 nul
 
+# UI 스크린샷
+stitch_*.png
+
 # Generated content
 generated_images/
 
