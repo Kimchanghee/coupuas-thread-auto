@@ -185,7 +185,7 @@ class SettingsDialog(QDialog):
 
         self._build_api_section()
         self._build_upload_section()
-        self._build_telegram_section()
+        self._build_security_section()
         self._build_threads_section()
 
         self.content_layout.addStretch()
@@ -265,21 +265,12 @@ class SettingsDialog(QDialog):
 
         self.content_layout.addWidget(section)
 
-    def _build_telegram_section(self):
-        section = SectionCard("텔레그램 알림", "*")
+    def _build_security_section(self):
+        section = SectionCard("보안 설정", "*")
         layout = section.content_layout()
 
-        self.telegram_check = QCheckBox("텔레그램 알림 활성화")
-        layout.addWidget(self.telegram_check)
-
-        self.bot_token_edit = QLineEdit()
-        self.bot_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.bot_token_edit.setPlaceholderText("BotFather 토큰")
-        layout.addWidget(FormField("봇 토큰", self.bot_token_edit))
-
-        self.chat_id_edit = QLineEdit()
-        self.chat_id_edit.setPlaceholderText("채팅 ID")
-        layout.addWidget(FormField("채팅 ID", self.chat_id_edit))
+        self.allow_ai_fallback_check = QCheckBox("AI 자동 업로드 fallback 허용 (권장: 비활성화)")
+        layout.addWidget(self.allow_ai_fallback_check)
 
         self.content_layout.addWidget(section)
 
@@ -349,9 +340,7 @@ class SettingsDialog(QDialog):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
-        self.telegram_check.setChecked(config.telegram_enabled)
-        self.bot_token_edit.setText(config.telegram_bot_token)
-        self.chat_id_edit.setText(config.telegram_chat_id)
+        self.allow_ai_fallback_check.setChecked(bool(getattr(config, "allow_ai_fallback", False)))
         self.username_edit.setText(config.instagram_username)
 
     def _save_settings(self):
@@ -367,9 +356,7 @@ class SettingsDialog(QDialog):
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
-        config.telegram_enabled = self.telegram_check.isChecked()
-        config.telegram_bot_token = self.bot_token_edit.text().strip()
-        config.telegram_chat_id = self.chat_id_edit.text().strip()
+        config.allow_ai_fallback = self.allow_ai_fallback_check.isChecked()
         config.instagram_username = self.username_edit.text().strip()
 
         config.save()

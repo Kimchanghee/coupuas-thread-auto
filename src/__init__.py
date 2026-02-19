@@ -12,7 +12,7 @@ Coupang Partners Thread Auto - 소스 패키지
 - threads_playwright_helper: Playwright 헬퍼
 
 하위 패키지:
-- services: 서비스 모듈 (coupang_parser, aggro_generator, image_search, telegram_service)
+- services: 서비스 모듈 (coupang_parser, aggro_generator, image_search)
 """
 
 __version__ = "2.2.0"

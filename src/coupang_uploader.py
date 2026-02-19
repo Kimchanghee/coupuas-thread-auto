@@ -7,7 +7,6 @@ import threading
 from typing import List, Dict, Optional, Callable
 from src.computer_use_agent import ComputerUseAgent
 from src.threads_playwright_helper import ThreadsPlaywrightHelper
-from src.services.telegram_service import TelegramService
 from src.config import config
 
 
@@ -103,6 +102,9 @@ class CoupangThreadsUploader:
                 print(f"  업로드 성공")
                 return True
             else:
+                if not getattr(config, "allow_ai_fallback", False):
+                    print("  직접 작성 실패: AI fallback 비활성화 상태입니다.")
+                    return False
                 print(f"  직접 작성 실패, AI 모드로 재시도...")
                 self._check_cancelled()
                 return self._upload_with_ai(agent, posts_data)
@@ -126,6 +128,8 @@ class CoupangThreadsUploader:
     def _upload_with_ai(self, agent: ComputerUseAgent, posts_data: List[Dict]) -> bool:
         """AI를 사용한 업로드 (fallback)"""
         try:
+            if not getattr(config, "allow_ai_fallback", False):
+                return False
             self._check_cancelled()
 
             first_post = posts_data[0]
@@ -281,8 +285,11 @@ class CoupangThreadsUploader:
                     success = helper.create_thread_direct(posts_data)
 
                     if not success:
-                        log("AI 모드 시도", "직접 작성 실패, AI 모드로 재시도...")
-                        success = self._upload_with_ai(agent, posts_data)
+                        if getattr(config, "allow_ai_fallback", False):
+                            log("AI 모드 시도", "직접 작성 실패, AI 모드로 재시도...")
+                            success = self._upload_with_ai(agent, posts_data)
+                        else:
+                            log("직접 작성 실패", "AI fallback 비활성화 상태입니다.")
 
                     result_item = {
                         'product_title': product.get('product_title', ''),
@@ -799,18 +806,6 @@ class CoupangPartnersPipeline:
             auth_client.log_action("pipeline_complete", summary)
         except Exception:
             pass
-
-        # 텔레그램 알림 전송 (설정되어 있으면)
-        try:
-            telegram = TelegramService()
-            if telegram.is_configured():
-                log("텔레그램 알림", "결과를 텔레그램으로 전송 중...")
-                if telegram.send_upload_result(results):
-                    log("텔레그램 전송 완료", "알림이 성공적으로 전송되었습니다")
-                else:
-                    log("텔레그램 전송 실패", "알림 전송에 실패했습니다")
-        except Exception as e:
-            log("텔레그램 오류", f"{str(e)[:50]}")
 
         return results
 

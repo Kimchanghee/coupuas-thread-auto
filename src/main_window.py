@@ -1105,35 +1105,25 @@ class MainWindow(QMainWindow):
 
         sy += 112
 
-        # ── Section 4: 텔레그램 알림 ───────────────────────
-        tg_sec = SectionFrame(content)
-        tg_sec.setGeometry(28, sy, 944, 180)
+        # ── Section 4: 보안 설정 ───────────────────────────
+        security_sec = SectionFrame(content)
+        security_sec.setGeometry(28, sy, 944, 110)
 
-        tg_title = QLabel("텔레그램 알림", tg_sec)
-        tg_title.setGeometry(24, 12, 200, 22)
-        tg_title.setStyleSheet(section_title_style())
+        security_title = QLabel("보안 설정", security_sec)
+        security_title.setGeometry(24, 12, 200, 22)
+        security_title.setStyleSheet(section_title_style())
 
-        self.telegram_check = QCheckBox("텔레그램 알림 활성화", tg_sec)
-        self.telegram_check.setGeometry(24, 40, 300, 22)
+        self.allow_ai_fallback_check = QCheckBox("업로드 실패 시 AI 대체 업로드 허용", security_sec)
+        self.allow_ai_fallback_check.setGeometry(24, 44, 360, 22)
 
-        bot_label = QLabel("봇 토큰", tg_sec)
-        bot_label.setGeometry(24, 68, 100, 16)
-        bot_label.setStyleSheet(_field_lbl_style)
+        security_hint = QLabel(
+            "비활성화 시 직접 업로드 실패를 즉시 실패로 처리합니다.",
+            security_sec,
+        )
+        security_hint.setGeometry(24, 72, 520, 16)
+        security_hint.setStyleSheet(hint_text_style())
 
-        self.bot_token_edit = QLineEdit(tg_sec)
-        self.bot_token_edit.setGeometry(24, 88, 896, 34)
-        self.bot_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.bot_token_edit.setPlaceholderText("BotFather 토큰")
-
-        chat_label = QLabel("채팅 ID", tg_sec)
-        chat_label.setGeometry(24, 128, 100, 16)
-        chat_label.setStyleSheet(_field_lbl_style)
-
-        self.chat_id_edit = QLineEdit(tg_sec)
-        self.chat_id_edit.setGeometry(24, 148, 896, 34)
-        self.chat_id_edit.setPlaceholderText("채팅 ID")
-
-        sy += 192
+        sy += 122
 
         # ── Section 5: 앱 정보 ─────────────────────────────
         info_sec = SectionFrame(content)
@@ -1520,9 +1510,7 @@ class MainWindow(QMainWindow):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
-        self.telegram_check.setChecked(config.telegram_enabled)
-        self.bot_token_edit.setText(config.telegram_bot_token)
-        self.chat_id_edit.setText(config.telegram_chat_id)
+        self.allow_ai_fallback_check.setChecked(bool(config.allow_ai_fallback))
         self.username_edit.setText(config.instagram_username)
 
     def _save_settings(self):
@@ -1539,9 +1527,7 @@ class MainWindow(QMainWindow):
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
-        config.telegram_enabled = self.telegram_check.isChecked()
-        config.telegram_bot_token = self.bot_token_edit.text().strip()
-        config.telegram_chat_id = self.chat_id_edit.text().strip()
+        config.allow_ai_fallback = self.allow_ai_fallback_check.isChecked()
         config.instagram_username = self.username_edit.text().strip()
 
         config.save()

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Auth client for dashboard API."""
 
-import base64
 import hashlib
 import json
 import logging
@@ -15,15 +14,17 @@ from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
+from src.secure_storage import protect_secret, unprotect_secret
 
 logger = logging.getLogger(__name__)
 
 # Load .env files without overriding existing environment values.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-for _env_path in [
-    _PROJECT_ROOT.parent / "project-user-dashboard" / ".env",
-    _PROJECT_ROOT / ".env",
-]:
+_env_paths = [_PROJECT_ROOT / ".env"]
+if os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1":
+    _env_paths.insert(0, _PROJECT_ROOT.parent / "project-user-dashboard" / ".env")
+
+for _env_path in _env_paths:
     if _env_path.exists():
         load_dotenv(_env_path, override=False)
 
@@ -39,6 +40,7 @@ if not API_SERVER_URL:
 # Credential storage
 _CRED_DIR = Path.home() / ".shorts_thread_maker"
 _CRED_FILE = _CRED_DIR / "auth.json"
+_API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
 _SENSITIVE_CRED_FIELDS = {"token", "remember_pw"}
 _MIN_PASSWORD_LENGTH = 8
@@ -56,6 +58,9 @@ def _check_api_url() -> Optional[str]:
         host = (parsed.hostname or "").lower()
         if host not in {"localhost", "127.0.0.1", "::1"}:
             return "Only HTTPS API URL is allowed for security."
+    host_lock_error = _check_api_host_lock(parsed)
+    if host_lock_error:
+        return host_lock_error
     return None
 
 
@@ -64,102 +69,49 @@ def _ensure_cred_dir() -> None:
 
 
 def _protect_secret(value: str) -> Optional[str]:
-    if not isinstance(value, str) or not value or value.startswith("dpapi:"):
-        return value
-
-    if os.name != "nt":
-        return None
-
-    try:
-        import ctypes
-
-        class DATA_BLOB(ctypes.Structure):
-            _fields_ = [
-                ("cbData", ctypes.c_uint32),
-                ("pbData", ctypes.POINTER(ctypes.c_ubyte)),
-            ]
-
-        crypt32 = ctypes.windll.crypt32
-        kernel32 = ctypes.windll.kernel32
-
-        plain_bytes = value.encode("utf-8")
-        in_buffer = ctypes.create_string_buffer(plain_bytes, len(plain_bytes))
-        in_blob = DATA_BLOB(
-            len(plain_bytes),
-            ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_ubyte)),
-        )
-        out_blob = DATA_BLOB()
-
-        if not crypt32.CryptProtectData(
-            ctypes.byref(in_blob),
-            "shorts_thread_maker",
-            None,
-            None,
-            None,
-            0,
-            ctypes.byref(out_blob),
-        ):
-            raise ctypes.WinError()
-
-        try:
-            protected = ctypes.string_at(out_blob.pbData, out_blob.cbData)
-        finally:
-            kernel32.LocalFree(out_blob.pbData)
-
-        return f"dpapi:{base64.b64encode(protected).decode('ascii')}"
-    except Exception:
+    protected = protect_secret(value, "shorts_thread_maker")
+    if isinstance(value, str) and value and protected is None:
         logger.warning("Failed to protect credential secret")
-        return None
+    return protected
 
 
 def _unprotect_secret(value: str) -> str:
-    if not isinstance(value, str) or not value.startswith("dpapi:"):
-        return value
-
-    if os.name != "nt":
-        return ""
-
-    try:
-        import ctypes
-
-        class DATA_BLOB(ctypes.Structure):
-            _fields_ = [
-                ("cbData", ctypes.c_uint32),
-                ("pbData", ctypes.POINTER(ctypes.c_ubyte)),
-            ]
-
-        crypt32 = ctypes.windll.crypt32
-        kernel32 = ctypes.windll.kernel32
-
-        encoded = value.split(":", 1)[1]
-        protected = base64.b64decode(encoded.encode("ascii"))
-        in_buffer = ctypes.create_string_buffer(protected, len(protected))
-        in_blob = DATA_BLOB(
-            len(protected),
-            ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_ubyte)),
-        )
-        out_blob = DATA_BLOB()
-
-        if not crypt32.CryptUnprotectData(
-            ctypes.byref(in_blob),
-            None,
-            None,
-            None,
-            None,
-            0,
-            ctypes.byref(out_blob),
-        ):
-            raise ctypes.WinError()
-
-        try:
-            plain = ctypes.string_at(out_blob.pbData, out_blob.cbData).decode("utf-8")
-        finally:
-            kernel32.LocalFree(out_blob.pbData)
-
-        return plain
-    except Exception:
+    plain = unprotect_secret(value)
+    if isinstance(value, str) and value.startswith("dpapi:") and not plain:
         logger.exception("Failed to unprotect credential secret")
-        return ""
+    return plain
+
+
+def _check_api_host_lock(parsed) -> Optional[str]:
+    host = (parsed.hostname or "").lower()
+    if not host or host in {"localhost", "127.0.0.1", "::1"}:
+        return None
+
+    _ensure_cred_dir()
+    lock_override = os.getenv("THREAD_AUTO_ALLOW_API_HOST_CHANGE", "").strip() == "1"
+    locked_host = ""
+    try:
+        if _API_HOST_LOCK_FILE.exists():
+            locked_host = _API_HOST_LOCK_FILE.read_text(encoding="utf-8").strip().lower()
+    except Exception:
+        logger.warning("Failed to read API host lock file")
+
+    if locked_host and locked_host != host and not lock_override:
+        return (
+            f"Blocked API host change: locked={locked_host}, current={host}. "
+            "Set THREAD_AUTO_ALLOW_API_HOST_CHANGE=1 to migrate."
+        )
+
+    if not locked_host:
+        try:
+            _API_HOST_LOCK_FILE.write_text(host, encoding="utf-8")
+            try:
+                os.chmod(_API_HOST_LOCK_FILE, 0o600)
+            except OSError:
+                pass
+        except Exception:
+            logger.warning("Failed to write API host lock file")
+    return None
 
 
 def _load_cred() -> dict:

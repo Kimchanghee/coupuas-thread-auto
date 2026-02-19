@@ -1,6 +1,7 @@
 """Auto-updater with release checksum verification."""
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -28,9 +29,19 @@ class AutoUpdater:
         "github-releases.githubusercontent.com",
         "release-assets.githubusercontent.com",
     }
+    EXPECTED_EXE_NAME = "CoupangThreadAuto.exe"
+    REQUIRE_SIGNED_UPDATES = True
 
     def __init__(self, current_version: str):
         self.current_version = str(current_version or "").lstrip("v")
+        thumbprints = os.getenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "")
+        self.trusted_thumbprints = {
+            item.strip().upper()
+            for item in thumbprints.split(",")
+            if item.strip()
+        }
+        self.trusted_publisher = os.getenv("COUPUAS_TRUSTED_PUBLISHER", "").strip().lower()
+        self.allow_unsigned_updates = os.getenv("COUPUAS_ALLOW_UNSIGNED_UPDATES", "").strip() == "1"
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -82,6 +93,55 @@ class AutoUpdater:
                 return asset
         return None
 
+    def _verify_release_author(self, release_data: Dict) -> bool:
+        author_login = str((release_data.get("author") or {}).get("login", "")).strip().lower()
+        if not author_login:
+            return False
+        return author_login == self.GITHUB_OWNER.lower()
+
+    def _verify_authenticode_signature(self, file_path: str) -> bool:
+        if os.name != "nt":
+            return True
+        if self.allow_unsigned_updates:
+            return True
+        if not self.REQUIRE_SIGNED_UPDATES:
+            return True
+
+        escaped_file_path = str(file_path).replace("'", "''")
+        ps_script = (
+            "$ErrorActionPreference='Stop';"
+            f"$sig=Get-AuthenticodeSignature -FilePath '{escaped_file_path}';"
+            "$cert=$sig.SignerCertificate;"
+            "$obj=[PSCustomObject]@{"
+            "Status=$sig.Status.ToString();"
+            "Subject=($(if($cert){$cert.Subject}else{''}));"
+            "Thumbprint=($(if($cert){$cert.Thumbprint}else{''}))"
+            "};"
+            "$obj | ConvertTo-Json -Compress"
+        )
+        try:
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            )
+            data = json.loads((completed.stdout or "").strip() or "{}")
+            status = str(data.get("Status", "")).strip().lower()
+            subject = str(data.get("Subject", "")).strip().lower()
+            thumbprint = str(data.get("Thumbprint", "")).strip().upper()
+
+            if status != "valid":
+                return False
+            if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
+                return False
+            if self.trusted_publisher and self.trusted_publisher not in subject:
+                return False
+            return bool(subject)
+        except Exception:
+            return False
+
     def check_for_updates(self) -> Optional[Dict]:
         response = self.session.get(self.RELEASES_URL, timeout=10)
         if response.status_code == 404:
@@ -89,6 +149,8 @@ class AutoUpdater:
 
         response.raise_for_status()
         release_data = response.json()
+        if not self._verify_release_author(release_data):
+            return None
 
         latest_version = str(release_data.get("tag_name", "")).lstrip("v")
         if not latest_version:
@@ -101,7 +163,7 @@ class AutoUpdater:
         exe_asset = None
         for asset in assets:
             name = str(asset.get("name", ""))
-            if name.lower().endswith(".exe"):
+            if name.lower() == self.EXPECTED_EXE_NAME.lower():
                 exe_asset = asset
                 break
 
@@ -179,6 +241,12 @@ class AutoUpdater:
                 except OSError:
                     pass
                 raise ValueError("Downloaded update checksum mismatch")
+            if not self._verify_authenticode_signature(temp_file):
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
+                raise ValueError("Downloaded update signature validation failed")
 
             return temp_file
 
@@ -188,6 +256,10 @@ class AutoUpdater:
 
     def install_update(self, update_file: str) -> bool:
         try:
+            if not self._verify_authenticode_signature(update_file):
+                print("Update signature validation failed.")
+                return False
+
             current_exe = sys.executable
             if not getattr(sys, "frozen", False):
                 print("개발 모드에서는 자동 업데이트를 지원하지 않습니다.")

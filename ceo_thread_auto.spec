@@ -36,7 +36,6 @@ hidden_imports = [
     'src.services',
     'src.services.coupang_parser',
     'src.services.aggro_generator',
-    'src.services.telegram_service',
 
     # ============ Google/Gemini AI ============
     'google',
@@ -215,7 +214,6 @@ a = Analysis(
     pathex=[project_root],
     binaries=binaries,
     datas=datas + [
-        ('src', 'src'),  # src 폴더 전체 포함
         ('fonts', 'fonts'),  # UI fonts (Pretendard 등)
     ],
     hiddenimports=list(set(hidden_imports)),  # 중복 제거
@@ -265,7 +263,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # 콘솔 표시 (로그 확인용, 배포시 False로 변경)
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,

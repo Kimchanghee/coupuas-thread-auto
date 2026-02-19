@@ -74,13 +74,11 @@ HIDDEN_IMPORTS = [
     "src.services.image_search",
     "src.services.link_history",
     "src.services.coupang_parser",
-    "src.services.telegram_service",
 ]
 
 # 포함할 데이터 파일 및 폴더
 DATAS = [
     # (소스 경로, 대상 폴더)
-    ("src", "src"),
     ("fonts", "fonts"),
 ]
 

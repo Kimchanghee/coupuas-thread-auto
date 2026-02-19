@@ -1,115 +1,143 @@
-"""
-설정 관리 모듈
-쿠팡 파트너스 Threads 자동화 설정을 관리합니다.
-"""
+﻿"""Application configuration storage."""
 
 import json
-import os
 import logging
+import os
 from pathlib import Path
+
+from src.secure_storage import protect_secret, unprotect_secret
 
 logger = logging.getLogger(__name__)
 
 
 class Config:
+    _SECRET_KEYS = ("gemini_api_key", "threads_api_key")
+
     def __init__(self):
         self.config_dir = Path.home() / ".shorts_thread_maker"
         self.config_file = self.config_dir / "config.json"
+        self.secrets_file = self.config_dir / "secrets.json"
         self.ensure_config_dir()
         self.load()
 
     def ensure_config_dir(self):
-        """설정 디렉토리가 없으면 생성 (owner-only 권한)."""
+        """Ensure configuration directory exists."""
         if not self.config_dir.exists():
             self.config_dir.mkdir(parents=True, mode=0o700)
 
     def load(self):
-        """설정 파일을 로드합니다."""
+        """Load config and encrypted secrets."""
+        self._set_defaults()
+        data = {}
         if self.config_file.exists():
             try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self._load_from_dict(data)
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data = loaded
             except (json.JSONDecodeError, OSError):
                 logger.exception("Failed to load config file")
-                self._set_defaults()
-                self.save()
-        else:
-            self._set_defaults()
+                data = {}
+
+        self._load_from_dict(data)
+        self._load_secrets()
+
+        # Backward-compat migration for old plaintext values.
+        migrated = False
+        for key in self._SECRET_KEYS:
+            legacy_value = str(data.get(key, "") or "").strip()
+            if not getattr(self, key, "") and legacy_value:
+                setattr(self, key, legacy_value)
+                migrated = True
+        if migrated:
+            self.save()
+        elif not self.config_file.exists():
             self.save()
 
     def _load_from_dict(self, data: dict):
-        """딕셔너리에서 설정을 로드합니다."""
-        # 필수 설정
-        self.gemini_api_key = data.get('gemini_api_key', '')
-
-        # 업로드 설정
-        self.upload_interval = data.get('upload_interval', 60)
-
-        # 브라우저 자동화용 (선택)
-        self.instagram_username = data.get('instagram_username', '')
-        # 호환성: 이전 버전에서 저장된 비밀번호 로드 (더 이상 디스크에 저장하지 않음)
-        self.instagram_password = data.get('instagram_password', '')
-
-        # Threads API (선택)
-        self.threads_api_key = data.get('threads_api_key', '')
-
-        # 텔레그램 알림 (선택)
-        self.telegram_bot_token = data.get('telegram_bot_token', '')
-        self.telegram_chat_id = data.get('telegram_chat_id', '')
-        self.telegram_enabled = data.get('telegram_enabled', False)
-
-        # 미디어 설정
-        self.media_download_dir = data.get('media_download_dir', 'media')
-        self.prefer_video = data.get('prefer_video', True)
-
-        # 호환성: 이전 버전 설정
-        self.instruction = data.get('instruction', '')
-
-        # 튜토리얼
-        self.tutorial_shown = data.get('tutorial_shown', False)
+        self.upload_interval = int(data.get("upload_interval", 60) or 60)
+        self.instagram_username = str(data.get("instagram_username", "") or "")
+        # Compatibility: read legacy field if present, do not persist on save.
+        self.instagram_password = str(data.get("instagram_password", "") or "")
+        self.media_download_dir = str(data.get("media_download_dir", "media") or "media")
+        self.prefer_video = bool(data.get("prefer_video", True))
+        self.allow_ai_fallback = bool(data.get("allow_ai_fallback", False))
+        self.instruction = str(data.get("instruction", "") or "")
+        self.tutorial_shown = bool(data.get("tutorial_shown", False))
 
     def _set_defaults(self):
-        """기본값을 설정합니다."""
-        self.gemini_api_key = ''
+        self.gemini_api_key = ""
         self.upload_interval = 60
-        self.instagram_username = ''
-        self.instagram_password = ''
-        self.threads_api_key = ''
-        self.telegram_bot_token = ''
-        self.telegram_chat_id = ''
-        self.telegram_enabled = False
-        self.media_download_dir = 'media'
+        self.instagram_username = ""
+        self.instagram_password = ""
+        self.threads_api_key = ""
+        self.media_download_dir = "media"
         self.prefer_video = True
-        self.instruction = ''
+        self.allow_ai_fallback = False
+        self.instruction = ""
         self.tutorial_shown = False
 
+    def _load_secrets(self):
+        if not self.secrets_file.exists():
+            return
+        try:
+            with open(self.secrets_file, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if not isinstance(payload, dict):
+                return
+            for key in self._SECRET_KEYS:
+                raw_value = payload.get(key)
+                if isinstance(raw_value, str):
+                    setattr(self, key, unprotect_secret(raw_value))
+        except Exception:
+            logger.exception("Failed to load secrets file")
+
+    def _save_secrets(self):
+        payload = {}
+        for key in self._SECRET_KEYS:
+            value = str(getattr(self, key, "") or "").strip()
+            if not value:
+                continue
+            protected = protect_secret(value, "shorts_thread_maker")
+            if protected is None:
+                logger.warning("Skipping secret '%s' because secure storage is unavailable", key)
+                continue
+            payload[key] = protected
+
+        try:
+            if payload:
+                with open(self.secrets_file, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                try:
+                    os.chmod(self.secrets_file, 0o600)
+                except OSError:
+                    pass
+            elif self.secrets_file.exists():
+                self.secrets_file.unlink()
+        except Exception:
+            logger.exception("Failed to save secrets file")
+
     def save(self):
-        """설정 파일 저장 (민감 정보 파일 권한 제한)."""
+        """Save non-sensitive config and encrypted secrets."""
         data = {
-            'gemini_api_key': self.gemini_api_key,
-            'upload_interval': self.upload_interval,
-            'instagram_username': self.instagram_username,
-            'threads_api_key': self.threads_api_key,
-            'telegram_bot_token': self.telegram_bot_token,
-            'telegram_chat_id': self.telegram_chat_id,
-            'telegram_enabled': self.telegram_enabled,
-            'media_download_dir': self.media_download_dir,
-            'prefer_video': self.prefer_video,
-            'instruction': self.instruction,
-            'tutorial_shown': self.tutorial_shown,
+            "upload_interval": self.upload_interval,
+            "instagram_username": self.instagram_username,
+            "media_download_dir": self.media_download_dir,
+            "prefer_video": self.prefer_video,
+            "allow_ai_fallback": self.allow_ai_fallback,
+            "instruction": self.instruction,
+            "tutorial_shown": self.tutorial_shown,
         }
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
+            with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            # owner-only read/write (Unix: 0o600, Windows: best-effort)
             try:
                 os.chmod(self.config_file, 0o600)
             except OSError:
                 pass
         except OSError:
             logger.exception("Failed to save config file")
+        self._save_secrets()
 
 
-# 전역 설정 객체
 config = Config()

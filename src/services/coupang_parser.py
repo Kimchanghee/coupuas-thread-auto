@@ -14,6 +14,7 @@ from urllib.parse import urlparse, parse_qs
 # Gemini API 재시도 설정
 MAX_RETRIES = 5
 RETRY_DELAY = 60  # 1분
+ALLOWED_COUPANG_DOMAINS = ("coupang.com",)
 
 
 class CoupangParser:
@@ -36,6 +37,35 @@ class CoupangParser:
             'Cache-Control': 'max-age=0',
         })
 
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        value = str(url or "").strip()
+        if not value:
+            return ""
+        if not value.startswith(("http://", "https://")):
+            value = f"https://{value}"
+        return value
+
+    @staticmethod
+    def _is_allowed_coupang_host(host: str) -> bool:
+        host = str(host or "").strip().lower()
+        if not host:
+            return False
+        return any(
+            host == domain or host.endswith(f".{domain}")
+            for domain in ALLOWED_COUPANG_DOMAINS
+        )
+
+    @classmethod
+    def _is_allowed_coupang_url(cls, url: str) -> bool:
+        try:
+            parsed = urlparse(cls._normalize_url(url))
+            if parsed.scheme not in ("http", "https"):
+                return False
+            return cls._is_allowed_coupang_host(parsed.hostname or "")
+        except Exception:
+            return False
+
     def parse_link(self, url: str) -> Optional[Dict]:
         """
         쿠팡 파트너스 링크에서 상품 정보 추출
@@ -50,8 +80,10 @@ class CoupangParser:
             상품 정보 딕셔너리 또는 None
         """
         try:
-            if not url.startswith('http'):
-                url = 'https://' + url
+            url = self._normalize_url(url)
+            if not self._is_allowed_coupang_url(url):
+                print("  [!] Invalid or disallowed URL")
+                return None
 
             print(f"  [Parse] Parsing Coupang link...")
 
@@ -321,12 +353,18 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
     def _follow_redirect(self, url: str) -> Optional[str]:
         """리다이렉트를 따라가서 최종 URL 반환"""
         try:
-            response = self.session.head(url, allow_redirects=True, timeout=10)
-            return response.url
+            normalized = self._normalize_url(url)
+            if not self._is_allowed_coupang_url(normalized):
+                return None
+
+            response = self.session.head(normalized, allow_redirects=True, timeout=10)
+            final_url = self._normalize_url(response.url)
+            return final_url if self._is_allowed_coupang_url(final_url) else None
         except:
             try:
-                response = self.session.get(url, allow_redirects=True, timeout=10)
-                return response.url
+                response = self.session.get(normalized, allow_redirects=True, timeout=10)
+                final_url = self._normalize_url(response.url)
+                return final_url if self._is_allowed_coupang_url(final_url) else None
             except Exception as e:
                 print(f"  [!] Redirect error: {e}")
                 return None
@@ -349,9 +387,7 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
     def validate_link(self, url: str) -> bool:
         """쿠팡 파트너스 링크 유효성 검사"""
         try:
-            parsed = urlparse(url if url.startswith('http') else 'https://' + url)
-            valid_domains = ['link.coupang.com', 'www.coupang.com', 'coupang.com']
-            return any(parsed.netloc.endswith(domain) for domain in valid_domains)
+            return self._is_allowed_coupang_url(url)
         except:
             return False
 
