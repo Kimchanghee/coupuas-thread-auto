@@ -31,6 +31,7 @@ class AutoUpdater:
     }
     EXPECTED_EXE_NAME = "CoupangThreadAuto.exe"
     REQUIRE_SIGNED_UPDATES = True
+    DEFAULT_TRUSTED_PUBLISHERS = {"paro partners"}
 
     def __init__(self, current_version: str):
         self.current_version = str(current_version or "").lstrip("v")
@@ -40,8 +41,25 @@ class AutoUpdater:
             for item in thumbprints.split(",")
             if item.strip()
         }
-        self.trusted_publisher = os.getenv("COUPUAS_TRUSTED_PUBLISHER", "").strip().lower()
-        self.allow_unsigned_updates = os.getenv("COUPUAS_ALLOW_UNSIGNED_UPDATES", "").strip() == "1"
+
+        publishers = {
+            item.strip().lower()
+            for item in os.getenv("COUPUAS_TRUSTED_PUBLISHERS", "").split(",")
+            if item.strip()
+        }
+        legacy_publisher = os.getenv("COUPUAS_TRUSTED_PUBLISHER", "").strip().lower()
+        if legacy_publisher:
+            publishers.add(legacy_publisher)
+        self.trusted_publishers = publishers or set(self.DEFAULT_TRUSTED_PUBLISHERS)
+
+        self.is_dev_mode = not getattr(sys, "frozen", False)
+        self.allow_unsigned_updates = (
+            self.is_dev_mode
+            and os.getenv("COUPUAS_ALLOW_UNSIGNED_UPDATES", "").strip() == "1"
+        )
+
+        self.last_expected_sha256: Optional[str] = None
+
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -136,7 +154,9 @@ class AutoUpdater:
                 return False
             if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
                 return False
-            if self.trusted_publisher and self.trusted_publisher not in subject:
+            if self.trusted_publishers and not any(
+                publisher in subject for publisher in self.trusted_publishers
+            ):
                 return False
             return bool(subject)
         except Exception:
@@ -207,10 +227,8 @@ class AutoUpdater:
             expected_sha256 = self._parse_sha256_text(checksum_resp.text)
             if not expected_sha256:
                 raise ValueError("Checksum file does not contain SHA-256 hash")
-
-            safe_name = os.path.basename(str(update_info.get("asset_name", "update.exe")))
-            if not safe_name.lower().endswith(".exe"):
-                safe_name = f"{safe_name}.exe"
+            self.last_expected_sha256 = expected_sha256
+            update_info["expected_sha256"] = expected_sha256
 
             with tempfile.NamedTemporaryFile(
                 prefix="coupuas_update_",
@@ -251,18 +269,25 @@ class AutoUpdater:
             return temp_file
 
         except Exception as e:
-            print(f"다운로드 중 오류: {e}")
+            print(f"Download error: {e}")
             return None
 
-    def install_update(self, update_file: str) -> bool:
+    def install_update(self, update_file: str, expected_sha256: str = "") -> bool:
         try:
             if not self._verify_authenticode_signature(update_file):
                 print("Update signature validation failed.")
                 return False
 
+            expected_sha = str(expected_sha256 or self.last_expected_sha256 or "").strip().lower()
+            if expected_sha:
+                actual_sha = self._compute_sha256(update_file)
+                if actual_sha != expected_sha:
+                    print("Update checksum validation failed.")
+                    return False
+
             current_exe = sys.executable
             if not getattr(sys, "frozen", False):
-                print("개발 모드에서는 자동 업데이트를 지원하지 않습니다.")
+                print("Auto-update is only supported in packaged executable mode.")
                 return False
 
             backup_exe = current_exe + ".backup"
@@ -273,65 +298,93 @@ class AutoUpdater:
                     pass
 
             shutil.copy2(current_exe, backup_exe)
-            update_script = self._create_update_script(current_exe, update_file, backup_exe)
+            update_script = self._create_update_script()
 
-            subprocess.Popen(["cmd", "/c", update_script], shell=False)
+            subprocess.Popen(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    update_script,
+                    "-CurrentExe",
+                    current_exe,
+                    "-UpdateFile",
+                    update_file,
+                    "-BackupExe",
+                    backup_exe,
+                    "-ExpectedSha256",
+                    expected_sha,
+                ],
+                shell=False,
+            )
             return True
 
         except Exception as e:
-            print(f"업데이트 설치 중 오류: {e}")
+            print(f"Update installation error: {e}")
             return False
 
-    def _create_update_script(self, current_exe: str, update_file: str, backup_exe: str) -> str:
-        current_exe_q = current_exe.replace('"', '""')
-        update_file_q = update_file.replace('"', '""')
-        backup_exe_q = backup_exe.replace('"', '""')
-
-        script_content = f"""@echo off
-setlocal
-
-echo Update install in progress...
-timeout /t 5 /nobreak >nul
-
-set retry=0
-:delete_loop
-del /f \"{current_exe_q}\" 2>nul
-if exist \"{current_exe_q}\" (
-    set /a retry+=1
-    if %retry% lss 10 (
-        timeout /t 1 /nobreak >nul
-        goto delete_loop
-    ) else (
-        copy /y \"{backup_exe_q}\" \"{current_exe_q}\" >nul
-        goto cleanup
-    )
+    def _create_update_script(self) -> str:
+        script_content = """param(
+    [Parameter(Mandatory=$true)][string]$CurrentExe,
+    [Parameter(Mandatory=$true)][string]$UpdateFile,
+    [Parameter(Mandatory=$true)][string]$BackupExe,
+    [string]$ExpectedSha256 = ''
 )
+$ErrorActionPreference = 'Stop'
+try {
+    Start-Sleep -Seconds 2
+    if (-not (Test-Path -LiteralPath $UpdateFile)) {
+        throw 'Update file is missing.'
+    }
+    if ($ExpectedSha256) {
+        $actualHash = (Get-FileHash -LiteralPath $UpdateFile -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $ExpectedSha256.ToLowerInvariant()) {
+            throw 'Update checksum mismatch.'
+        }
+    }
+    $sig = Get-AuthenticodeSignature -FilePath $UpdateFile
+    if ($sig.Status -ne 'Valid') {
+        throw 'Update signature is invalid.'
+    }
 
-copy /y \"{update_file_q}\" \"{current_exe_q}\" >nul
-if errorlevel 1 (
-    copy /y \"{backup_exe_q}\" \"{current_exe_q}\" >nul
-    goto cleanup
-)
+    $deleted = $false
+    for ($i = 0; $i -lt 15; $i++) {
+        try {
+            Remove-Item -LiteralPath $CurrentExe -Force -ErrorAction Stop
+        } catch {
+        }
+        if (-not (Test-Path -LiteralPath $CurrentExe)) {
+            $deleted = $true
+            break
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $deleted) {
+        throw 'Failed to stop current process for replacement.'
+    }
 
-del /f \"{backup_exe_q}\" 2>nul
-del /f \"{update_file_q}\" 2>nul
-start \"\" \"{current_exe_q}\"
-goto end
-
-:cleanup
-del /f \"{update_file_q}\" 2>nul
-echo Update failed and previous version was restored.
-pause
-
-:end
-del /f \"%~f0\"
-endlocal
+    Copy-Item -LiteralPath $UpdateFile -Destination $CurrentExe -Force
+    Remove-Item -LiteralPath $BackupExe -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $UpdateFile -Force -ErrorAction SilentlyContinue
+    Start-Process -FilePath $CurrentExe
+} catch {
+    try {
+        if (Test-Path -LiteralPath $BackupExe) {
+            Copy-Item -LiteralPath $BackupExe -Destination $CurrentExe -Force
+        }
+    } catch {
+    }
+} finally {
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+}
 """
 
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
-            suffix=".bat",
+            suffix=".ps1",
             prefix="update_coupuas_",
             delete=False,
         ) as script_file:

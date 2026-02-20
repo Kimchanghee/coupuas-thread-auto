@@ -17,6 +17,11 @@ RETRY_DELAY = 60  # 1분
 ALLOWED_COUPANG_DOMAINS = ("coupang.com",)
 
 
+def _redact_api_key(value: object) -> str:
+    text = str(value or "")
+    return re.sub(r"(key=)[^&\\s]+", r"\\1[REDACTED]", text)
+
+
 class CoupangParser:
     """쿠팡 파트너스 링크 파서 (스크린샷 + AI Vision 방식)"""
 
@@ -242,7 +247,7 @@ JSON만 출력하세요."""
         try:
             print(f"  [Parse] Using Gemini REST API with URL Context...")
 
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={self.google_api_key}"
+            api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
             prompt = f"""다음 쿠팡 상품 페이지에서 정보를 추출해주세요: {url}
 
@@ -272,7 +277,12 @@ JSON만 출력하세요."""
                 }
             }
 
-            response = requests.post(api_url, json=payload, timeout=60)
+            response = requests.post(
+                api_url,
+                json=payload,
+                headers={"x-goog-api-key": self.google_api_key},
+                timeout=60,
+            )
             response.raise_for_status()
 
             result = response.json()
@@ -288,7 +298,7 @@ JSON만 출력하세요."""
             return None
 
         except Exception as e:
-            print(f"  [!] Gemini REST API error: {e}")
+            print(f"  [!] Gemini REST API error: {_redact_api_key(e)}")
             return None
 
     def _analyze_screenshot_with_gemini(self, screenshot_bytes: bytes) -> Optional[Dict]:
@@ -301,7 +311,7 @@ JSON만 출력하세요."""
             image_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
             # Gemini API 호출
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={self.google_api_key}"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
             prompt = """이 쿠팡 상품 페이지 스크린샷을 분석하여 다음 정보를 JSON 형식으로 추출해주세요:
 
@@ -332,7 +342,12 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
                 }
             }
 
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(
+                url,
+                json=payload,
+                headers={"x-goog-api-key": self.google_api_key},
+                timeout=30,
+            )
             response.raise_for_status()
 
             result = response.json()
@@ -347,7 +362,7 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
             return None
 
         except Exception as e:
-            print(f"  [!] Gemini Vision error: {e}")
+            print(f"  [!] Gemini Vision error: {_redact_api_key(e)}")
             return None
 
     def _follow_redirect(self, url: str) -> Optional[str]:

@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Auth client for dashboard API."""
 
-import hashlib
 import json
 import logging
 import os
@@ -42,7 +41,7 @@ _CRED_DIR = Path.home() / ".shorts_thread_maker"
 _CRED_FILE = _CRED_DIR / "auth.json"
 _API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
-_SENSITIVE_CRED_FIELDS = {"token", "remember_pw"}
+_SENSITIVE_CRED_FIELDS = {"token"}
 _MIN_PASSWORD_LENGTH = 8
 _WORK_RESERVATION_SUPPORTED: Optional[bool] = None
 
@@ -88,7 +87,6 @@ def _check_api_host_lock(parsed) -> Optional[str]:
         return None
 
     _ensure_cred_dir()
-    lock_override = os.getenv("THREAD_AUTO_ALLOW_API_HOST_CHANGE", "").strip() == "1"
     locked_host = ""
     try:
         if _API_HOST_LOCK_FILE.exists():
@@ -96,10 +94,10 @@ def _check_api_host_lock(parsed) -> Optional[str]:
     except Exception:
         logger.warning("Failed to read API host lock file")
 
-    if locked_host and locked_host != host and not lock_override:
+    if locked_host and locked_host != host:
         return (
             f"Blocked API host change: locked={locked_host}, current={host}. "
-            "Set THREAD_AUTO_ALLOW_API_HOST_CHANGE=1 to migrate."
+            "Delete api_host.lock after verifying trusted server to migrate."
         )
 
     if not locked_host:
@@ -124,6 +122,7 @@ def _load_cred() -> dict:
                     for field in _SENSITIVE_CRED_FIELDS:
                         if field in payload:
                             payload[field] = _unprotect_secret(payload.get(field))
+                    payload.pop("remember_pw", None)
                     return payload
         except Exception:
             pass
@@ -133,6 +132,7 @@ def _load_cred() -> dict:
 def _save_cred(data: dict) -> None:
     _ensure_cred_dir()
     serialized = dict(data or {})
+    serialized.pop("remember_pw", None)
     for field in _SENSITIVE_CRED_FIELDS:
         if field in serialized:
             protected = _protect_secret(serialized.get(field, ""))
@@ -176,10 +176,7 @@ def _normalize_password_for_backend(password: str) -> str:
     """
     if not isinstance(password, str):
         password = str(password or "")
-    if len(password) >= _MIN_PASSWORD_LENGTH:
-        return password
-    digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    return f"spw_{digest[:16]}"
+    return password
 
 
 def _localize_message(message: str) -> str:
@@ -502,6 +499,9 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
     if not password:
         return {"success": False, "message": "비밀번호를 입력해주세요."}
 
+    if len(password) < _MIN_PASSWORD_LENGTH:
+        return {"success": False, "message": "Password must be at least 8 characters."}
+
     contact_clean = re.sub(r"[^0-9]", "", str(contact or ""))
     if len(contact_clean) < 10:
         return {"success": False, "message": "올바른 연락처를 입력해주세요."}
@@ -587,6 +587,8 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     password = str(password or "")
     if not username or not password:
         return {"status": False, "message": "아이디와 비밀번호를 입력해주세요."}
+    if len(password) < _MIN_PASSWORD_LENGTH:
+        return {"status": False, "message": "Password must be at least 8 characters."}
 
     backend_password = _normalize_password_for_backend(password)
 

@@ -44,7 +44,7 @@ if _LOCAL_ENV.exists():
 
 # project-user-dashboard 백엔드의 .env 로드 (형제 프로젝트)
 _DASHBOARD_ENV = _PROJECT_ROOT.parent / "project-user-dashboard" / ".env"
-if _DASHBOARD_ENV.exists():
+if os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1" and _DASHBOARD_ENV.exists():
     load_dotenv(_DASHBOARD_ENV, override=False)
 
 from PyQt6.QtWidgets import QApplication, QSplashScreen
@@ -57,7 +57,7 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.2.1"
+VERSION = "v2.2.2"
 logger = logging.getLogger(__name__)
 
 

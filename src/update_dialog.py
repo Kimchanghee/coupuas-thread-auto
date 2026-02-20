@@ -350,7 +350,10 @@ class UpdateDialog(QDialog):
 
         try:
             updater = AutoUpdater(self.current_version)
-            success = updater.install_update(self.download_path)
+            expected_sha256 = ""
+            if isinstance(self.update_info, dict):
+                expected_sha256 = str(self.update_info.get("expected_sha256", "") or "")
+            success = updater.install_update(self.download_path, expected_sha256=expected_sha256)
 
             if success:
                 # 설치 스크립트가 실행되면 프로그램 종료

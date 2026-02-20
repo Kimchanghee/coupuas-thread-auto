@@ -443,7 +443,6 @@ class LoginWindow(QMainWindow):
                     "user_id": result.get("id"),
                     "username": self.login_id.text().strip().lower(),
                     "token": result.get("key"),
-                    "remember_pw": self.login_pw.text(),
                 })
 
             self.login_success.emit(result)

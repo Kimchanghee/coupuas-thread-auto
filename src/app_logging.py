@@ -2,6 +2,7 @@ import builtins
 import logging
 import os
 import platform
+import re
 import sys
 import threading
 from logging.handlers import RotatingFileHandler
@@ -13,6 +14,21 @@ _PRINT_HOOKED = False
 _ORIGINAL_PRINT = builtins.print
 _PREV_EXCEPTHOOK = None
 _PREV_THREAD_EXCEPTHOOK = None
+
+_SENSITIVE_PATTERNS = [
+    (re.compile(r"(x-goog-api-key\\s*[:=]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
+    (re.compile(r"(key=)([^&\\s]+)", re.IGNORECASE), r"\\1[REDACTED]"),
+    (re.compile(r"(authorization\\s*[:=]\\s*bearer\\s+)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
+    (re.compile(r"(sessionid\\s*[=:]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
+    (re.compile(r"(ds_user_id\\s*[=:]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
+]
+
+
+def _sanitize_log_text(text: str) -> str:
+    safe = str(text or "")
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        safe = pattern.sub(replacement, safe)
+    return safe
 
 
 def _resolve_level(level_name: str) -> int:
@@ -90,7 +106,7 @@ def _install_print_hook() -> None:
     def _logged_print(*args, **kwargs):
         sep = kwargs.get("sep", " ")
         target = kwargs.get("file")
-        text = sep.join(str(arg) for arg in args)
+        text = _sanitize_log_text(sep.join(str(arg) for arg in args))
 
         try:
             if text:

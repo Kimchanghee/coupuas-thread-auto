@@ -5,27 +5,23 @@ This module wires up the official Computer Use preview model
 (`gemini-2.5-computer-use-preview-10-2025`) with a simple action executor that
 runs inside Playwright. It is intentionally sandboxed and opt-in; it does NOT
 run anywhere in the main app flow by default.
-
-Usage:
-    1) pip install google-genai playwright
-       playwright install chromium
-    2) Set GOOGLE_API_KEY (or pass api_key=... to ComputerUseAgent).
-    3) Run: python -m src.computer_use_agent "Go to threads.net and ..."
-
-⚠️ Preview model: supervise closely; do not use for sensitive/critical actions.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types
 from google.genai.types import Content, Part
 from playwright.sync_api import Page, sync_playwright
+
+from src.secure_storage import protect_secret, unprotect_secret
 
 
 SCREEN_WIDTH = 1440
@@ -51,107 +47,151 @@ class ComputerUseAgent:
         """
         Args:
             api_key: Google API key
-            headless: 브라우저 헤드리스 모드
-            profile_dir: 세션 저장 디렉토리 (쿠키/localStorage 저장)
+            headless: whether to run browser in headless mode
+            profile_dir: logical profile id (used to derive encrypted session path)
         """
         self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
 
-        # Gemini Client 생성 (더미 키면 None)
         if self.api_key and self.api_key != "dummy-key-for-session-setup":
             self.client = genai.Client(api_key=self.api_key)
         else:
-            self.client = None  # 세션 저장만 사용 시
+            self.client = None
 
         self.playwright = None
         self.browser = None
         self.context = None
         self.page: Optional[Page] = None
         self.headless = headless
-        self.profile_dir = profile_dir
+
+        self.profile_name = self._normalize_profile_name(profile_dir)
+        self.profile_path = self._resolve_profile_path(self.profile_name)
+        self.legacy_profile_path = Path(os.path.abspath(profile_dir))
+        self.profile_dir = str(self.profile_path)
+
+    @staticmethod
+    def _normalize_profile_name(value: str) -> str:
+        raw = str(value or "default").strip().replace("\\", "_").replace("/", "_")
+        raw = raw.replace(" ", "_").replace(".", "_")
+        safe = "".join(ch for ch in raw if ch.isalnum() or ch in {"_", "-"})
+        return safe or "default"
+
+    @staticmethod
+    def _resolve_profile_path(profile_name: str) -> Path:
+        root = Path.home() / ".shorts_thread_maker" / "sessions"
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(root, 0o700)
+        except OSError:
+            pass
+
+        profile_path = root / profile_name
+        profile_path.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(profile_path, 0o700)
+        except OSError:
+            pass
+        return profile_path
+
+    def _get_storage_state_path(self) -> str:
+        return str(self.profile_path / "storage_state.sec")
+
+    def _load_storage_state(self) -> Optional[Dict[str, Any]]:
+        secure_path = Path(self._get_storage_state_path())
+        if secure_path.exists():
+            try:
+                payload = secure_path.read_text(encoding="utf-8")
+                plain = unprotect_secret(payload)
+                if plain:
+                    data = json.loads(plain)
+                    if isinstance(data, dict):
+                        return data
+            except Exception:
+                pass
+
+        # Legacy plaintext migration path.
+        legacy_path = self.legacy_profile_path / "storage_state.json"
+        if legacy_path.exists():
+            try:
+                data = json.loads(legacy_path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+
+        return None
+
+    def _write_storage_state(self, state: Dict[str, Any]) -> None:
+        secure_path = Path(self._get_storage_state_path())
+        payload = json.dumps(state, ensure_ascii=False)
+        protected = protect_secret(payload, f"shorts_thread_maker.session.{self.profile_name}")
+        if not protected:
+            return
+
+        secure_path.write_text(protected, encoding="utf-8")
+        try:
+            os.chmod(secure_path, 0o600)
+        except OSError:
+            pass
+
+        # Remove legacy plaintext if present.
+        legacy_path = self.legacy_profile_path / "storage_state.json"
+        if legacy_path.exists():
+            try:
+                legacy_path.unlink()
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------ setup
     def start_browser(self):
         if self.context:
             return
 
-        # 프로필 디렉토리 생성 (절대 경로 사용)
-        profile_path = os.path.abspath(self.profile_dir)
-        os.makedirs(profile_path, exist_ok=True)
-
         self.playwright = sync_playwright().start()
+        self.browser = self.playwright.chromium.launch(
+            headless=self.headless,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+            ],
+        )
 
-        # 🔑 launch_persistent_context 사용 - 브라우저 프로필 완전 유지
-        # 쿠키, localStorage, IndexedDB, Service Worker 등 모든 데이터 유지
-        print(f"  브라우저 프로필: {profile_path}")
+        context_kwargs: Dict[str, Any] = {
+            "viewport": {"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
+        }
+        storage_state = self._load_storage_state()
+        if storage_state:
+            context_kwargs["storage_state"] = storage_state
 
-        try:
-            self.context = self.playwright.chromium.launch_persistent_context(
-                user_data_dir=profile_path,
-                headless=self.headless,
-                viewport={"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
-                # 추가 옵션 - 안정성 향상
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-dev-shm-usage",
-                ],
-                ignore_default_args=["--enable-automation"],
-            )
-            print(f"  브라우저 시작 완료 (프로필 유지)")
-
-            # 기존 쿠키 확인
-            cookies = self.context.cookies()
-            if cookies:
-                threads_cookies = [c for c in cookies if 'threads' in c.get('domain', '').lower()]
-                ig_cookies = [c for c in cookies if 'instagram' in c.get('domain', '').lower()]
-                if threads_cookies or ig_cookies:
-                    print(f"  저장된 세션 발견: Threads {len(threads_cookies)}개, Instagram {len(ig_cookies)}개")
-
-        except Exception as e:
-            print(f"  영구 프로필 로드 실패, 일반 모드로 시작: {e}")
-            # fallback: 일반 브라우저
-            self.browser = self.playwright.chromium.launch(headless=self.headless)
-            self.context = self.browser.new_context(
-                viewport={"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT}
-            )
-
-        # 페이지 가져오기 또는 생성
-        pages = self.context.pages
-        if pages:
-            self.page = pages[0]
-        else:
-            self.page = self.context.new_page()
-
-    def _get_storage_state_path(self) -> str:
-        """세션 저장 경로"""
-        return os.path.join(self.profile_dir, "storage_state.json")
+        self.context = self.browser.new_context(**context_kwargs)
+        self.page = self.context.new_page()
 
     def save_session(self):
-        """현재 세션 저장 (persistent context는 자동 저장됨)"""
-        if self.context:
-            try:
-                # persistent context는 닫을 때 자동으로 저장됨
-                # 추가로 storage_state도 백업
-                storage_path = self._get_storage_state_path()
-                self.context.storage_state(path=storage_path)
-                print(f"  세션 백업 완료: {storage_path}")
-            except Exception as e:
-                # persistent context에서는 실패해도 괜찮음 (자동 저장됨)
-                print(f"  세션 백업 생략 (자동 저장 모드)")
+        """Persist storage state encrypted at rest."""
+        if not self.context:
+            return
+        try:
+            state = self.context.storage_state()
+            if isinstance(state, dict):
+                self._write_storage_state(state)
+        except Exception:
+            pass
 
     def close(self):
-        """브라우저 닫기 - persistent context는 자동으로 세션 저장"""
+        """Close browser and persist storage state."""
         try:
-            # persistent context 닫기 - 세션 자동 저장됨
+            self.save_session()
+        except Exception:
+            pass
+
+        try:
             if self.context:
-                print("  브라우저 종료 중 (세션 자동 저장)...")
                 self.context.close()
-            # fallback 브라우저가 있으면 닫기
             if self.browser:
                 self.browser.close()
             if self.playwright:
                 self.playwright.stop()
-        except Exception as e:
-            print(f"  브라우저 종료 중 오류: {e}")
+        except Exception:
+            pass
         finally:
             self.page = None
             self.browser = None
@@ -173,18 +213,15 @@ class ComputerUseAgent:
             fname = fc.name
             args = fc.args or {}
             extra_fields: Dict[str, Any] = {}
-            print(f"  실행: {fname} ({args})")
+            print(f"  execute: {fname} ({args})")
 
-            # Safety confirmation - AUTO ACCEPT for automation
             safety = args.get("safety_decision")
             if safety:
-                print("  안전 확인 감지 - 자동화를 위해 자동 수락")
-                print(f"    {safety.get('explanation')}")
                 extra_fields["safety_acknowledgement"] = True
 
             try:
                 if fname == "open_web_browser":
-                    pass  # already open
+                    pass
                 elif fname == "wait_5_seconds":
                     time.sleep(5)
                 elif fname == "go_back":
@@ -221,8 +258,7 @@ class ComputerUseAgent:
                 elif fname == "key_combination":
                     keys = args.get("keys")
                     if keys:
-                        # Playwright expects "+", e.g., "Control+A"
-                        page.keyboard.press(keys.replace("+", "+"))
+                        page.keyboard.press(keys)
                 elif fname == "scroll_document":
                     direction = args.get("direction", "down")
                     amount = 1200
@@ -261,8 +297,8 @@ class ComputerUseAgent:
                 page.wait_for_load_state("domcontentloaded")
                 time.sleep(0.5)
                 results.append(ExecutedAction(fname, extra_fields))
-            except Exception as e:  # noqa: BLE001
-                print(f"  실행 오류 ({fname}): {e}")
+            except Exception as e:
+                print(f"  execution error ({fname}): {e}")
                 results.append(ExecutedAction(fname, {"error": str(e)}))
 
         return results
@@ -291,10 +327,13 @@ class ComputerUseAgent:
 
     # --------------------------------------------------------------- main loop
     def run_goal(self, goal: str, turn_limit: int = 8, skip_navigation: bool = False):
+        if self.client is None:
+            print("Google API client is not configured.")
+            return None
+
         self.start_browser()
         assert self.page
 
-        # Initial screenshot and prompt
         if not skip_navigation:
             self.page.goto("about:blank")
         initial_screenshot = self.page.screenshot(type="png")
@@ -318,7 +357,7 @@ class ComputerUseAgent:
                     Part(
                         inline_data=types.Blob(
                             mime_type="image/png",
-                            data=initial_screenshot
+                            data=initial_screenshot,
                         )
                     ),
                 ],
@@ -333,9 +372,8 @@ class ComputerUseAgent:
                 config=config,
             )
 
-            # candidates가 비어있는지 확인
             if not response.candidates or len(response.candidates) == 0:
-                print("  API 응답 없음 (API 과부하 또는 안전 필터)")
+                print("No API candidates returned")
                 return None
 
             candidate = response.candidates[0]
@@ -346,10 +384,9 @@ class ComputerUseAgent:
                 final_text = " ".join(
                     [p.text for p in candidate.content.parts if getattr(p, "text", None)]
                 )
-                print(f"  에이전트 완료: {final_text}")
+                print(f"Task complete: {final_text}")
                 return final_text
 
-            # Execute actions
             results = self._execute_function_calls(candidate, self.page, SCREEN_WIDTH, SCREEN_HEIGHT)
             responses = self._get_function_responses(self.page, results)
 
@@ -360,13 +397,13 @@ class ComputerUseAgent:
                 )
             )
 
-        print("  작업 턴 한도 도달")
+        print("Turn limit reached")
         return None
 
 
 def main(argv: List[str]):
     if len(argv) < 2:
-        print("Usage: python -m src.computer_use_agent \"<goal text>\"")
+        print('Usage: python -m src.computer_use_agent "<goal text>"')
         sys.exit(1)
 
     goal = argv[1]

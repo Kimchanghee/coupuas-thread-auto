@@ -145,7 +145,7 @@ def test_register_200_failure_with_error_object_returns_message(monkeypatch):
     assert result["message"] == "이미 가입한 아이디입니다. 로그인해 주세요."
 
 
-def test_register_allows_short_password_with_backend_normalization(monkeypatch):
+def test_register_rejects_short_password(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(
         200,
@@ -162,24 +162,23 @@ def test_register_allows_short_password_with_backend_normalization(monkeypatch):
         email="short@example.com",
     )
 
-    assert result["success"] is True
-    assert len(session.calls) == 1
-    assert session.calls[0]["json"]["password"].startswith("spw_")
-    assert len(session.calls[0]["json"]["password"]) >= 8
+    assert result["success"] is False
+    assert "8 characters" in result["message"]
+    assert len(session.calls) == 0
 
 
-def test_login_normalizes_short_password_for_backend(monkeypatch):
+def test_login_rejects_short_password(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(200, {"status": "EU001", "message": "EU001"})
     session = _FakeSession(response)
     monkeypatch.setattr(auth_client, "_session", session)
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    auth_client.login("shortuser", "1")
+    result = auth_client.login("shortuser", "1")
 
-    payload = session.calls[0]["json"]
-    assert payload["pw"].startswith("spw_")
-    assert len(payload["pw"]) >= 8
+    assert result["status"] is False
+    assert "8 characters" in result["message"]
+    assert len(session.calls) == 0
 
 
 def test_register_429_normalizes_rate_limit_message(monkeypatch):
@@ -206,7 +205,6 @@ def test_register_429_normalizes_rate_limit_message(monkeypatch):
     )
 
     assert result["success"] is False
-    assert "제한" in result["message"]
     assert "5 per 1 hour" in result["message"]
 
 
