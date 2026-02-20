@@ -8,11 +8,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 from typing import Dict, Optional
 from urllib.parse import urlparse
 
 import requests
 from packaging import version
+from src.fs_security import secure_dir_permissions, secure_file_permissions
 
 
 class AutoUpdater:
@@ -32,6 +34,7 @@ class AutoUpdater:
     EXPECTED_EXE_NAME = "CoupangThreadAuto.exe"
     REQUIRE_SIGNED_UPDATES = True
     MAX_UPDATE_SIZE_BYTES = 200 * 1024 * 1024
+    # Release CI injects the production signer thumbprint into this constant at build time.
     DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = set()
     DEFAULT_TRUSTED_PUBLISHERS = {"paro partners"}
 
@@ -128,6 +131,13 @@ class AutoUpdater:
             for chunk in iter(lambda: f.read(8192), b""):
                 digest.update(chunk)
         return digest.hexdigest().lower()
+
+    @staticmethod
+    def _secure_update_temp_dir() -> Path:
+        update_dir = Path.home() / ".shorts_thread_maker" / "updates"
+        update_dir.mkdir(parents=True, exist_ok=True)
+        secure_dir_permissions(update_dir)
+        return update_dir
 
     @staticmethod
     def _find_checksum_asset(assets, exe_name: str):
@@ -276,9 +286,11 @@ class AutoUpdater:
             with tempfile.NamedTemporaryFile(
                 prefix="coupuas_update_",
                 suffix=".exe",
+                dir=str(self._secure_update_temp_dir()),
                 delete=False,
             ) as tmp:
                 temp_file = tmp.name
+            secure_file_permissions(temp_file)
 
             response = self.session.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
@@ -435,15 +447,27 @@ try {
 }
 """
 
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
+        fd, script_path = tempfile.mkstemp(
             suffix=".ps1",
             prefix="update_coupuas_",
-            delete=False,
-        ) as script_file:
-            script_file.write(script_content)
-            return script_file.name
+            dir=str(self._secure_update_temp_dir()),
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as script_file:
+                script_file.write(script_content)
+            secure_file_permissions(script_path)
+            return script_path
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.remove(script_path)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def get_changelog_summary(changelog: str, max_lines: int = 10) -> str:

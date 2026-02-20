@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class Config:
-    _SECRET_KEYS = ("gemini_api_key", "threads_api_key")
+    _SECRET_KEYS = ("gemini_api_key", "threads_api_key", "instagram_password")
 
     def __init__(self):
         self.config_dir = Path.home() / ".shorts_thread_maker"
@@ -45,12 +45,15 @@ class Config:
 
         # Backward-compat migration for old plaintext values.
         migrated = False
+        legacy_plaintext_present = False
         for key in self._SECRET_KEYS:
             legacy_value = str(data.get(key, "") or "").strip()
+            if legacy_value:
+                legacy_plaintext_present = True
             if not getattr(self, key, "") and legacy_value:
                 setattr(self, key, legacy_value)
                 migrated = True
-        if migrated:
+        if migrated or legacy_plaintext_present:
             self.save()
         elif not self.config_file.exists():
             self.save()
@@ -58,8 +61,8 @@ class Config:
     def _load_from_dict(self, data: dict):
         self.upload_interval = int(data.get("upload_interval", 60) or 60)
         self.instagram_username = str(data.get("instagram_username", "") or "")
-        # Compatibility: read legacy field if present, do not persist on save.
-        self.instagram_password = str(data.get("instagram_password", "") or "")
+        # Password is loaded from secure secrets storage and migrated in load().
+        self.instagram_password = ""
         self.media_download_dir = str(data.get("media_download_dir", "media") or "media")
         self.prefer_video = bool(data.get("prefer_video", True))
         self.allow_ai_fallback = bool(data.get("allow_ai_fallback", False))

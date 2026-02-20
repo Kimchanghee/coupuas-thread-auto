@@ -56,7 +56,25 @@ _LOCK = threading.RLock()
 _SENSITIVE_CRED_FIELDS = {"token"}
 _MIN_PASSWORD_LENGTH = 8
 _WORK_RESERVATION_SUPPORTED: Optional[bool] = None
-_TOKEN_TTL_SECONDS = max(int(os.getenv("THREAD_AUTO_TOKEN_TTL_SECONDS", "43200") or 43200), 300)
+_TOKEN_TTL_DEFAULT_SECONDS = 43200
+_TOKEN_TTL_MIN_SECONDS = 300
+_TOKEN_TTL_MAX_SECONDS = 604800
+
+
+def _resolve_token_ttl_seconds() -> int:
+    # Frozen production builds must not accept unbounded token TTL overrides.
+    if getattr(sys, "frozen", False):
+        return _TOKEN_TTL_DEFAULT_SECONDS
+
+    raw_value = os.getenv("THREAD_AUTO_TOKEN_TTL_SECONDS", str(_TOKEN_TTL_DEFAULT_SECONDS)).strip()
+    try:
+        parsed = int(raw_value or _TOKEN_TTL_DEFAULT_SECONDS)
+    except ValueError:
+        parsed = _TOKEN_TTL_DEFAULT_SECONDS
+    return max(_TOKEN_TTL_MIN_SECONDS, min(parsed, _TOKEN_TTL_MAX_SECONDS))
+
+
+_TOKEN_TTL_SECONDS = _resolve_token_ttl_seconds()
 
 
 def _check_api_url() -> Optional[str]:
