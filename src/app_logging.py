@@ -16,11 +16,25 @@ _PREV_EXCEPTHOOK = None
 _PREV_THREAD_EXCEPTHOOK = None
 
 _SENSITIVE_PATTERNS = [
-    (re.compile(r"(x-goog-api-key\\s*[:=]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
-    (re.compile(r"(key=)([^&\\s]+)", re.IGNORECASE), r"\\1[REDACTED]"),
-    (re.compile(r"(authorization\\s*[:=]\\s*bearer\\s+)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
-    (re.compile(r"(sessionid\\s*[=:]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
-    (re.compile(r"(ds_user_id\\s*[=:]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1[REDACTED]"),
+    (re.compile(r"(x-goog-api-key\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(key=)([^&\s]+)", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(sessionid\s*[=:]\s*)([^\s,;]+)", re.IGNORECASE), r"\1[REDACTED]"),
+    (re.compile(r"(ds_user_id\s*[=:]\s*)([^\s,;]+)", re.IGNORECASE), r"\1[REDACTED]"),
+    (
+        re.compile(
+            r"((?:['\"])?(?:password|passwd|pwd|token|access_token|refresh_token|api[_-]?key|secret|authorization|cookie|text)(?:['\"])?\s*[:=]\s*)(?:'[^']*'|\"[^\"]*\"|[^,\s}\]]+)",
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED]",
+    ),
+    (
+        re.compile(
+            r"([?&](?:token|access_token|refresh_token|api[_-]?key|password|passwd|pwd|secret|key)=)([^&\s]+)",
+            re.IGNORECASE,
+        ),
+        r"\1[REDACTED]",
+    ),
 ]
 
 

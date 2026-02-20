@@ -42,9 +42,16 @@ _LOCAL_ENV = _PROJECT_ROOT / ".env"
 if _LOCAL_ENV.exists():
     load_dotenv(_LOCAL_ENV, override=False)
 
+
+def _allow_external_env_loading() -> bool:
+    return (
+        os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1"
+        and os.getenv("THREAD_AUTO_TRUST_EXTERNAL_ENV", "").strip() == "1"
+    )
+
 # project-user-dashboard 백엔드의 .env 로드 (형제 프로젝트)
 _DASHBOARD_ENV = _PROJECT_ROOT.parent / "project-user-dashboard" / ".env"
-if os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1" and _DASHBOARD_ENV.exists():
+if _allow_external_env_loading() and _DASHBOARD_ENV.exists() and not _DASHBOARD_ENV.is_symlink():
     load_dotenv(_DASHBOARD_ENV, override=False)
 
 from PyQt6.QtWidgets import QApplication, QSplashScreen
@@ -57,7 +64,7 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.2.2"
+VERSION = "v2.2.3"
 logger = logging.getLogger(__name__)
 
 
@@ -234,7 +241,7 @@ class SplashScreen(QSplashScreen):
 
 
 def main():
-    log_file = setup_logging()
+    log_file = setup_logging(capture_print=False)
     logger.info("Application startup")
     logger.info("Log file path: %s", log_file)
 
