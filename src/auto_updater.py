@@ -31,32 +31,49 @@ class AutoUpdater:
     }
     EXPECTED_EXE_NAME = "CoupangThreadAuto.exe"
     REQUIRE_SIGNED_UPDATES = True
+    MAX_UPDATE_SIZE_BYTES = 200 * 1024 * 1024
+    DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = set()
     DEFAULT_TRUSTED_PUBLISHERS = {"paro partners"}
 
     def __init__(self, current_version: str):
         self.current_version = str(current_version or "").lstrip("v")
-        thumbprints = os.getenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "")
-        self.trusted_thumbprints = {
-            item.strip().upper()
-            for item in thumbprints.split(",")
-            if item.strip()
-        }
-
-        publishers = {
-            item.strip().lower()
-            for item in os.getenv("COUPUAS_TRUSTED_PUBLISHERS", "").split(",")
-            if item.strip()
-        }
-        legacy_publisher = os.getenv("COUPUAS_TRUSTED_PUBLISHER", "").strip().lower()
-        if legacy_publisher:
-            publishers.add(legacy_publisher)
-        self.trusted_publishers = publishers or set(self.DEFAULT_TRUSTED_PUBLISHERS)
-
         self.is_dev_mode = not getattr(sys, "frozen", False)
-        self.allow_unsigned_updates = (
-            self.is_dev_mode
-            and os.getenv("COUPUAS_ALLOW_UNSIGNED_UPDATES", "").strip() == "1"
-        )
+
+        default_thumbprints = {
+            item.strip().upper()
+            for item in self.DEFAULT_TRUSTED_SIGNER_THUMBPRINTS
+            if str(item).strip()
+        }
+        if self.is_dev_mode:
+            env_thumbprints = os.getenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "")
+            env_thumbprint_set = {
+                item.strip().upper()
+                for item in env_thumbprints.split(",")
+                if item.strip()
+            }
+            self.trusted_thumbprints = env_thumbprint_set or default_thumbprints
+        else:
+            # Production builds use signer pins baked into the binary.
+            self.trusted_thumbprints = default_thumbprints
+
+        publishers = set()
+        if self.is_dev_mode:
+            publishers = {
+                self._normalize_identity(item)
+                for item in os.getenv("COUPUAS_TRUSTED_PUBLISHERS", "").split(",")
+                if item.strip()
+            }
+            legacy_publisher = self._normalize_identity(
+                os.getenv("COUPUAS_TRUSTED_PUBLISHER", "").strip()
+            )
+            if legacy_publisher:
+                publishers.add(legacy_publisher)
+        self.trusted_publishers = publishers or {
+            self._normalize_identity(item) for item in self.DEFAULT_TRUSTED_PUBLISHERS
+        }
+
+        # Unsigned updates are not allowed in production builds.
+        self.allow_unsigned_updates = False
 
         self.last_expected_sha256: Optional[str] = None
 
@@ -78,6 +95,24 @@ class AutoUpdater:
             return host in AutoUpdater.ALLOWED_DOWNLOAD_HOSTS
         except Exception:
             return False
+
+    @staticmethod
+    def _normalize_identity(value: str) -> str:
+        text = str(value or "").strip().lower()
+        return re.sub(r"[^a-z0-9]+", "", text)
+
+    @classmethod
+    def _extract_subject_identities(cls, subject: str) -> set:
+        identities = set()
+        text = str(subject or "").strip()
+        if not text:
+            return identities
+
+        for field in re.finditer(r"(?:^|,\s*)(CN|O|OU)\s*=\s*([^,]+)", text, re.IGNORECASE):
+            normalized = cls._normalize_identity(field.group(2))
+            if normalized:
+                identities.add(normalized)
+        return identities
 
     @staticmethod
     def _parse_sha256_text(content: str) -> Optional[str]:
@@ -124,6 +159,9 @@ class AutoUpdater:
             return True
         if not self.REQUIRE_SIGNED_UPDATES:
             return True
+        if not self.is_dev_mode and not self.trusted_thumbprints:
+            # Fail closed: production updates require pinned signer thumbprints.
+            return False
 
         escaped_file_path = str(file_path).replace("'", "''")
         ps_script = (
@@ -147,16 +185,15 @@ class AutoUpdater:
             )
             data = json.loads((completed.stdout or "").strip() or "{}")
             status = str(data.get("Status", "")).strip().lower()
-            subject = str(data.get("Subject", "")).strip().lower()
+            subject = str(data.get("Subject", "")).strip()
             thumbprint = str(data.get("Thumbprint", "")).strip().upper()
 
             if status != "valid":
                 return False
             if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
                 return False
-            if self.trusted_publishers and not any(
-                publisher in subject for publisher in self.trusted_publishers
-            ):
+            subject_identities = self._extract_subject_identities(subject)
+            if self.trusted_publishers and not subject_identities.intersection(self.trusted_publishers):
                 return False
             return bool(subject)
         except Exception:
@@ -202,6 +239,8 @@ class AutoUpdater:
             return None
 
         size = exe_asset.get("size") or 0
+        if isinstance(size, int) and size > self.MAX_UPDATE_SIZE_BYTES:
+            return None
         return {
             "version": latest_version,
             "download_url": download_url,
@@ -209,6 +248,7 @@ class AutoUpdater:
             "changelog": release_data.get("body", ""),
             "published_at": release_data.get("published_at", ""),
             "size_mb": size / (1024 * 1024),
+            "size_bytes": size,
             "asset_name": str(exe_asset.get("name", "")),
             "checksum_asset_name": str(checksum_asset.get("name", "")),
         }
@@ -217,6 +257,9 @@ class AutoUpdater:
         try:
             download_url = str(update_info.get("download_url", ""))
             checksum_url = str(update_info.get("checksum_download_url", ""))
+            declared_size = int(update_info.get("size_bytes") or 0)
+            if declared_size > self.MAX_UPDATE_SIZE_BYTES:
+                raise ValueError("Update file is too large")
             if not self._is_allowed_download_url(download_url):
                 raise ValueError("Disallowed update download URL")
             if not self._is_allowed_download_url(checksum_url):
@@ -241,6 +284,8 @@ class AutoUpdater:
             response.raise_for_status()
 
             total_size = int(response.headers.get("content-length", 0))
+            if total_size > self.MAX_UPDATE_SIZE_BYTES:
+                raise ValueError("Update file exceeds maximum allowed size")
             downloaded = 0
 
             with open(temp_file, "wb") as f:
@@ -249,6 +294,8 @@ class AutoUpdater:
                         continue
                     f.write(chunk)
                     downloaded += len(chunk)
+                    if downloaded > self.MAX_UPDATE_SIZE_BYTES:
+                        raise ValueError("Update download exceeded maximum allowed size")
                     if progress_callback and total_size > 0:
                         progress_callback((downloaded / total_size) * 100)
 
@@ -269,6 +316,11 @@ class AutoUpdater:
             return temp_file
 
         except Exception as e:
+            if "temp_file" in locals():
+                try:
+                    os.remove(temp_file)
+                except OSError:
+                    pass
             print(f"Download error: {e}")
             return None
 
@@ -279,11 +331,13 @@ class AutoUpdater:
                 return False
 
             expected_sha = str(expected_sha256 or self.last_expected_sha256 or "").strip().lower()
-            if expected_sha:
-                actual_sha = self._compute_sha256(update_file)
-                if actual_sha != expected_sha:
-                    print("Update checksum validation failed.")
-                    return False
+            if not expected_sha:
+                print("Expected update checksum is missing.")
+                return False
+            actual_sha = self._compute_sha256(update_file)
+            if actual_sha != expected_sha:
+                print("Update checksum validation failed.")
+                return False
 
             current_exe = sys.executable
             if not getattr(sys, "frozen", False):
@@ -305,7 +359,7 @@ class AutoUpdater:
                     "powershell",
                     "-NoProfile",
                     "-ExecutionPolicy",
-                    "Bypass",
+                    "RemoteSigned",
                     "-File",
                     update_script,
                     "-CurrentExe",

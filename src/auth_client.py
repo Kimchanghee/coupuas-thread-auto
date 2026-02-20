@@ -6,13 +6,16 @@ import logging
 import os
 import re
 import socket
+import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
+from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
 
 logger = logging.getLogger(__name__)
@@ -20,11 +23,20 @@ logger = logging.getLogger(__name__)
 # Load .env files without overriding existing environment values.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _env_paths = [_PROJECT_ROOT / ".env"]
-if os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1":
+
+
+def _allow_external_env_loading() -> bool:
+    return (
+        os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1"
+        and os.getenv("THREAD_AUTO_TRUST_EXTERNAL_ENV", "").strip() == "1"
+    )
+
+
+if _allow_external_env_loading():
     _env_paths.insert(0, _PROJECT_ROOT.parent / "project-user-dashboard" / ".env")
 
 for _env_path in _env_paths:
-    if _env_path.exists():
+    if _env_path.exists() and not _env_path.is_symlink():
         load_dotenv(_env_path, override=False)
 
 API_SERVER_URL = (
@@ -44,6 +56,7 @@ _LOCK = threading.RLock()
 _SENSITIVE_CRED_FIELDS = {"token"}
 _MIN_PASSWORD_LENGTH = 8
 _WORK_RESERVATION_SUPPORTED: Optional[bool] = None
+_TOKEN_TTL_SECONDS = max(int(os.getenv("THREAD_AUTO_TOKEN_TTL_SECONDS", "43200") or 43200), 300)
 
 
 def _check_api_url() -> Optional[str]:
@@ -65,6 +78,7 @@ def _check_api_url() -> Optional[str]:
 
 def _ensure_cred_dir() -> None:
     _CRED_DIR.mkdir(parents=True, exist_ok=True)
+    secure_dir_permissions(_CRED_DIR)
 
 
 def _protect_secret(value: str) -> Optional[str]:
@@ -103,10 +117,7 @@ def _check_api_host_lock(parsed) -> Optional[str]:
     if not locked_host:
         try:
             _API_HOST_LOCK_FILE.write_text(host, encoding="utf-8")
-            try:
-                os.chmod(_API_HOST_LOCK_FILE, 0o600)
-            except OSError:
-                pass
+            secure_file_permissions(_API_HOST_LOCK_FILE)
         except Exception:
             logger.warning("Failed to write API host lock file")
     return None
@@ -146,10 +157,7 @@ def _save_cred(data: dict) -> None:
         try:
             with open(_CRED_FILE, "w", encoding="utf-8") as f:
                 json.dump(serialized, f, ensure_ascii=False, indent=2)
-            try:
-                os.chmod(_CRED_FILE, 0o600)
-            except OSError:
-                pass
+            secure_file_permissions(_CRED_FILE)
         except Exception as e:
             logger.error("Failed to save credentials: %s", e)
 
@@ -300,9 +308,14 @@ def _normalize_api_message(
 
 
 def _resolve_client_ip() -> str:
-    env_ip = os.getenv("THREAD_AUTO_CLIENT_IP", "").strip()
-    if env_ip:
-        return env_ip
+    allow_ip_override = (
+        not getattr(sys, "frozen", False)
+        and os.getenv("THREAD_AUTO_ALLOW_CLIENT_IP_OVERRIDE", "").strip() == "1"
+    )
+    if allow_ip_override:
+        env_ip = os.getenv("THREAD_AUTO_CLIENT_IP", "").strip()
+        if env_ip:
+            return env_ip
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -333,6 +346,7 @@ _auth_state: Dict[str, Any] = {
     "user_id": None,
     "username": None,
     "token": None,
+    "token_issued_at": None,
     "work_count": 0,
     "work_used": 0,
     "remaining_count": None,
@@ -341,6 +355,36 @@ _auth_state: Dict[str, Any] = {
     "subscription_status": None,
     "expires_at": None,
 }
+
+
+def _mark_token_issued() -> None:
+    _auth_state["token_issued_at"] = time.time()
+
+
+def _clear_auth_state_memory() -> None:
+    _auth_state["user_id"] = None
+    _auth_state["username"] = None
+    _auth_state["token"] = None
+    _auth_state["token_issued_at"] = None
+    _auth_state["work_count"] = 0
+    _auth_state["work_used"] = 0
+    _auth_state["remaining_count"] = None
+    _auth_state["plan_type"] = None
+    _auth_state["is_paid"] = None
+    _auth_state["subscription_status"] = None
+    _auth_state["expires_at"] = None
+
+
+def _is_token_expired() -> bool:
+    token = _auth_state.get("token")
+    if not token:
+        return False
+
+    issued_at = _auth_state.get("token_issued_at")
+    if not isinstance(issued_at, (int, float)):
+        return False
+
+    return (time.time() - float(issued_at)) >= _TOKEN_TTL_SECONDS
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
@@ -394,7 +438,10 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
 
     token = _extract_state_value(payload, "token", "key")
     if token:
-        _auth_state["token"] = token
+        token_text = str(token).strip()
+        if token_text:
+            _auth_state["token"] = token_text
+            _mark_token_issued()
 
     work_count = _extract_state_value(payload, "work_count", "quota_total", "limit_count")
     if isinstance(work_count, (int, float)):
@@ -447,11 +494,23 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
 
 
 def get_auth_state() -> Dict[str, Any]:
+    if _is_token_expired():
+        _clear_auth_state_memory()
     return dict(_auth_state)
 
 
 def is_logged_in() -> bool:
+    if _is_token_expired():
+        _clear_auth_state_memory()
+        return False
     return _auth_state.get("token") is not None and _auth_state.get("user_id") is not None
+
+
+def _get_session_user_and_token() -> tuple[Any, Any]:
+    if _is_token_expired():
+        _clear_auth_state_memory()
+        return None, None
+    return _auth_state.get("user_id"), _auth_state.get("token")
 
 
 def check_username(username: str) -> Dict[str, Any]:
@@ -545,6 +604,7 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
                     _auth_state["user_id"] = user_id
                     _auth_state["username"] = username
                     _auth_state["token"] = token
+                    _mark_token_issued()
                     _auth_state["work_count"] = result_data.get("work_count", 0)
                     _auth_state["work_used"] = 0
                     _save_cred({
@@ -615,6 +675,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                 _auth_state["user_id"] = data.get("id")
                 _auth_state["username"] = username
                 _auth_state["token"] = data.get("key")
+                _mark_token_issued()
                 _auth_state["work_count"] = data.get("work_count", 0)
                 _auth_state["work_used"] = data.get("work_used", 0)
                 _save_cred({
@@ -657,8 +718,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
 
 
 def logout() -> bool:
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
 
     if user_id and token:
         try:
@@ -670,16 +730,7 @@ def logout() -> bool:
         except Exception as e:
             logger.warning("Logout API error (ignored): %s", e)
 
-    _auth_state["user_id"] = None
-    _auth_state["username"] = None
-    _auth_state["token"] = None
-    _auth_state["work_count"] = 0
-    _auth_state["work_used"] = 0
-    _auth_state["remaining_count"] = None
-    _auth_state["plan_type"] = None
-    _auth_state["is_paid"] = None
-    _auth_state["subscription_status"] = None
-    _auth_state["expires_at"] = None
+    _clear_auth_state_memory()
 
     cred = _load_cred()
     if cred:
@@ -694,8 +745,7 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
     if _check_api_url():
         return {"status": False}
 
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"status": False, "message": "로그인이 필요합니다."}
 
@@ -723,8 +773,7 @@ def check_work_available() -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
 
@@ -747,8 +796,7 @@ def use_work() -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
 
@@ -784,8 +832,7 @@ def reserve_work() -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
 
@@ -815,8 +862,7 @@ def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
 
@@ -842,8 +888,7 @@ def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id = _auth_state.get("user_id")
-    token = _auth_state.get("token")
+    user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
 
@@ -878,7 +923,7 @@ def refresh_account_state(current_task: str = "", app_version: str = "") -> Dict
 def log_action(action: str, content: str = None, level: str = "INFO") -> None:
     if _check_api_url():
         return
-    token = _auth_state.get("token")
+    _, token = _get_session_user_and_token()
     if not token:
         return
 

@@ -2,9 +2,9 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 
+from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ class Config:
         """Ensure configuration directory exists."""
         if not self.config_dir.exists():
             self.config_dir.mkdir(parents=True, mode=0o700)
+        secure_dir_permissions(self.config_dir)
 
     def load(self):
         """Load config and encrypted secrets."""
@@ -108,10 +109,7 @@ class Config:
             if payload:
                 with open(self.secrets_file, "w", encoding="utf-8") as f:
                     json.dump(payload, f, ensure_ascii=False, indent=2)
-                try:
-                    os.chmod(self.secrets_file, 0o600)
-                except OSError:
-                    pass
+                secure_file_permissions(self.secrets_file)
             elif self.secrets_file.exists():
                 self.secrets_file.unlink()
         except Exception:
@@ -131,10 +129,7 @@ class Config:
         try:
             with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            try:
-                os.chmod(self.config_file, 0o600)
-            except OSError:
-                pass
+            secure_file_permissions(self.config_file)
         except OSError:
             logger.exception("Failed to save config file")
         self._save_secrets()

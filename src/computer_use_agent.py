@@ -9,18 +9,22 @@ run anywhere in the main app flow by default.
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from google import genai
 from google.genai import types
 from google.genai.types import Content, Part
 from playwright.sync_api import Page, sync_playwright
 
+from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
 
 
@@ -43,6 +47,34 @@ class ExecutedAction:
 
 
 class ComputerUseAgent:
+    ALLOWED_NAVIGATION_HOST_SUFFIXES = (
+        "threads.net",
+        "instagram.com",
+        "facebook.com",
+        "google.com",
+    )
+    ALLOWED_SAFE_KEYS = {
+        "ENTER",
+        "TAB",
+        "SHIFT+TAB",
+        "BACKSPACE",
+        "DELETE",
+        "ESCAPE",
+        "ARROWUP",
+        "ARROWDOWN",
+        "ARROWLEFT",
+        "ARROWRIGHT",
+        "HOME",
+        "END",
+        "PAGEUP",
+        "PAGEDOWN",
+        "CONTROL+A",
+        "CONTROL+C",
+        "CONTROL+V",
+        "CONTROL+X",
+        "CONTROL+ENTER",
+    }
+
     def __init__(self, api_key: Optional[str] = None, headless: bool = False, profile_dir: str = ".threads_profile"):
         """
         Args:
@@ -68,6 +100,48 @@ class ComputerUseAgent:
         self.legacy_profile_path = Path(os.path.abspath(profile_dir))
         self.profile_dir = str(self.profile_path)
 
+    @classmethod
+    def _is_allowed_navigation_url(cls, raw_url: str) -> bool:
+        text = str(raw_url or "").strip()
+        if not text:
+            return False
+        if text == "about:blank":
+            return True
+
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return False
+
+        if parsed.scheme != "https":
+            return False
+        host = (parsed.hostname or "").strip().lower()
+        if not host:
+            return False
+        if host in {"localhost", "127.0.0.1", "::1"}:
+            return False
+
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+        except ValueError:
+            # Not an IP literal. Continue domain checks.
+            pass
+
+        if any(
+            host == suffix or host.endswith(f".{suffix}")
+            for suffix in cls.ALLOWED_NAVIGATION_HOST_SUFFIXES
+        ):
+            return True
+        return False
+
+    @classmethod
+    def _normalize_keys(cls, keys: str) -> str:
+        text = re.sub(r"\s+", "", str(keys or "").upper())
+        text = text.replace("CTRL", "CONTROL")
+        return text
+
     @staticmethod
     def _normalize_profile_name(value: str) -> str:
         raw = str(value or "default").strip().replace("\\", "_").replace("/", "_")
@@ -79,17 +153,11 @@ class ComputerUseAgent:
     def _resolve_profile_path(profile_name: str) -> Path:
         root = Path.home() / ".shorts_thread_maker" / "sessions"
         root.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(root, 0o700)
-        except OSError:
-            pass
+        secure_dir_permissions(root)
 
         profile_path = root / profile_name
         profile_path.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(profile_path, 0o700)
-        except OSError:
-            pass
+        secure_dir_permissions(profile_path)
         return profile_path
 
     def _get_storage_state_path(self) -> str:
@@ -114,32 +182,38 @@ class ComputerUseAgent:
             try:
                 data = json.loads(legacy_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
+                    # Migrate immediately so plaintext session does not linger.
+                    self._write_storage_state(data)
                     return data
             except Exception:
                 pass
 
         return None
 
-    def _write_storage_state(self, state: Dict[str, Any]) -> None:
+    def _write_storage_state(self, state: Dict[str, Any]) -> bool:
         secure_path = Path(self._get_storage_state_path())
+        legacy_path = self.legacy_profile_path / "storage_state.json"
         payload = json.dumps(state, ensure_ascii=False)
         protected = protect_secret(payload, f"shorts_thread_maker.session.{self.profile_name}")
         if not protected:
-            return
+            # Fail closed: remove legacy plaintext even when secure storage is unavailable.
+            if legacy_path.exists():
+                try:
+                    legacy_path.unlink()
+                except OSError:
+                    pass
+            return False
 
         secure_path.write_text(protected, encoding="utf-8")
-        try:
-            os.chmod(secure_path, 0o600)
-        except OSError:
-            pass
+        secure_file_permissions(secure_path)
 
         # Remove legacy plaintext if present.
-        legacy_path = self.legacy_profile_path / "storage_state.json"
         if legacy_path.exists():
             try:
                 legacy_path.unlink()
             except OSError:
                 pass
+        return True
 
     # ------------------------------------------------------------------ setup
     def start_browser(self):
@@ -199,6 +273,39 @@ class ComputerUseAgent:
             self.playwright = None
 
     # ---------------------------------------------------------- action runner
+    @staticmethod
+    def _safe_action_args(args: Dict[str, Any]) -> str:
+        if not isinstance(args, dict) or not args:
+            return ""
+
+        sensitive_keys = {
+            "text",
+            "password",
+            "passwd",
+            "pwd",
+            "token",
+            "access_token",
+            "refresh_token",
+            "api_key",
+            "authorization",
+            "cookie",
+        }
+
+        items = []
+        for key, value in args.items():
+            key_text = str(key)
+            if key_text.lower() in sensitive_keys:
+                items.append(f"{key_text}=[REDACTED]")
+                continue
+
+            if isinstance(value, str):
+                preview = value if len(value) <= 60 else value[:57] + "..."
+                items.append(f"{key_text}={preview!r}")
+            else:
+                items.append(f"{key_text}={value!r}")
+
+        return ", ".join(items[:8]) + (" ..." if len(items) > 8 else "")
+
     def _execute_function_calls(
         self, candidate, page: Page, screen_width: int, screen_height: int
     ) -> List[ExecutedAction]:
@@ -213,7 +320,7 @@ class ComputerUseAgent:
             fname = fc.name
             args = fc.args or {}
             extra_fields: Dict[str, Any] = {}
-            print(f"  execute: {fname} ({args})")
+            print(f"  execute: {fname} ({self._safe_action_args(args)})")
 
             safety = args.get("safety_decision")
             if safety:
@@ -233,6 +340,8 @@ class ComputerUseAgent:
                 elif fname == "navigate":
                     url = args.get("url")
                     if url:
+                        if not self._is_allowed_navigation_url(str(url)):
+                            raise ValueError(f"Blocked navigation target: {url}")
                         page.goto(url, wait_until="domcontentloaded")
                 elif fname == "click_at":
                     x = _denormalize_x(args["x"], screen_width)
@@ -258,6 +367,9 @@ class ComputerUseAgent:
                 elif fname == "key_combination":
                     keys = args.get("keys")
                     if keys:
+                        normalized = self._normalize_keys(str(keys))
+                        if normalized not in self.ALLOWED_SAFE_KEYS:
+                            raise ValueError(f"Blocked key combination: {keys}")
                         page.keyboard.press(keys)
                 elif fname == "scroll_document":
                     direction = args.get("direction", "down")
@@ -329,6 +441,12 @@ class ComputerUseAgent:
     def run_goal(self, goal: str, turn_limit: int = 8, skip_navigation: bool = False):
         if self.client is None:
             print("Google API client is not configured.")
+            return None
+        if os.getenv("THREAD_AUTO_ALLOW_AI_SCREENSHOTS", "").strip() != "1":
+            print(
+                "AI screenshot transfer is disabled. "
+                "Set THREAD_AUTO_ALLOW_AI_SCREENSHOTS=1 to enable."
+            )
             return None
 
         self.start_browser()

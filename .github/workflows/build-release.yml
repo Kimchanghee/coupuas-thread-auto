@@ -70,6 +70,12 @@ jobs:
             exit 1
           }
 
+      - name: Generate checksum
+        run: |
+          $hash = (Get-FileHash "dist\CoupangThreadAuto.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash  CoupangThreadAuto.exe" | Out-File -FilePath "dist\CoupangThreadAuto.exe.sha256" -Encoding ascii
+          Write-Host "SHA256: $hash"
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -80,6 +86,7 @@ jobs:
 
             ### Download
             - [CoupangThreadAuto.exe](https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/CoupangThreadAuto.exe)
+            - [CoupangThreadAuto.exe.sha256](https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/CoupangThreadAuto.exe.sha256)
 
             ### Installation
             1. Download CoupangThreadAuto.exe
@@ -93,6 +100,7 @@ jobs:
           prerelease: false
           files: |
             dist/CoupangThreadAuto.exe
+            dist/CoupangThreadAuto.exe.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -102,6 +110,7 @@ jobs:
           name: CoupangThreadAuto-${{ steps.get_version.outputs.VERSION }}
           path: |
             dist/CoupangThreadAuto.exe
+            dist/CoupangThreadAuto.exe.sha256
             dist/media/
             dist/user_data/
           retention-days: 30

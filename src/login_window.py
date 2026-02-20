@@ -584,8 +584,13 @@ class LoginWorker(QThread):
         self.force = force
 
     def run(self):
-        result = auth_client.login(self.username, self.password, self.force)
-        self.finished_signal.emit(result)
+        password = self.password
+        try:
+            result = auth_client.login(self.username, password, self.force)
+            self.finished_signal.emit(result)
+        finally:
+            self.password = None
+            password = None
 
 
 class RegisterWorker(QThread):
@@ -600,7 +605,12 @@ class RegisterWorker(QThread):
         self.email = email
 
     def run(self):
-        result = auth_client.register(
-            self.name, self.username, self.password, self.contact, self.email
-        )
-        self.finished_signal.emit(result)
+        password = self.password
+        try:
+            result = auth_client.register(
+                self.name, self.username, password, self.contact, self.email
+            )
+            self.finished_signal.emit(result)
+        finally:
+            self.password = None
+            password = None

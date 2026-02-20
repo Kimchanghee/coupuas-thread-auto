@@ -2,9 +2,15 @@
 Threads Playwright 직접 제어 헬퍼
 AI Vision 없이 Playwright selector로 직접 제어 (빠르고 안정적)
 """
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
+import os
 import time
+from datetime import datetime
+from pathlib import Path
 from typing import Optional, List
+
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
+
+from src.fs_security import secure_dir_permissions, secure_file_permissions
 
 
 class ThreadsPlaywrightHelper:
@@ -19,6 +25,23 @@ class ThreadsPlaywrightHelper:
     def __init__(self, page: Page):
         self.page = page
         self.last_error = None
+
+    def _save_debug_screenshot(self, prefix: str) -> Optional[str]:
+        if os.getenv("THREAD_AUTO_DEBUG_SCREENSHOTS", "").strip() != "1":
+            return None
+
+        debug_dir = Path.home() / ".shorts_thread_maker" / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        secure_dir_permissions(debug_dir)
+
+        stamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+        screenshot_path = debug_dir / f"{prefix}_{stamp}.png"
+        try:
+            self.page.screenshot(path=str(screenshot_path))
+            secure_file_permissions(screenshot_path)
+            return str(screenshot_path)
+        except Exception:
+            return None
 
     # ========== 로그인 ==========
 
@@ -515,7 +538,7 @@ class ThreadsPlaywrightHelper:
                 tag_name = textarea.evaluate("el => el.tagName")
                 existing_text = textarea.evaluate("el => el.value || el.innerText || ''")
                 trimmed_existing = (existing_text or "").strip()
-                print(f"      Textarea[{index}] 타입: {tag_name}, 기존 내용: '{existing_text[:50]}...'")
+                print(f"      Textarea[{index}] 타입: {tag_name}, 기존 내용 길이: {len(trimmed_existing)}자")
             except:
                 trimmed_existing = ""
 
@@ -539,7 +562,7 @@ class ThreadsPlaywrightHelper:
             # 입력 후 확인
             try:
                 after_text = textarea.evaluate("el => el.value || el.innerText || ''")
-                print(f"      Textarea[{index}]에 입력 완료: '{after_text[:50]}...' ({len(text)}자)")
+                print(f"      Textarea[{index}]에 입력 완료 (입력 {len(text)}자, 현재 {len(str(after_text or ''))}자)")
             except:
                 print(f"      Textarea[{index}]에 입력 완료 ({len(text)}자)")
 
@@ -670,9 +693,9 @@ class ThreadsPlaywrightHelper:
                     except:
                         pass
 
-                # 스크린샷
-                self.page.screenshot(path="debug_add_button.png")
-                print("  debug_add_button.png 저장됨")
+                debug_path = self._save_debug_screenshot("debug_add_button")
+                if debug_path:
+                    print(f"  Debug screenshot saved: {debug_path}")
             except Exception as e:
                 print(f"  디버그 정보 출력 실패: {e}")
 
@@ -846,8 +869,9 @@ class ThreadsPlaywrightHelper:
 
             print("  게시 버튼 클릭 모든 방법 실패")
             try:
-                self.page.screenshot(path="debug_post_button.png")
-                print("  debug_post_button.png 저장")
+                debug_path = self._save_debug_screenshot("debug_post_button")
+                if debug_path:
+                    print(f"  Debug screenshot saved: {debug_path}")
             except:
                 pass
             return False
@@ -985,8 +1009,9 @@ class ThreadsPlaywrightHelper:
                         print(f"    잘못된 요소를 클릭했거나 UI가 변경됨")
                         # 디버그 스크린샷
                         try:
-                            self.page.screenshot(path=f"debug_failed_add_{i}.png")
-                            print(f"    debug_failed_add_{i}.png 저장됨")
+                            debug_path = self._save_debug_screenshot(f"debug_failed_add_{i}")
+                            if debug_path:
+                                print(f"    Debug screenshot saved: {debug_path}")
                         except:
                             pass
                         return False
