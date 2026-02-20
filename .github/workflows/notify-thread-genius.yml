@@ -1,0 +1,22 @@
+name: Notify Thread Genius on Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch to thread-genius repo
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: Kimchanghee/thread-genius
+          event-type: new-release
+          client-payload: |
+            {
+              "tag_name": "${{ github.event.release.tag_name }}",
+              "release_name": "${{ github.event.release.name }}",
+              "body": "${{ github.event.release.body }}"
+            }
