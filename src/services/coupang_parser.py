@@ -430,7 +430,7 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
         """쿠팡 파트너스 링크 유효성 검사"""
         try:
             return self._is_allowed_coupang_url(url)
-        except:
+        except Exception:
             return False
 
     def extract_links_from_text(self, text: str) -> list:
@@ -479,7 +479,7 @@ if __name__ == "__main__":
             api_key = config.gemini_api_key
             if api_key:
                 print(f"API Key: config에서 로드됨")
-        except:
+        except Exception:
             pass
 
     if not api_key:

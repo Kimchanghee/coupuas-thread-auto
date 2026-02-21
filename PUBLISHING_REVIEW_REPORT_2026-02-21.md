@@ -1,6 +1,6 @@
 ﻿# 퍼블리싱 준비 상태 종합 검토 보고서
 
-- 프로젝트: 쿠팡 파트너스 스레드 자동화 (v2.3.0)
+- 프로젝트: 쿠팡 파트너스 스레드 자동화 (v2.3.1)
 - 검토일: 2026-02-21
 
 ## 종합 판정
@@ -42,6 +42,7 @@
 - 종료(`closeEvent`) 시 `_closed` 플래그 설정 순서 보정
 - 워커에 설정 스냅샷 전달(실행 중 config 경쟁 최소화)
 - `verify_post_success`에서 실제 실패(False) 경로 추가
+- `src/services/coupang_parser.py`의 `bare except` 2건을 `except Exception`으로 정리
 
 ## 검증 결과
 
