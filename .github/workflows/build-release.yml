@@ -158,29 +158,19 @@ jobs:
       - name: Sign executable
         shell: pwsh
         run: |
-          $signTool = (Get-Command signtool -ErrorAction SilentlyContinue).Source
-          if (-not $signTool) {
-            $candidates = Get-ChildItem `
-              -Path "C:\\Program Files (x86)\\Windows Kits\\10\\bin" `
-              -Recurse `
-              -Filter "signtool.exe" `
-              -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*\\x64\\*" }
-            if ($candidates) {
-              $signTool = ($candidates | Sort-Object FullName -Descending | Select-Object -First 1).FullName
-            }
+          $cert = Get-ChildItem -Path "Cert:\\CurrentUser\\My\\$env:CODE_SIGN_CERT_THUMBPRINT" -ErrorAction SilentlyContinue
+          if (-not $cert) {
+            throw "Signing certificate not found in CurrentUser\\My store."
           }
-          if (-not $signTool) {
-            throw "signtool.exe not found on runner."
+          $signResult = Set-AuthenticodeSignature `
+            -FilePath "dist\\CoupangThreadAuto.exe" `
+            -Certificate $cert `
+            -TimestampServer "http://timestamp.digicert.com"
+          $signStatus = $signResult.Status.ToString()
+          if (@("Valid", "UnknownError", "NotTrusted") -notcontains $signStatus) {
+            throw "Set-AuthenticodeSignature failed: $signStatus"
           }
-          Write-Host "Using signtool: $signTool"
-
-          & $signTool sign `
-            /fd SHA256 `
-            /td SHA256 `
-            /tr "https://timestamp.digicert.com" `
-            /sha1 "$env:CODE_SIGN_CERT_THUMBPRINT" `
-            /s "My" `
-            "dist\\CoupangThreadAuto.exe"
+          Write-Host "Set-AuthenticodeSignature status: $signStatus"
 
       - name: Verify executable signature
         shell: pwsh
