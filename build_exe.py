@@ -116,6 +116,10 @@ def build_exe() -> bool:
         "--clean",
         "--noconfirm",
         "--noupx",
+        "--optimize",
+        "2",
+        "--specpath",
+        "build",
     ]
 
     if ICON_PATH and os.path.exists(ICON_PATH):
@@ -125,8 +129,9 @@ def build_exe() -> bool:
         cmd.extend(["--hidden-import", hidden])
 
     for src, dst in DATAS:
-        if os.path.exists(src):
-            cmd.extend(["--add-data", f"{src};{dst}"])
+        abs_src = os.path.abspath(src)
+        if os.path.exists(abs_src):
+            cmd.extend(["--add-data", f"{abs_src};{dst}"])
 
     for exclude in EXCLUDES:
         cmd.extend(["--exclude-module", exclude])
@@ -136,7 +141,7 @@ def build_exe() -> bool:
         cmd.extend(["--add-data", f"{playwright_driver};playwright/driver"])
         print(f"  - Included Playwright driver: {playwright_driver}")
 
-    cmd.append(MAIN_SCRIPT)
+    cmd.append(os.path.abspath(MAIN_SCRIPT))
 
     print("\n[3/5] Running PyInstaller...")
     print(f"  Command preview: {' '.join(cmd[:10])} ...")

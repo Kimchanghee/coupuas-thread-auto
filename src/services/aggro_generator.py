@@ -27,7 +27,6 @@ class AggroGenerator:
         Args:
             api_key: Google Gemini API 키
         """
-        self.api_key = api_key
         if api_key:
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
@@ -36,10 +35,11 @@ class AggroGenerator:
 
     def set_api_key(self, api_key: str):
         """API 키 설정"""
-        self.api_key = api_key
         if api_key:
             genai.configure(api_key=api_key)
             self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        else:
+            self.model = None
 
     def generate_aggro_text(self, product_title: str, product_keywords: str = "") -> str:
         """

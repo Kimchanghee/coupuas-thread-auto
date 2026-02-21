@@ -243,6 +243,7 @@ a = Analysis(
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
+    optimize=2,
 )
 
 # PYZ (Python 아카이브)
