@@ -129,7 +129,9 @@ class ThreadsPlaywrightHelper:
             time.sleep(1)
 
             # 3. 濡쒓렇??踰꾪듉 ?대┃
-            login_locator = self.page.locator('button[type="submit"], button:has-text("濡쒓렇??), button:has-text("Log in")')
+            login_locator = self.page.locator(
+                'button[type="submit"], button:has-text("Log in"), button:has-text("Login")'
+            )
             if login_locator.count() > 0:
                 login_btn = login_locator.first
                 login_btn.click()
