@@ -6,6 +6,7 @@
 import re
 import logging
 import time
+import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
     QPushButton, QCheckBox, QStackedWidget,
@@ -13,8 +14,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import (
-    QFont, QPainter, QColor, QLinearGradient, QPainterPath, QFontDatabase
+    QFont, QPainter, QColor, QLinearGradient, QPainterPath, QFontDatabase, QPen
 )
+from PyQt6.QtCore import QRectF
 
 from src.theme import (Colors, Typography, Radius, Gradients,
                        input_style, accent_btn_style, window_control_btn_style,
@@ -23,6 +25,17 @@ from src import auth_client
 from src.ui_messages import ask_yes_no, show_info, show_warning
 
 logger = logging.getLogger(__name__)
+MIN_PASSWORD_LENGTH = 8
+
+
+def _resolve_app_version() -> str:
+    """Resolve app version once to avoid per-frame imports in paintEvent."""
+    for module_name in ("__main__", "main"):
+        module = sys.modules.get(module_name)
+        version = getattr(module, "VERSION", None)
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    return "unknown"
 
 
 def _get_font():
@@ -55,6 +68,8 @@ class LoginWindow(QMainWindow):
         self._username_available = False
         self._failed_login_attempts = 0
         self._login_cooldown_until = 0.0
+        self._username_check_token = 0
+        self._app_version = _resolve_app_version()
         self._setup_ui()
 
     def _setup_ui(self):
@@ -128,14 +143,12 @@ class LoginWindow(QMainWindow):
         painter.setBrush(QColor(59, 123, 255, 30))
         painter.drawEllipse(cx - 50, cy - 50, 100, 100)
         # Ring
-        from PyQt6.QtGui import QPen
         painter.setPen(QPen(QColor(Colors.ACCENT_LIGHT), 3))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawArc(cx - 30, cy - 30, 60, 60, 30 * 16, 300 * 16)
         # Letter
         painter.setPen(QColor("#FFFFFF"))
         painter.setFont(QFont(fn, 22, QFont.Weight.Bold))
-        from PyQt6.QtCore import QRectF
         painter.drawText(QRectF(cx - 30, cy - 30, 60, 60), Qt.AlignmentFlag.AlignCenter, "ST")
 
         # Title
@@ -161,8 +174,7 @@ class LoginWindow(QMainWindow):
         # Version
         painter.setPen(QColor(255, 255, 255, 180))
         painter.setFont(QFont(fn, 9))
-        from main import VERSION
-        painter.drawText(0, 488, 300, 20, Qt.AlignmentFlag.AlignCenter, VERSION)
+        painter.drawText(0, 488, 300, 20, Qt.AlignmentFlag.AlignCenter, self._app_version)
 
         # Border right
         painter.setPen(QColor(Colors.BORDER))
@@ -207,7 +219,7 @@ class LoginWindow(QMainWindow):
         self._apply_input_style(self.login_pw)
 
         # Remember
-        self.remember_cb = QCheckBox("아이디/비밀번호 저장", page)
+        self.remember_cb = QCheckBox("아이디 저장", page)
         self.remember_cb.setGeometry(50, 328, 200, 22)
         self.remember_cb.setFont(QFont(fn, 9))
         self.remember_cb.setStyleSheet(f"""
@@ -265,13 +277,11 @@ class LoginWindow(QMainWindow):
         self._load_saved_login()
 
     def _load_saved_login(self):
-        """Load saved username/password"""
+        """Load saved username."""
         cred = auth_client.get_saved_credentials()
         if cred and cred.get("username"):
             self.login_id.setText(cred["username"])
             self.remember_cb.setChecked(True)
-            if cred.get("remember_pw"):
-                self.login_pw.setText(cred["remember_pw"])
 
     # ─── Register Page ──────────────────────────────────────
     def _build_register_page(self):
@@ -428,6 +438,9 @@ class LoginWindow(QMainWindow):
         if not uid or not pw:
             self.login_status.setText("아이디와 비밀번호를 입력해주세요.")
             return
+        if len(pw) < MIN_PASSWORD_LENGTH:
+            self.login_status.setText(f"비밀번호는 최소 {MIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
+            return
 
         self.btn_login.setEnabled(False)
         self.btn_login.setText("로그인 중...")
@@ -489,11 +502,17 @@ class LoginWindow(QMainWindow):
         self.btn_check_user.setEnabled(False)
         self.btn_check_user.setText("확인중...")
 
+        self._username_check_token += 1
+        token = self._username_check_token
         self._username_worker = UsernameCheckWorker(username)
-        self._username_worker.finished.connect(self._on_username_checked)
+        self._username_worker.finished.connect(
+            lambda available, message, t=token: self._on_username_checked(t, available, message)
+        )
         self._username_worker.start()
 
-    def _on_username_checked(self, available: bool, message: str):
+    def _on_username_checked(self, token: int, available: bool, message: str):
+        if token != self._username_check_token:
+            return
         self.btn_check_user.setEnabled(True)
         self.btn_check_user.setText("중복확인")
 
@@ -529,6 +548,9 @@ class LoginWindow(QMainWindow):
             return
         if not pw:
             self._show_msg("비밀번호를 입력해주세요.")
+            return
+        if len(pw) < MIN_PASSWORD_LENGTH:
+            self._show_msg(f"비밀번호는 최소 {MIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
         if pw != pw2:
             self._show_msg("비밀번호가 일치하지 않습니다.")
@@ -594,16 +616,22 @@ class LoginWorker(QThread):
     def __init__(self, username, password, force=False):
         super().__init__()
         self.username = username
-        self.password = password
+        self._password_bytes = bytearray(str(password or "").encode("utf-8"))
         self.force = force
 
     def run(self):
-        password = self.password
+        password = ""
         try:
+            password = self._password_bytes.decode("utf-8", errors="ignore")
             result = auth_client.login(self.username, password, self.force)
             self.finished_signal.emit(result)
+        except Exception as exc:
+            logger.exception("LoginWorker failed")
+            self.finished_signal.emit({"status": False, "message": f"로그인 처리 중 오류가 발생했습니다: {exc}"})
         finally:
-            self.password = None
+            for i in range(len(self._password_bytes)):
+                self._password_bytes[i] = 0
+            self._password_bytes = bytearray()
             password = None
 
 
@@ -614,17 +642,23 @@ class RegisterWorker(QThread):
         super().__init__()
         self.name = name
         self.username = username
-        self.password = password
+        self._password_bytes = bytearray(str(password or "").encode("utf-8"))
         self.contact = contact
         self.email = email
 
     def run(self):
-        password = self.password
+        password = ""
         try:
+            password = self._password_bytes.decode("utf-8", errors="ignore")
             result = auth_client.register(
                 self.name, self.username, password, self.contact, self.email
             )
             self.finished_signal.emit(result)
+        except Exception as exc:
+            logger.exception("RegisterWorker failed")
+            self.finished_signal.emit({"success": False, "message": f"회원가입 처리 중 오류가 발생했습니다: {exc}"})
         finally:
-            self.password = None
+            for i in range(len(self._password_bytes)):
+                self._password_bytes[i] = 0
+            self._password_bytes = bytearray()
             password = None

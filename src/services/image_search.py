@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Search and download product images from 1688 with guarded network I/O."""
 
 from __future__ import annotations

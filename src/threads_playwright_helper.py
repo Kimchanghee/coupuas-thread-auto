@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Threads Playwright 직접 제어 헬퍼
 AI Vision 없이 Playwright selector로 직접 제어 (빠르고 안정적)
@@ -208,7 +209,7 @@ class ThreadsPlaywrightHelper:
                                     # 원래 페이지로 돌아가기
                                     self.page.goto(current_url, wait_until="domcontentloaded", timeout=10000)
                                     return username
-                except:
+                except Exception:
                     continue
 
             # 방법 2: 설정 > 계정 페이지에서 확인
@@ -314,12 +315,12 @@ class ThreadsPlaywrightHelper:
                                     print("  로그아웃 확인 완료")
                                     time.sleep(3)
                                     break
-                            except:
+                            except Exception:
                                 continue
 
                         print("  로그아웃 완료")
                         return True
-                except:
+                except Exception:
                     continue
 
             # 프로필 메뉴에서 로그아웃 시도
@@ -341,7 +342,7 @@ class ThreadsPlaywrightHelper:
                         profile_btn.click()
                         time.sleep(2)
                         break
-                except:
+                except Exception:
                     continue
 
             # 설정/로그아웃 메뉴 찾기
@@ -358,7 +359,7 @@ class ThreadsPlaywrightHelper:
                             time.sleep(3)
                             print("  로그아웃 완료")
                             return True
-                    except:
+                    except Exception:
                         continue
 
             print("  로그아웃 버튼을 찾을 수 없음")
@@ -456,13 +457,13 @@ class ThreadsPlaywrightHelper:
             self.page.keyboard.press("Escape")
             time.sleep(1)
             return True
-        except:
+        except Exception:
             # 팝업 바깥 클릭
             try:
                 self.page.mouse.click(50, 50)
                 time.sleep(1)
                 return True
-            except:
+            except Exception:
                 return False
 
     def count_textareas(self) -> int:
@@ -476,7 +477,7 @@ class ThreadsPlaywrightHelper:
             # 다양한 textarea selector
             textareas = self.page.locator('textarea, div[contenteditable="true"]').count()
             return textareas
-        except:
+        except Exception:
             return 0
 
     def find_empty_textarea_index(self) -> Optional[int]:
@@ -539,7 +540,7 @@ class ThreadsPlaywrightHelper:
                 existing_text = textarea.evaluate("el => el.value || el.innerText || ''")
                 trimmed_existing = (existing_text or "").strip()
                 print(f"      Textarea[{index}] 타입: {tag_name}, 기존 내용 길이: {len(trimmed_existing)}자")
-            except:
+            except Exception:
                 trimmed_existing = ""
 
             if require_empty and trimmed_existing:
@@ -563,7 +564,7 @@ class ThreadsPlaywrightHelper:
             try:
                 after_text = textarea.evaluate("el => el.value || el.innerText || ''")
                 print(f"      Textarea[{index}]에 입력 완료 (입력 {len(text)}자, 현재 {len(str(after_text or ''))}자)")
-            except:
+            except Exception:
                 print(f"      Textarea[{index}]에 입력 완료 ({len(text)}자)")
 
             return True
@@ -690,7 +691,7 @@ class ThreadsPlaywrightHelper:
                         role = btn.evaluate("el => el.getAttribute('role') || ''")
                         classes = btn.evaluate("el => el.className || ''")
                         print(f"      [{idx}] <{tag}> role={role} text='{text}' class='{classes[:30]}'")
-                    except:
+                    except Exception:
                         pass
 
                 debug_path = self._save_debug_screenshot("debug_add_button")
@@ -732,7 +733,7 @@ class ThreadsPlaywrightHelper:
                                 if box['y'] > max_y:
                                     max_y = box['y']
                                     target_btn = btn
-                    except:
+                    except Exception:
                         continue
 
                 if target_btn:
@@ -822,7 +823,7 @@ class ThreadsPlaywrightHelper:
                                 if box and box['y'] > bottom_y:
                                     bottom_y = box['y']
                                     bottom_btn = btn
-                        except:
+                        except Exception:
                             continue
 
                     if bottom_btn:
@@ -872,7 +873,7 @@ class ThreadsPlaywrightHelper:
                 debug_path = self._save_debug_screenshot("debug_post_button")
                 if debug_path:
                     print(f"  Debug screenshot saved: {debug_path}")
-            except:
+            except Exception:
                 pass
             return False
 
@@ -1012,7 +1013,7 @@ class ThreadsPlaywrightHelper:
                             debug_path = self._save_debug_screenshot(f"debug_failed_add_{i}")
                             if debug_path:
                                 print(f"    Debug screenshot saved: {debug_path}")
-                        except:
+                        except Exception:
                             pass
                         return False
 
@@ -1100,12 +1101,10 @@ class ThreadsPlaywrightHelper:
                 print(f"  compose 페이지에서 이동됨 - 게시 성공 추정")
                 return True
 
-            # 그래도 확실하지 않으면, 게시 성공으로 간주 (너무 엄격한 검증 방지)
-            # 실제로 글이 작성되고 버튼을 클릭했다면 대부분 성공
-            print("  검증 불확실 - 게시 성공으로 간주")
-            return True
+            # compose 상태가 유지되면 실제 게시 실패로 판단
+            print("  compose 상태가 유지됨 - 게시 실패로 판단")
+            return False
 
         except Exception as e:
-            print(f"  검증 중 오류 (무시): {e}")
-            # 검증 실패해도 게시는 성공했을 수 있음
-            return True
+            print(f"  검증 중 오류: {e}")
+            return False

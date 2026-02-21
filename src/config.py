@@ -122,6 +122,7 @@ class Config:
                 ) as tmp:
                     json.dump(payload, tmp, ensure_ascii=False, indent=2)
                     temp_path = tmp.name
+                secure_file_permissions(temp_path)
                 os.replace(temp_path, self.secrets_file)
                 secure_file_permissions(self.secrets_file)
             elif self.secrets_file.exists():
@@ -156,6 +157,7 @@ class Config:
             ) as tmp:
                 json.dump(data, tmp, ensure_ascii=False, indent=2)
                 temp_path = tmp.name
+            secure_file_permissions(temp_path)
             os.replace(temp_path, self.config_file)
             secure_file_permissions(self.config_file)
         except OSError:

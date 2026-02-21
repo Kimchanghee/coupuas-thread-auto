@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Coupang Partners Thread Auto - 소스 패키지
 

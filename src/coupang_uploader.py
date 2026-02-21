@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 쿠팡 파트너스 전용 Threads 업로더
 2개 포스트 형식 (어그로 문구 + 미디어 / 링크 + 규정)으로 업로드합니다.
@@ -27,15 +28,16 @@ class CoupangThreadsUploader:
 
     def __init__(self, google_api_key: str = ""):
         # Keep key in config scope only; avoid long-lived plaintext key fields.
-        if google_api_key and not getattr(config, "gemini_api_key", ""):
-            config.gemini_api_key = str(google_api_key).strip()
+        resolved_key = str(google_api_key or getattr(config, "gemini_api_key", "") or "").strip()
+        if resolved_key and not getattr(config, "gemini_api_key", ""):
+            config.gemini_api_key = resolved_key
+        self._google_api_key = resolved_key
         self.last_error = None
-        self._cancel_flag = False
+        self._cancel_event = threading.Event()
         self._current_agent = None
 
-    @staticmethod
-    def _resolve_google_api_key() -> str:
-        return str(getattr(config, "gemini_api_key", "") or "").strip()
+    def _resolve_google_api_key(self) -> str:
+        return self._google_api_key
 
     @staticmethod
     def _sanitize_goal_text(value: object, limit: int = 2500) -> str:
@@ -50,17 +52,17 @@ class CoupangThreadsUploader:
 
     def cancel(self):
         """업로드 취소"""
-        self._cancel_flag = True
+        self._cancel_event.set()
         # 현재 실행 중인 agent가 있으면 정리
         if self._current_agent:
             try:
                 self._current_agent.close()
-            except:
+            except Exception:
                 pass
 
     def _check_cancelled(self):
         """취소 여부 확인"""
-        if self._cancel_flag:
+        if self._cancel_event.is_set():
             raise CancelledException("사용자에 의해 취소됨")
 
     def upload_product(self, product_post: Dict, agent: Optional[ComputerUseAgent] = None) -> bool:
@@ -139,7 +141,7 @@ class CoupangThreadsUploader:
                 try:
                     agent.save_session()
                     agent.close()
-                except:
+                except Exception:
                     pass
                 self._current_agent = None
 
@@ -224,7 +226,7 @@ class CoupangThreadsUploader:
             print(msg)
             if progress_callback:
                 progress_callback(step, detail)
-        self._cancel_flag = False
+        self._cancel_event.clear()
         results = {
             'success': 0,
             'failed': 0,
@@ -264,7 +266,7 @@ class CoupangThreadsUploader:
                     results['cancelled'] = True
                     break
 
-                if self._cancel_flag:
+                if self._cancel_event.is_set():
                     log("취소됨", f"사용자에 의해 취소됨 ({i-1}/{total} 완료)")
                     results['cancelled'] = True
                     break
@@ -281,7 +283,7 @@ class CoupangThreadsUploader:
                         agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                         time.sleep(2)
                         log("페이지 로드 완료", "Threads 페이지가 로드되었습니다")
-                    except:
+                    except Exception:
                         log("페이지 로드 경고", "페이지 로드 시간 초과, 계속 진행합니다")
 
                     # 설정된 계정으로 로그인 확인
@@ -368,7 +370,7 @@ class CoupangThreadsUploader:
                     log("대기 중", f"다음 업로드까지 {time_str} 대기...")
 
                     for sec in range(interval):
-                        if (cancel_check and cancel_check()) or self._cancel_flag:
+                        if (cancel_check and cancel_check()) or self._cancel_event.is_set():
                             results['cancelled'] = True
                             break
                         # 10초마다 남은 시간 표시
@@ -394,7 +396,7 @@ class CoupangThreadsUploader:
                 try:
                     agent.save_session()
                     agent.close()
-                except:
+                except Exception:
                     pass
             self._current_agent = None
 
@@ -416,9 +418,11 @@ class CoupangPartnersPipeline:
     """
 
     def __init__(self, google_api_key: str = ""):
-        if google_api_key and not getattr(config, "gemini_api_key", ""):
-            config.gemini_api_key = str(google_api_key).strip()
-        self._cancel_flag = False
+        resolved_key = str(google_api_key or getattr(config, "gemini_api_key", "") or "").strip()
+        if resolved_key and not getattr(config, "gemini_api_key", ""):
+            config.gemini_api_key = resolved_key
+        self._google_api_key = resolved_key
+        self._cancel_event = threading.Event()
 
         self._coupang_parser = None
         self._aggro_generator = None
@@ -426,19 +430,18 @@ class CoupangPartnersPipeline:
         self._link_history = None
         self._image_search = None
 
-    @staticmethod
-    def _resolve_google_api_key() -> str:
-        return str(getattr(config, "gemini_api_key", "") or "").strip()
+    def _resolve_google_api_key(self) -> str:
+        return self._google_api_key
 
     def cancel(self):
         """파이프라인 취소"""
-        self._cancel_flag = True
+        self._cancel_event.set()
         if self._uploader:
             self._uploader.cancel()
 
     def _check_cancelled(self):
         """취소 여부 확인"""
-        if self._cancel_flag:
+        if self._cancel_event.is_set():
             raise CancelledException("사용자에 의해 취소됨")
 
     @property
@@ -556,7 +559,7 @@ class CoupangPartnersPipeline:
         Returns:
             결과 딕셔너리
         """
-        self._cancel_flag = False
+        self._cancel_event.clear()
         total = len(link_data)
         results = {
             'total': total,
@@ -623,7 +626,7 @@ class CoupangPartnersPipeline:
             try:
                 agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                 time.sleep(3)
-            except:
+            except Exception:
                 pass
 
             helper = ThreadsPlaywrightHelper(agent.page)
@@ -657,7 +660,7 @@ class CoupangPartnersPipeline:
                     url, keyword = item, None
 
                 # 취소 확인
-                if (cancel_check and cancel_check()) or self._cancel_flag:
+                if (cancel_check and cancel_check()) or self._cancel_event.is_set():
                     results['cancelled'] = True
                     log("취소됨", f"사용자에 의해 취소됨 ({i-1}/{total} 완료)")
                     break
@@ -707,7 +710,7 @@ class CoupangPartnersPipeline:
                     try:
                         agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                         time.sleep(2)
-                    except:
+                    except Exception:
                         log("페이지 경고", "페이지 로드 시간 초과, 계속 진행")
 
                     # 게시물 데이터 준비 (2개 포스트)
@@ -792,7 +795,7 @@ class CoupangPartnersPipeline:
                     log("3단계: 대기", f"다음 상품까지 {interval_str} 대기...")
 
                     for sec in range(interval):
-                        if (cancel_check and cancel_check()) or self._cancel_flag:
+                        if (cancel_check and cancel_check()) or self._cancel_event.is_set():
                             results['cancelled'] = True
                             log("취소됨", "대기 중 취소됨")
                             break
@@ -826,7 +829,7 @@ class CoupangPartnersPipeline:
                 try:
                     agent.save_session()
                     agent.close()
-                except:
+                except Exception:
                     pass
 
         # 결과 요약

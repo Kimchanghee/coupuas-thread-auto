@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Coupang Partners Thread Auto - Design System
 "Stitch Blue" Theme - Generated from Google Stitch AI

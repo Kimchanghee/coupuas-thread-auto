@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import hashlib
+import ssl
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -28,6 +29,8 @@ _env_paths = [_PROJECT_ROOT / ".env"]
 
 
 def _allow_external_env_loading() -> bool:
+    if getattr(sys, "frozen", False):
+        return False
     return (
         os.getenv("THREAD_AUTO_LOAD_EXTERNAL_ENV", "").strip() == "1"
         and os.getenv("THREAD_AUTO_TRUST_EXTERNAL_ENV", "").strip() == "1"
@@ -41,9 +44,11 @@ for _env_path in _env_paths:
     if _env_path.exists() and not _env_path.is_symlink():
         load_dotenv(_env_path, override=False)
 
+_DEFAULT_API_SERVER_URL = "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app"
 API_SERVER_URL = (
     os.getenv("USER_DASHBOARD_API_URL")
     or os.getenv("API_SERVER_URL", "")
+    or _DEFAULT_API_SERVER_URL
 ).rstrip("/")
 PROGRAM_TYPE = "stmaker"
 
@@ -62,6 +67,7 @@ _WORK_RESERVATION_SUPPORTED: Optional[bool] = None
 _TOKEN_TTL_DEFAULT_SECONDS = 43200
 _TOKEN_TTL_MIN_SECONDS = 300
 _TOKEN_TTL_MAX_SECONDS = 604800
+_DEFAULT_TLS_PIN_SHA256 = set()
 
 
 def _resolve_token_ttl_seconds() -> int:
@@ -80,6 +86,47 @@ def _resolve_token_ttl_seconds() -> int:
 _TOKEN_TTL_SECONDS = _resolve_token_ttl_seconds()
 
 
+def _resolve_tls_pin_set() -> set[str]:
+    env_pins = os.getenv("THREAD_AUTO_TLS_SHA256_PINS", "")
+    pins = {
+        item.strip().lower().replace(":", "")
+        for item in env_pins.split(",")
+        if item.strip()
+    }
+    default_pins = {
+        str(item).strip().lower().replace(":", "")
+        for item in _DEFAULT_TLS_PIN_SHA256
+        if str(item).strip()
+    }
+    return pins or default_pins
+
+
+def _get_server_cert_sha256(host: str, port: int = 443) -> str:
+    context = ssl.create_default_context()
+    with socket.create_connection((host, port), timeout=5) as sock:
+        with context.wrap_socket(sock, server_hostname=host) as secure_sock:
+            der = secure_sock.getpeercert(binary_form=True)
+    return hashlib.sha256(der).hexdigest().lower()
+
+
+def _check_tls_certificate_pin(parsed) -> Optional[str]:
+    if parsed.scheme != "https":
+        return None
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host in {"localhost", "127.0.0.1", "::1"}:
+        return None
+    pins = _resolve_tls_pin_set()
+    if not pins:
+        return None
+    try:
+        actual_pin = _get_server_cert_sha256(host, parsed.port or 443)
+    except Exception:
+        return "Failed to verify API TLS certificate pin."
+    if actual_pin not in pins:
+        return "Blocked API TLS certificate pin mismatch."
+    return None
+
+
 def _check_api_url() -> Optional[str]:
     if not API_SERVER_URL:
         return "Server URL is not configured. Set API_SERVER_URL in .env."
@@ -96,6 +143,9 @@ def _check_api_url() -> Optional[str]:
     host_lock_error = _check_api_host_lock(parsed)
     if host_lock_error:
         return host_lock_error
+    tls_pin_error = _check_tls_certificate_pin(parsed)
+    if tls_pin_error:
+        return tls_pin_error
     return None
 
 
@@ -161,6 +211,7 @@ def _write_api_host_lock(host: str) -> bool:
         ) as tmp:
             tmp.write(protected)
             temp_path = tmp.name
+        secure_file_permissions(temp_path)
         os.replace(temp_path, _API_HOST_LOCK_FILE)
         secure_file_permissions(_API_HOST_LOCK_FILE)
         return True
@@ -235,6 +286,7 @@ def _save_cred(data: dict) -> None:
             ) as tmp:
                 json.dump(serialized, tmp, ensure_ascii=False, indent=2)
                 temp_path = tmp.name
+            secure_file_permissions(temp_path)
             os.replace(temp_path, _CRED_FILE)
             secure_file_permissions(_CRED_FILE)
         except Exception as e:
@@ -268,9 +320,8 @@ def _normalize_password_for_backend(password: str) -> str:
     """
     if not isinstance(password, str):
         password = str(password or "")
-    normalized = password.strip()
-    if re.fullmatch(r"[a-fA-F0-9]{64}", normalized):
-        return normalized.lower()
+    if re.fullmatch(r"[a-fA-F0-9]{64}", password):
+        return password.lower()
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
@@ -428,6 +479,7 @@ _session.headers.update({
     "Content-Type": "application/json",
     "User-Agent": "ShortsThreadMaker/2.0",
 })
+_AUTH_STATE_LOCK = threading.RLock()
 
 _auth_state: Dict[str, Any] = {
     "user_id": None,
@@ -445,33 +497,36 @@ _auth_state: Dict[str, Any] = {
 
 
 def _mark_token_issued() -> None:
-    _auth_state["token_issued_at"] = time.time()
+    with _AUTH_STATE_LOCK:
+        _auth_state["token_issued_at"] = time.time()
 
 
 def _clear_auth_state_memory() -> None:
-    _auth_state["user_id"] = None
-    _auth_state["username"] = None
-    _auth_state["token"] = None
-    _auth_state["token_issued_at"] = None
-    _auth_state["work_count"] = 0
-    _auth_state["work_used"] = 0
-    _auth_state["remaining_count"] = None
-    _auth_state["plan_type"] = None
-    _auth_state["is_paid"] = None
-    _auth_state["subscription_status"] = None
-    _auth_state["expires_at"] = None
+    with _AUTH_STATE_LOCK:
+        _auth_state["user_id"] = None
+        _auth_state["username"] = None
+        _auth_state["token"] = None
+        _auth_state["token_issued_at"] = None
+        _auth_state["work_count"] = 0
+        _auth_state["work_used"] = 0
+        _auth_state["remaining_count"] = None
+        _auth_state["plan_type"] = None
+        _auth_state["is_paid"] = None
+        _auth_state["subscription_status"] = None
+        _auth_state["expires_at"] = None
 
 
 def _is_token_expired() -> bool:
-    token = _auth_state.get("token")
-    if not token:
-        return False
+    with _AUTH_STATE_LOCK:
+        token = _auth_state.get("token")
+        if not token:
+            return False
 
-    issued_at = _auth_state.get("token_issued_at")
-    if not isinstance(issued_at, (int, float)):
-        return False
+        issued_at = _auth_state.get("token_issued_at")
+        if not isinstance(issued_at, (int, float)):
+            return False
 
-    return (time.time() - float(issued_at)) >= _TOKEN_TTL_SECONDS
+        return (time.time() - float(issued_at)) >= _TOKEN_TTL_SECONDS
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
@@ -514,90 +569,93 @@ def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
 def _merge_account_state(payload: Dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         return
+    with _AUTH_STATE_LOCK:
+        user_id = _extract_state_value(payload, "user_id", "id")
+        if user_id is not None:
+            _auth_state["user_id"] = user_id
 
-    user_id = _extract_state_value(payload, "user_id", "id")
-    if user_id is not None:
-        _auth_state["user_id"] = user_id
+        username = _extract_state_value(payload, "username", "id")
+        if isinstance(username, str) and username.strip():
+            _auth_state["username"] = username.strip()
 
-    username = _extract_state_value(payload, "username", "id")
-    if isinstance(username, str) and username.strip():
-        _auth_state["username"] = username.strip()
+        token = _extract_state_value(payload, "token", "key")
+        if token:
+            token_text = str(token).strip()
+            if token_text:
+                _auth_state["token"] = token_text
+                _auth_state["token_issued_at"] = time.time()
 
-    token = _extract_state_value(payload, "token", "key")
-    if token:
-        token_text = str(token).strip()
-        if token_text:
-            _auth_state["token"] = token_text
-            _mark_token_issued()
+        work_count = _extract_state_value(payload, "work_count", "quota_total", "limit_count")
+        if isinstance(work_count, (int, float)):
+            _auth_state["work_count"] = int(work_count)
 
-    work_count = _extract_state_value(payload, "work_count", "quota_total", "limit_count")
-    if isinstance(work_count, (int, float)):
-        _auth_state["work_count"] = int(work_count)
+        work_used = _extract_state_value(payload, "work_used", "quota_used", "used_count")
+        if isinstance(work_used, (int, float)):
+            _auth_state["work_used"] = int(work_used)
 
-    work_used = _extract_state_value(payload, "work_used", "quota_used", "used_count")
-    if isinstance(work_used, (int, float)):
-        _auth_state["work_used"] = int(work_used)
+        remaining_count = _extract_state_value(payload, "remaining_count", "remaining", "quota_remaining")
+        if isinstance(remaining_count, (int, float)):
+            _auth_state["remaining_count"] = int(remaining_count)
+            if isinstance(_auth_state.get("work_count"), int):
+                computed_used = _auth_state["work_count"] - int(remaining_count)
+                if computed_used >= 0:
+                    _auth_state["work_used"] = computed_used
 
-    remaining_count = _extract_state_value(payload, "remaining_count", "remaining", "quota_remaining")
-    if isinstance(remaining_count, (int, float)):
-        _auth_state["remaining_count"] = int(remaining_count)
-        if isinstance(_auth_state.get("work_count"), int):
-            computed_used = _auth_state["work_count"] - int(remaining_count)
-            if computed_used >= 0:
-                _auth_state["work_used"] = computed_used
+        plan_type = _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier")
+        if isinstance(plan_type, str) and plan_type.strip():
+            _auth_state["plan_type"] = plan_type.strip()
 
-    plan_type = _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier")
-    if isinstance(plan_type, str) and plan_type.strip():
-        _auth_state["plan_type"] = plan_type.strip()
+        subscription_status = _extract_state_value(payload, "subscription_status", "plan_status", "status")
+        if isinstance(subscription_status, str) and subscription_status.strip():
+            _auth_state["subscription_status"] = subscription_status.strip()
 
-    subscription_status = _extract_state_value(payload, "subscription_status", "plan_status", "status")
-    if isinstance(subscription_status, str) and subscription_status.strip():
-        _auth_state["subscription_status"] = subscription_status.strip()
+        expires_at = _extract_state_value(
+            payload,
+            "expires_at",
+            "expire_at",
+            "subscription_expires_at",
+            "period_end",
+            "period_end_at",
+        )
+        if isinstance(expires_at, str) and expires_at.strip():
+            _auth_state["expires_at"] = expires_at.strip()
 
-    expires_at = _extract_state_value(
-        payload,
-        "expires_at",
-        "expire_at",
-        "subscription_expires_at",
-        "period_end",
-        "period_end_at",
-    )
-    if isinstance(expires_at, str) and expires_at.strip():
-        _auth_state["expires_at"] = expires_at.strip()
+        is_paid_value = _extract_state_value(payload, "is_paid", "paid", "pro")
+        coerced_is_paid = _coerce_bool(is_paid_value)
+        if coerced_is_paid is not None:
+            _auth_state["is_paid"] = coerced_is_paid
 
-    is_paid_value = _extract_state_value(payload, "is_paid", "paid", "pro")
-    coerced_is_paid = _coerce_bool(is_paid_value)
-    if coerced_is_paid is not None:
-        _auth_state["is_paid"] = coerced_is_paid
+        if _auth_state.get("is_paid") is None:
+            plan_value = str(_auth_state.get("plan_type") or "").strip().lower()
+            if plan_value:
+                _auth_state["is_paid"] = plan_value not in {"free", "trial", "basic", "starter"}
 
-    if _auth_state.get("is_paid") is None:
-        plan_value = str(_auth_state.get("plan_type") or "").strip().lower()
-        if plan_value:
-            _auth_state["is_paid"] = plan_value not in {"free", "trial", "basic", "starter"}
-
-    status_value = str(_auth_state.get("subscription_status") or "").strip().lower()
-    if status_value in {"expired", "inactive", "cancelled"}:
-        _auth_state["is_paid"] = False
+        status_value = str(_auth_state.get("subscription_status") or "").strip().lower()
+        if status_value in {"expired", "inactive", "cancelled"}:
+            _auth_state["is_paid"] = False
 
 
 def get_auth_state() -> Dict[str, Any]:
     if _is_token_expired():
         _clear_auth_state_memory()
-    return dict(_auth_state)
+    with _AUTH_STATE_LOCK:
+        return dict(_auth_state)
 
 
 def is_logged_in() -> bool:
     if _is_token_expired():
         _clear_auth_state_memory()
         return False
-    return _auth_state.get("token") is not None and _auth_state.get("user_id") is not None
+    with _AUTH_STATE_LOCK:
+        return _auth_state.get("token") is not None and _auth_state.get("user_id") is not None
 
 
 def _get_session_user_and_token() -> tuple[Any, Any]:
     if _is_token_expired():
         _clear_auth_state_memory()
         return None, None
-    return _auth_state.get("user_id"), _auth_state.get("token")
+    with _AUTH_STATE_LOCK:
+        return _auth_state.get("user_id"), _auth_state.get("token")
 
 
 def check_username(username: str) -> Dict[str, Any]:
@@ -646,7 +704,7 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
         return {"success": False, "message": "비밀번호를 입력해주세요."}
 
     if len(password) < _MIN_PASSWORD_LENGTH:
-        return {"success": False, "message": "Password must be at least 8 characters."}
+        return {"success": False, "message": f"비밀번호는 최소 {_MIN_PASSWORD_LENGTH}자 이상이어야 합니다."}
 
     contact_clean = re.sub(r"[^0-9]", "", str(contact or ""))
     if len(contact_clean) < 10:
@@ -688,15 +746,17 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
                 token = result_data.get("token")
                 user_id = result_data.get("user_id")
                 if token and user_id:
-                    _auth_state["user_id"] = user_id
-                    _auth_state["username"] = username
-                    _auth_state["token"] = token
-                    _mark_token_issued()
-                    _auth_state["work_count"] = result_data.get("work_count", 0)
-                    _auth_state["work_used"] = 0
+                    with _AUTH_STATE_LOCK:
+                        _auth_state["user_id"] = user_id
+                        _auth_state["username"] = username
+                        _auth_state["token"] = token
+                        _auth_state["token_issued_at"] = time.time()
+                        _auth_state["work_count"] = result_data.get("work_count", 0)
+                        _auth_state["work_used"] = 0
+                        saved_username = _auth_state["username"]
                     _save_cred({
                         "user_id": user_id,
-                        "username": _auth_state["username"],
+                        "username": saved_username,
                         "token": token,
                     })
                     _merge_account_state(result_data)
@@ -735,7 +795,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     if not username or not password:
         return {"status": False, "message": "아이디와 비밀번호를 입력해주세요."}
     if len(password) < _MIN_PASSWORD_LENGTH:
-        return {"status": False, "message": "Password must be at least 8 characters."}
+        return {"status": False, "message": f"비밀번호는 최소 {_MIN_PASSWORD_LENGTH}자 이상이어야 합니다."}
 
     backend_password = _normalize_password_for_backend(password)
 
@@ -759,16 +819,20 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                 return {"status": False, "message": "로그인 응답이 비었습니다."}
             _merge_account_state(data)
             if data.get("status") is True:
-                _auth_state["user_id"] = data.get("id")
-                _auth_state["username"] = username
-                _auth_state["token"] = data.get("key")
-                _mark_token_issued()
-                _auth_state["work_count"] = data.get("work_count", 0)
-                _auth_state["work_used"] = data.get("work_used", 0)
+                with _AUTH_STATE_LOCK:
+                    _auth_state["user_id"] = data.get("id")
+                    _auth_state["username"] = username
+                    _auth_state["token"] = data.get("key")
+                    _auth_state["token_issued_at"] = time.time()
+                    _auth_state["work_count"] = data.get("work_count", 0)
+                    _auth_state["work_used"] = data.get("work_used", 0)
+                    saved_user_id = _auth_state["user_id"]
+                    saved_username = _auth_state["username"]
+                    saved_token = _auth_state["token"]
                 _save_cred({
-                    "user_id": _auth_state["user_id"],
-                    "username": _auth_state["username"],
-                    "token": _auth_state["token"],
+                    "user_id": saved_user_id,
+                    "username": saved_username,
+                    "token": saved_token,
                 })
                 _merge_account_state(data)
             elif data.get("status") is False and not data.get("message"):
@@ -896,7 +960,8 @@ def use_work() -> Dict[str, Any]:
         if resp.status_code == 200:
             data = _safe_json(resp)
             if data.get("success"):
-                _auth_state["work_used"] = data.get("work_used", _auth_state["work_used"] + 1)
+                with _AUTH_STATE_LOCK:
+                    _auth_state["work_used"] = data.get("work_used", _auth_state["work_used"] + 1)
             _merge_account_state(data)
             return data
         return {"success": False}

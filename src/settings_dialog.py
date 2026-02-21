@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 설정 다이얼로그 (PyQt6)
 Stitch Blue 디자인 - 좌표 기반 배치

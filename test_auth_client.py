@@ -184,7 +184,7 @@ def test_register_rejects_short_password(monkeypatch):
     )
 
     assert result["success"] is False
-    assert "8 characters" in result["message"]
+    assert "8자" in result["message"]
     assert len(session.calls) == 0
 
 
@@ -198,7 +198,7 @@ def test_login_rejects_short_password(monkeypatch):
     result = auth_client.login("shortuser", "1")
 
     assert result["status"] is False
-    assert "8 characters" in result["message"]
+    assert "8자" in result["message"]
     assert len(session.calls) == 0
 
 
