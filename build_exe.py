@@ -1,4 +1,4 @@
-﻿"""Build helper for creating the Windows executable with PyInstaller."""
+"""Build helper for creating the Windows executable with PyInstaller."""
 
 from __future__ import annotations
 
@@ -102,8 +102,15 @@ def pin_updater_signer_thumbprint():
         or os.getenv("CODE_SIGN_CERT_THUMBPRINT")
     )
     if not thumb:
-        print("  - No trusted signer thumbprint env set; updater pin left unchanged.")
-        return None
+        allow_unpinned = os.getenv("COUPUAS_ALLOW_UNPINNED_UPDATER_SIGNER", "").strip() == "1"
+        if allow_unpinned:
+            print("  - WARNING: unpinned updater signer is allowed by override env.")
+            return None
+        raise RuntimeError(
+            "Trusted signer thumbprint is required. "
+            "Set COUPUAS_TRUSTED_SIGNER_THUMBPRINT (or CODE_SIGN_CERT_THUMBPRINT). "
+            "For local test builds only, set COUPUAS_ALLOW_UNPINNED_UPDATER_SIGNER=1."
+        )
 
     updater_path = Path("src") / "auto_updater.py"
     if not updater_path.exists():

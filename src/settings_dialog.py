@@ -395,12 +395,12 @@ class SettingsDialog(QDialog):
 
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
+        profile_dir = self._get_profile_dir()
 
         def open_browser():
             try:
                 from src.computer_use_agent import ComputerUseAgent
 
-                profile_dir = self._get_profile_dir()
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=False,
@@ -444,13 +444,13 @@ class SettingsDialog(QDialog):
         self.check_login_btn.setEnabled(False)
         self.check_login_btn.setText("확인 중...")
         self._update_login_status("pending", "확인 중...")
+        profile_dir = self._get_profile_dir()
 
         def check_status():
             try:
                 from src.computer_use_agent import ComputerUseAgent
                 from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
-                profile_dir = self._get_profile_dir()
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=True,

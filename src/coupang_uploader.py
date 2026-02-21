@@ -35,9 +35,25 @@ class CoupangThreadsUploader:
         self.last_error = None
         self._cancel_event = threading.Event()
         self._current_agent = None
+        self._agent_lock = threading.Lock()
 
     def _resolve_google_api_key(self) -> str:
         return self._google_api_key
+
+    def _set_current_agent(self, agent: Optional[ComputerUseAgent]) -> None:
+        with self._agent_lock:
+            self._current_agent = agent
+
+    def _pop_current_agent(self) -> Optional[ComputerUseAgent]:
+        with self._agent_lock:
+            agent = self._current_agent
+            self._current_agent = None
+            return agent
+
+    def _clear_current_agent(self, expected: Optional[ComputerUseAgent] = None) -> None:
+        with self._agent_lock:
+            if expected is None or self._current_agent is expected:
+                self._current_agent = None
 
     @staticmethod
     def _sanitize_goal_text(value: object, limit: int = 2500) -> str:
@@ -54,9 +70,10 @@ class CoupangThreadsUploader:
         """업로드 취소"""
         self._cancel_event.set()
         # 현재 실행 중인 agent가 있으면 정리
-        if self._current_agent:
+        agent = self._pop_current_agent()
+        if agent:
             try:
-                self._current_agent.close()
+                agent.close()
             except Exception:
                 pass
 
@@ -79,7 +96,7 @@ class CoupangThreadsUploader:
                 )
                 agent.start_browser()
                 created_agent = True
-                self._current_agent = agent
+                self._set_current_agent(agent)
 
             helper = ThreadsPlaywrightHelper(agent.page)
 
@@ -143,7 +160,7 @@ class CoupangThreadsUploader:
                     agent.close()
                 except Exception:
                     pass
-                self._current_agent = None
+                self._clear_current_agent(agent)
 
     def _upload_with_ai(self, agent: ComputerUseAgent, posts_data: List[Dict]) -> bool:
         """AI를 사용한 업로드 (fallback)"""
@@ -255,7 +272,7 @@ class CoupangThreadsUploader:
                 profile_dir=".threads_profile"
             )
             agent.start_browser()
-            self._current_agent = agent
+            self._set_current_agent(agent)
             log("브라우저 준비 완료", "브라우저가 성공적으로 시작되었습니다")
 
             total = len(products)
@@ -398,7 +415,7 @@ class CoupangThreadsUploader:
                     agent.close()
                 except Exception:
                     pass
-            self._current_agent = None
+            self._clear_current_agent(agent)
 
         status = "취소됨" if results['cancelled'] else "완료"
         print(f"\n{'━'*50}")

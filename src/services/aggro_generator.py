@@ -1,207 +1,159 @@
 # -*- coding: utf-8 -*-
-"""
-어그로 문구 생성 서비스
-상품에 대한 재미있고 어그로성 있는 한줄 문구를 Gemini로 생성합니다.
-"""
-import google.generativeai as genai
-from typing import Optional
+"""Generate short promotional Threads copy for product posts."""
+
+from __future__ import annotations
+
+import os
+import re
+from typing import Dict, List, Optional
 
 
 class AggroGenerator:
-    """어그로 문구 생성기"""
+    """Create ad-like short copy and multi-post payloads."""
 
-    # 쿠팡 파트너스 규정 문구
-    COUPANG_DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+    COUPANG_DISCLOSURE = (
+        "이 포스팅은 쿠팡 파트너스 활동의 일환으로, "
+        "이에 따른 일정액의 수수료를 제공받습니다."
+    )
 
-    # 활동 시 주의사항
-    ACTIVITY_WARNING = """*활동 시 주의 사항
+    ACTIVITY_WARNING = (
+        "*파트너스 활동 주의사항*\n\n"
+        "1. 게시글 작성 시 아래 문구를 반드시 포함해 주세요.\n"
+        "\"이 포스팅은 쿠팡 파트너스 활동의 일환으로, "
+        "이에 따른 일정액의 수수료를 제공받습니다.\"\n\n"
+        "2. 수신자 동의 없는 메시지/SNS 발송은 스팸으로 간주될 수 있습니다."
+    )
 
-1. 게시글 작성 시, 아래 문구를 반드시 기재해 주세요.
-"이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+    def __init__(self, api_key: str = "") -> None:
+        self._client = None
+        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash")
+        self.set_api_key(api_key)
 
-쿠팡 파트너스의 활동은 공정거래위원회의 심사지침에 따라 추천, 보증인인 파트너스 회원과 당사의 경제적 이해관계에 대하여 공개하여야 합니다.
+    def set_api_key(self, api_key: str) -> None:
+        """Initialize Gemini client without global SDK configuration."""
+        key = str(api_key or "").strip()
+        if not key:
+            self._client = None
+            return
+        try:
+            from google import genai
 
-2. 바로가기 아이콘 이용 시, 수신자의 사전 동의를 얻지 않은 메신저, SNS 등으로 메시지를 발송하는 행위는 불법 스팸 전송 행위로 간주되어 규제기관의 행정제재 또는 형사 처벌의 대상이 될 수 있으니 이 점 유의하시기 바랍니다."""
+            self._client = genai.Client(api_key=key)
+        except Exception:
+            self._client = None
 
-    def __init__(self, api_key: str = ""):
-        """
-        Args:
-            api_key: Google Gemini API 키
-        """
-        if api_key:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        else:
-            self.model = None
+    def _generate_text(self, prompt: str) -> str:
+        if self._client is None:
+            return ""
+        response = self._client.models.generate_content(
+            model=self._model_name,
+            contents=prompt,
+        )
+        text = str(getattr(response, "text", "") or "").strip()
+        if text:
+            return text
 
-    def set_api_key(self, api_key: str):
-        """API 키 설정"""
-        if api_key:
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        else:
-            self.model = None
+        candidates = getattr(response, "candidates", None) or []
+        for candidate in candidates:
+            content = getattr(candidate, "content", None)
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                part_text = str(getattr(part, "text", "") or "").strip()
+                if part_text:
+                    return part_text
+        return ""
 
-    def generate_aggro_text(self, product_title: str, product_keywords: str = "", api_key: str = "") -> str:
-        """
-        상품에 대한 어그로성 한줄 문구 생성
-
-        Args:
-            product_title: 상품명
-            product_keywords: 추가 키워드 (사용하지 않음 - 한국어만 사용)
-
-        Returns:
-            어그로성 한줄 문구
-        """
+    def generate_aggro_text(
+        self, product_title: str, product_keywords: str = "", api_key: str = ""
+    ) -> str:
+        """Generate one short hook sentence for Threads."""
         if api_key:
             self.set_api_key(api_key)
 
-        if not self.model:
-            return f"이거 보고 충동구매 했는데 후회 1도 없음 {product_title[:15]}"
+        seed_text = str(product_title or product_keywords or "").strip()
+        if not seed_text:
+            seed_text = "추천 상품"
+
+        if self._client is None:
+            return f"이거 보고 안 사면 손해일 수도 있음 {seed_text[:15]}"
 
         try:
-            prompt = f"""상품명: {product_title}
+            prompt = (
+                f"상품명: {seed_text}\n\n"
+                "Threads용 한 줄 훅 문장을 작성해줘.\n"
+                "규칙:\n"
+                "- 25~40자\n"
+                "- 과장된 후기체/충동구매 유도 톤\n"
+                "- 해시태그 금지\n"
+                "- 한국어만 사용\n"
+                "- 문장 하나만 출력\n"
+            )
+            result = self._generate_text(prompt).strip()
+            if not result:
+                raise ValueError("empty response")
 
-Threads에 올릴 클릭을 유도하는 한줄 문구를 작성해.
-
-규칙:
-- 25~40자 정도로 작성
-- 궁금해서 클릭할 수밖에 없는 문장
-- 충격/반전/궁금증 유발
-- 과장되고 재미있게
-- 이모지 1~2개 사용
-- 해시태그 금지
-- 한국어만
-
-좋은 예시:
-"친구가 이거 사고 인생 바뀌었다는데 실화냐"
-"우리 엄마한테 보여줬더니 왜 이제 알려줬냐고 화냄"
-"이거 보고 충동구매 했는데 후회 1도 없음"
-"솔직히 이 가격에 이게 된다고? 사기 아님?"
-"3일 써보고 소름돋아서 가족한테도 사줌"
-"이거 왜 아무도 안알려줬어 진짜 억울해"
-
-나쁜 예시:
-"좋은 상품입니다" (재미없음)
-"추천드려요" (광고느낌)
-"이거 실화냐?!" (너무 짧음)
-
-한줄만 출력:"""
-            response = self.model.generate_content(prompt)
-            result = response.text.strip()
-
-            # 따옴표 제거
-            result = result.strip('"\'')
-
-            # 줄바꿈 제거
-            result = result.replace('\n', ' ').strip()
-
-            # 중국어 문자 제거 (혹시 포함되어 있다면)
-            import re
-            result = re.sub(r'[\u4e00-\u9fff]+', '', result)
-
-            # 해시태그 제거 (혹시 포함되어 있다면)
-            result = re.sub(r'#\S+', '', result).strip()
-
+            result = result.strip("\"'")
+            result = result.replace("\n", " ").strip()
+            result = re.sub(r"[\u4e00-\u9fff]+", "", result)
+            result = re.sub(r"#\S+", "", result).strip()
             return result
+        except Exception as exc:
+            print(f"  애그로 문구 생성 오류: {exc}")
+            return "이거 보고 안 사면 손해일 수도 있음"
 
-        except Exception as e:
-            print(f"  ⚠️ 어그로 문구 생성 오류: {e}")
-            return f"이거 뭐야?! ㅋㅋ"
+    def generate_product_post(self, product_info: dict, api_key: str = "") -> Dict[str, object]:
+        """Build 3-part post payload with media metadata."""
+        title = str(product_info.get("title", "") or "")
+        keywords = str(product_info.get("search_keywords", "") or "")
+        original_url = str(product_info.get("original_url", "") or "")
+        image_path: Optional[str] = product_info.get("image_path")
+        video_path: Optional[str] = product_info.get("video_path")
 
-    def generate_product_post(self, product_info: dict, api_key: str = "") -> dict:
-        """
-        상품 정보로 스레드 포스트 데이터 생성
-
-        Args:
-            product_info: 상품 정보 딕셔너리
-                - title: 상품명
-                - original_url: 쿠팡 파트너스 링크
-                - search_keywords: 검색 키워드
-                - image_path: 이미지 경로 (선택)
-                - video_path: 영상 경로 (선택)
-
-        Returns:
-            포스트 데이터 딕셔너리
-            {
-                'first_post': {'text': 어그로문구, 'media_path': 이미지/영상},
-                'second_post': {'text': 링크+규정문구},
-                'third_post': {'text': 주의사항}
-            }
-        """
-        title = product_info.get('title', '')
-        keywords = product_info.get('search_keywords', '')
-        original_url = product_info.get('original_url', '')
-        image_path = product_info.get('image_path')
-        video_path = product_info.get('video_path')
-
-        # 어그로 문구 생성
         aggro_text = self.generate_aggro_text(title, keywords, api_key=api_key)
-
-        # 미디어 선택 (영상 우선)
         media_path = video_path if video_path else image_path
 
-        # 두 번째 포스트 (링크 + 규정 문구)
-        second_text = f"👆제품 구경하기\n{original_url}\n\n{self.COUPANG_DISCLOSURE}"
-
-        # 세 번째 포스트 (주의사항)
-        third_text = self.ACTIVITY_WARNING
+        second_text = f"상품 구경하기\n{original_url}\n\n{self.COUPANG_DISCLOSURE}"
 
         return {
-            'first_post': {
-                'text': aggro_text,
-                'media_path': media_path,
-                'media_type': 'video' if video_path else 'image'
+            "first_post": {
+                "text": aggro_text,
+                "media_path": media_path,
+                "media_type": "video" if video_path else "image",
             },
-            'second_post': {
-                'text': second_text,
-                'media_path': None,
-                'media_type': None
+            "second_post": {
+                "text": second_text,
+                "media_path": None,
+                "media_type": None,
             },
-            'third_post': {
-                'text': third_text,
-                'media_path': None,
-                'media_type': None
+            "third_post": {
+                "text": self.ACTIVITY_WARNING,
+                "media_path": None,
+                "media_type": None,
             },
-            'product_title': title,
-            'original_url': original_url
+            "product_title": title,
+            "original_url": original_url,
         }
 
-    def generate_batch(self, products: list, api_key: str = "") -> list:
-        """
-        여러 상품에 대해 일괄 포스트 생성
-
-        Args:
-            products: 상품 정보 리스트
-
-        Returns:
-            포스트 데이터 리스트
-        """
-        results = []
-        for i, product in enumerate(products, 1):
-            print(f"  📝 [{i}/{len(products)}] 어그로 문구 생성: {product.get('title', '')[:30]}...")
-            post_data = self.generate_product_post(product, api_key=api_key)
-            results.append(post_data)
-
+    def generate_batch(self, products: list, api_key: str = "") -> List[Dict[str, object]]:
+        """Generate post payloads for multiple products."""
+        results: List[Dict[str, object]] = []
+        for index, product in enumerate(products, 1):
+            title = str(product.get("title", "") or "")
+            print(f"  [{index}/{len(products)}] 애그로 문구 생성: {title[:30]}...")
+            results.append(self.generate_product_post(product, api_key=api_key))
         return results
 
 
-# 테스트
 if __name__ == "__main__":
-    import os
-
     api_key = os.environ.get("GOOGLE_API_KEY", "")
     generator = AggroGenerator(api_key)
-
-    # 테스트 상품
     test_product = {
-        'title': '동전 먹는 가오나시 저금통',
-        'original_url': 'https://link.coupang.com/a/test123',
-        'search_keywords': '가오나시 저금통 동전',
-        'image_path': 'media/test.jpg',
-        'video_path': None
+        "title": "충전 되는 가열용 텀블러",
+        "original_url": "https://link.coupang.com/a/test123",
+        "search_keywords": "가열 텀블러 충전",
+        "image_path": "media/test.jpg",
+        "video_path": None,
     }
-
     result = generator.generate_product_post(test_product)
     print(f"\n첫 번째 포스트: {result['first_post']['text']}")
     print(f"두 번째 포스트: {result['second_post']['text'][:100]}...")

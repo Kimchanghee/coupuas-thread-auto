@@ -8,6 +8,7 @@ import os
 import random
 import re
 import time
+from pathlib import Path
 from typing import List, Optional
 from urllib.parse import quote, urlparse
 
@@ -17,7 +18,7 @@ import requests
 class ImageSearchService:
     """1688 image search service with retry and fallback query generation."""
 
-    CACHE_DIR = "media/cache"
+    CACHE_DIR = str(Path(__file__).resolve().parents[2] / "media" / "cache")
     MAX_RETRIES = 10
     TARGET_IMAGES = 2
     MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -27,16 +28,44 @@ class ImageSearchService:
 
     def __init__(self):
         os.makedirs(self.CACHE_DIR, exist_ok=True)
-        self._gemini_model = None
+        self._gemini_client = None
+        self._gemini_api_key = ""
+        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash")
 
-    def _get_gemini_model(self, api_key: str):
-        """Lazily initialize Gemini model for translation/query variation."""
-        if self._gemini_model is None and api_key:
-            import google.generativeai as genai
+    def _get_gemini_client(self, api_key: str):
+        """Lazily initialize Gemini client for translation/query variation."""
+        normalized_key = str(api_key or "").strip()
+        if not normalized_key:
+            return None
 
-            genai.configure(api_key=api_key)
-            self._gemini_model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        return self._gemini_model
+        if self._gemini_client is None or self._gemini_api_key != normalized_key:
+            from google import genai
+
+            self._gemini_client = genai.Client(api_key=normalized_key)
+            self._gemini_api_key = normalized_key
+        return self._gemini_client
+
+    def _generate_gemini_text(self, prompt: str, api_key: str) -> str:
+        client = self._get_gemini_client(api_key)
+        if client is None:
+            return ""
+        response = client.models.generate_content(
+            model=self._model_name,
+            contents=prompt,
+        )
+        text = str(getattr(response, "text", "") or "").strip()
+        if text:
+            return text
+
+        candidates = getattr(response, "candidates", None) or []
+        for candidate in candidates:
+            content = getattr(candidate, "content", None)
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                part_text = str(getattr(part, "text", "") or "").strip()
+                if part_text:
+                    return part_text
+        return ""
 
     def search_product_images(self, product_info: dict, api_key: str = "") -> List[str]:
         """Return up to TARGET_IMAGES local image paths for the given product."""
@@ -135,16 +164,15 @@ class ImageSearchService:
     def _generate_random_variant(self, title: str, keywords: str, api_key: str, attempt: int) -> str:
         """Generate additional variant for retries."""
         base = (title or keywords or "").strip()
-        model = self._get_gemini_model(api_key)
+        client = self._get_gemini_client(api_key)
 
-        if model and base and attempt <= 5:
+        if client and base and attempt <= 5:
             try:
                 prompt = (
                     f"Return one short 1688 Chinese search keyword phrase for: {base}. "
                     "Output phrase only."
                 )
-                response = model.generate_content(prompt)
-                result = str(getattr(response, "text", "") or "").strip().strip("\"'")
+                result = self._generate_gemini_text(prompt, api_key).strip().strip("\"'")
                 if result:
                     return result
             except Exception:
@@ -158,8 +186,8 @@ class ImageSearchService:
 
     def _translate_to_chinese(self, text: str, api_key: str) -> Optional[str]:
         """Translate product keyword to Chinese for 1688 search."""
-        model = self._get_gemini_model(api_key)
-        if not model or not text:
+        client = self._get_gemini_client(api_key)
+        if not client or not text:
             return None
 
         try:
@@ -167,8 +195,7 @@ class ImageSearchService:
                 f"Translate this into concise Chinese search terms for 1688: {text}. "
                 "Output terms only."
             )
-            response = model.generate_content(prompt)
-            result = str(getattr(response, "text", "") or "").strip()
+            result = self._generate_gemini_text(prompt, api_key).strip()
             result = re.sub(r"[\"'\n]", "", result)
             if re.search(r"[\u4e00-\u9fff]", result):
                 return result
@@ -179,8 +206,8 @@ class ImageSearchService:
 
     def _translate_to_english(self, text: str, api_key: str) -> Optional[str]:
         """Translate product keyword to English fallback query."""
-        model = self._get_gemini_model(api_key)
-        if not model or not text:
+        client = self._get_gemini_client(api_key)
+        if not client or not text:
             return None
 
         try:
@@ -188,8 +215,7 @@ class ImageSearchService:
                 f"Translate this into concise English product search terms: {text}. "
                 "Output terms only."
             )
-            response = model.generate_content(prompt)
-            result = str(getattr(response, "text", "") or "").strip().strip("\"'")
+            result = self._generate_gemini_text(prompt, api_key).strip().strip("\"'")
             return result if result else None
         except Exception:
             return None

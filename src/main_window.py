@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-쿠팡 파트너스 스레드 자동화 - 메인 윈도우 (PyQt6)
-Stitch Blue 디자인 - 사이드바 + 스택 페이지 레이아웃
-좌표 기반 배치 (setGeometry), 레이아웃 매니저 없음
+荑좏뙜 ?뚰듃?덉뒪 ?ㅻ젅???먮룞??- 硫붿씤 ?덈룄??(PyQt6)
+Stitch Blue ?붿옄??- ?ъ씠?쒕컮 + ?ㅽ깮 ?섏씠吏 ?덉씠?꾩썐
+醫뚰몴 湲곕컲 諛곗튂 (setGeometry), ?덉씠?꾩썐 留ㅻ땲? ?놁쓬
 """
 import re
 import html
@@ -35,7 +35,7 @@ from src.events import LoginStatusEvent
 logger = logging.getLogger(__name__)
 
 
-# ─── Constants ──────────────────────────────────────────────
+# ??? Constants ??????????????????????????????????????????????
 
 WIN_W = 1280
 WIN_H = 800
@@ -46,7 +46,7 @@ CONTENT_H = 700   # WIN_H - HEADER_H - STATUSBAR_H
 STATUSBAR_H = 32
 
 
-# ─── Helpers ────────────────────────────────────────────────
+# ??? Helpers ????????????????????????????????????????????????
 
 def _format_interval(seconds):
     """Return a human-readable interval."""
@@ -54,13 +54,13 @@ def _format_interval(seconds):
     m = (seconds % 3600) // 60
     s = seconds % 60
     if h > 0:
-        return f"{h}시간 {m}분 {s}초"
+        return f"{h}h {m}m {s}s"
     if m > 0:
-        return f"{m}분 {s}초"
-    return f"{s}초"
+        return f"{m}m {s}s"
+    return f"{s}s"
 
 
-# ─── Signals ────────────────────────────────────────────────
+# ??? Signals ????????????????????????????????????????????????
 
 class Signals(QObject):
     log = pyqtSignal(str)
@@ -73,12 +73,14 @@ class Signals(QObject):
     link_status = pyqtSignal(str, str, str)  # url, status, product_name
     queue_progress = pyqtSignal(str)
     reset_steps = pyqtSignal()
+    heartbeat_result = pyqtSignal(dict)
+    update_check_result = pyqtSignal(dict)
 
 
-# ─── Badge ──────────────────────────────────────────────────
+# ??? Badge ??????????????????????????????????????????????????
 
 class Badge(QLabel):
-    """작은 알약형 상태 배지."""
+    """?묒? ?뚯빟???곹깭 諛곗?."""
     def __init__(self, text="", color=Colors.ACCENT, parent=None):
         super().__init__(text, parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -95,10 +97,10 @@ class Badge(QLabel):
         self._apply(color)
 
 
-# ─── HeaderBar ──────────────────────────────────────────────
+# ??? HeaderBar ??????????????????????????????????????????????
 
 class HeaderBar(QFrame):
-    """그라디언트 헤더 바 (accent 라인 포함)."""
+    """洹몃씪?붿뼵???ㅻ뜑 諛?(accent ?쇱씤 ?ы븿)."""
     ACCENT_LINE_H = 4
 
     def __init__(self, parent=None):
@@ -110,14 +112,14 @@ class HeaderBar(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # 배경 그라디언트
+        # 諛곌꼍 洹몃씪?붿뼵??
         grad = QLinearGradient(0, 0, w, 0)
         grad.setColorAt(0, QColor("#12203A"))
         grad.setColorAt(0.5, QColor("#162847"))
         grad.setColorAt(1, QColor("#12203A"))
         painter.fillRect(self.rect(), grad)
 
-        # 상단 accent 라인
+        # ?곷떒 accent ?쇱씤
         accent = QLinearGradient(0, 0, w, 0)
         accent.setColorAt(0, QColor(13, 89, 242, 0))
         accent.setColorAt(0.2, QColor(Colors.ACCENT))
@@ -126,15 +128,15 @@ class HeaderBar(QFrame):
         accent.setColorAt(1, QColor(13, 89, 242, 0))
         painter.fillRect(0, 0, w, self.ACCENT_LINE_H, accent)
 
-        # 하단 border
+        # ?섎떒 border
         painter.setPen(QPen(QColor(13, 89, 242, 80), 1))
         painter.drawLine(0, h - 1, w, h - 1)
 
 
-# ─── SidebarPanel ──────────────────────────────────────────
+# ??? SidebarPanel ??????????????????????????????????????????
 
 class SidebarPanel(QFrame):
-    """어두운 사이드바 패널 (오른쪽 border 라인)."""
+    """?대몢???ъ씠?쒕컮 ?⑤꼸 (?ㅻⅨ履?border ?쇱씤)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -144,20 +146,20 @@ class SidebarPanel(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # 배경
+        # 諛곌꼍
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor("#111827"))
         painter.drawRect(0, 0, w, h)
 
-        # 오른쪽 border 라인
+        # ?ㅻⅨ履?border ?쇱씤
         painter.setPen(QPen(QColor(Colors.BORDER), 1))
         painter.drawLine(w - 1, 0, w - 1, h)
 
 
-# ─── SectionFrame ──────────────────────────────────────────
+# ??? SectionFrame ??????????????????????????????????????????
 
 class SectionFrame(QFrame):
-    """둥근 카드 프레임 (설정/Threads 섹션용)."""
+    """?κ렐 移대뱶 ?꾨젅??(?ㅼ젙/Threads ?뱀뀡??."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,10 +173,10 @@ class SectionFrame(QFrame):
         painter.drawRoundedRect(rect, 12, 12)
 
 
-# ─── MainWindow ─────────────────────────────────────────────
+# ??? MainWindow ?????????????????????????????????????????????
 
 class MainWindow(QMainWindow):
-    """쿠팡 파트너스 스레드 자동화 메인 윈도우 - 사이드바 레이아웃."""
+    """荑좏뙜 ?뚰듃?덉뒪 ?ㅻ젅???먮룞??硫붿씤 ?덈룄??- ?ъ씠?쒕컮 ?덉씠?꾩썐."""
 
     MAX_LOG_LINES = 2000
 
@@ -185,17 +187,17 @@ class MainWindow(QMainWindow):
 
     # Sidebar menu items
     _SIDEBAR_ITEMS = [
-        ("◈", "링크 입력"),
-        ("⬆", "업로드 설정"),
-        ("⚙", "설정"),
+        ("Links", "Link Input"),
+        ("Upload", "Upload Settings"),
+        ("Settings", "Settings"),
     ]
 
     # Process steps for progress panel
     _PROCESS_STEPS = [
-        "링크 분석",
-        "콘텐츠 생성",
-        "Threads 업로드",
-        "완료 처리",
+        "Parse Links",
+        "Generate Content",
+        "Upload to Threads",
+        "Finalize",
     ]
 
     def __init__(self):
@@ -214,6 +216,10 @@ class MainWindow(QMainWindow):
         self._link_url_row_map = {}  # url -> table row index
         self._active_pipeline = None
         self._session_expiry_notified = False
+        self._heartbeat_lock = threading.Lock()
+        self._heartbeat_inflight = False
+        self._update_check_lock = threading.Lock()
+        self._update_check_inflight = False
         logger.info("MainWindow initialized")
 
         self.signals = Signals()
@@ -227,6 +233,8 @@ class MainWindow(QMainWindow):
         self.signals.link_status.connect(self._update_link_table_status)
         self.signals.queue_progress.connect(self._set_queue_progress)
         self.signals.reset_steps.connect(self._reset_steps)
+        self.signals.heartbeat_result.connect(self._on_heartbeat_result)
+        self.signals.update_check_result.connect(self._on_update_check_result)
 
         self._current_page = 0
         # Apply global stylesheet before building widgets so sizeHint/metrics are correct
@@ -282,9 +290,9 @@ class MainWindow(QMainWindow):
 
         return "unknown"
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  BUILD UI
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _build_ui(self):
         central = QWidget()
@@ -295,7 +303,7 @@ class MainWindow(QMainWindow):
         self._build_pages(central)
         self._build_statusbar(central)
 
-    # ── Header ──────────────────────────────────────────────
+    # ?? Header ??????????????????????????????????????????????
 
     def _build_header(self, parent):
         header = HeaderBar(parent)
@@ -321,7 +329,7 @@ class MainWindow(QMainWindow):
         )
 
         # Title
-        title_label = QLabel("쿠팡 파트너스", header)
+        title_label = QLabel("荑좏뙜 ?뚰듃?덉뒪", header)
         title_label.setGeometry(62, 10, 220, 30)
         title_label.setStyleSheet(
             "color: #FFFFFF; font-size: 15pt; font-weight: 800;"
@@ -350,7 +358,7 @@ class MainWindow(QMainWindow):
         )
 
         # Logout button (far right)
-        self.logout_btn = QPushButton("로그아웃", header)
+        self.logout_btn = QPushButton("濡쒓렇?꾩썐", header)
         self.logout_btn.setGeometry(WIN_W - 80, 20, 64, 28)
         self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.logout_btn.setStyleSheet(
@@ -374,7 +382,7 @@ class MainWindow(QMainWindow):
         self.tutorial_btn.clicked.connect(self.open_tutorial)
 
         # Update button
-        self.update_btn = QPushButton("업데이트", header)
+        self.update_btn = QPushButton("?낅뜲?댄듃", header)
         self.update_btn.setGeometry(WIN_W - 80 - 12 - 56 - 10 - 60, 20, 60, 28)
         self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_btn.setStyleSheet(_nav_pill_style)
@@ -397,7 +405,7 @@ class MainWindow(QMainWindow):
             nav_right -= nav_gap
 
 
-        # ── Account info card (compact horizontal bar) ──
+        # ?? Account info card (compact horizontal bar) ??
         acct_card = QWidget(header)
         acct_card.setObjectName("acctInfoCard")
         acct_card.setStyleSheet(f"""
@@ -420,7 +428,7 @@ class MainWindow(QMainWindow):
         cx += 16
 
         # Status badge (compact text inside card)
-        self.status_badge = Badge("대기중", Colors.SUCCESS, acct_card)
+        self.status_badge = Badge("?湲곗쨷", Colors.SUCCESS, acct_card)
         self.status_badge.setGeometry(cx, 2, 70, 24)
         cx += 74
 
@@ -451,7 +459,7 @@ class MainWindow(QMainWindow):
         cx += 10
 
         # Work count label
-        self._work_label = QLabel("0 / 0 회", acct_card)
+        self._work_label = QLabel("0 / 0 work", acct_card)
         self._work_label.setGeometry(cx, 0, 90, 28)
         self._work_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)
         self._work_label.setStyleSheet(
@@ -504,7 +512,7 @@ class MainWindow(QMainWindow):
         self._acct_sep2.setGeometry(cx, 6, 1, 16)
         cx += 10
 
-        work_text = self._work_label.text() or "0 / 0 회"
+        work_text = self._work_label.text() or "0 / 0 work"
         work_w = max(self._work_label.fontMetrics().horizontalAdvance(work_text) + 16, 90)
         status_min_w = 58
         plan_min_w = 46
@@ -560,7 +568,7 @@ class MainWindow(QMainWindow):
         card_x = max(min_card_x, nav_left - 12 - card_w)
         card.setGeometry(card_x, 20, card_w, 28)
 
-    # ── Sidebar ─────────────────────────────────────────────
+    # ?? Sidebar ?????????????????????????????????????????????
 
     def _build_sidebar(self, parent):
         sidebar = SidebarPanel(parent)
@@ -590,10 +598,10 @@ class MainWindow(QMainWindow):
         divider.setGeometry(20, divider_y, SIDEBAR_W - 40, 1)
         divider.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
 
-        # ── Progress Panel ─────────────────────────────────
+        # ?? Progress Panel ?????????????????????????????????
         prog_y = divider_y + 16
 
-        prog_title = QLabel("현재 진행 상황", sidebar)
+        prog_title = QLabel("?꾩옱 吏꾪뻾 ?곹솴", sidebar)
         prog_title.setGeometry(24, prog_y, 200, 20)
         prog_title.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 700;"
@@ -602,7 +610,7 @@ class MainWindow(QMainWindow):
         prog_y += 28
 
         # Queue progress
-        self._progress_queue_label = QLabel("전체: 0 / 0", sidebar)
+        self._progress_queue_label = QLabel("?꾩껜: 0 / 0", sidebar)
         self._progress_queue_label.setGeometry(24, prog_y, 240, 20)
         self._progress_queue_label.setStyleSheet(
             f"color: {Colors.ACCENT_LIGHT}; font-size: 10pt; font-weight: 700;"
@@ -614,7 +622,7 @@ class MainWindow(QMainWindow):
         self._step_dots = []
         self._step_labels = []
         for step_name in self._PROCESS_STEPS:
-            dot = QLabel("○", sidebar)
+            dot = QLabel("•", sidebar)
             dot.setGeometry(28, prog_y, 16, 20)
             dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot.setStyleSheet(
@@ -638,7 +646,7 @@ class MainWindow(QMainWindow):
         prog_y += 12
 
         # Status label
-        self._sidebar_status_label = QLabel("대기중", sidebar)
+        self._sidebar_status_label = QLabel("?湲곗쨷", sidebar)
         self._sidebar_status_label.setGeometry(24, prog_y, 240, 20)
         self._sidebar_status_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
@@ -652,7 +660,7 @@ class MainWindow(QMainWindow):
         self._sidebar_success_dot.setStyleSheet(
             f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
         )
-        self._sidebar_success_label = QLabel("성공: 0", sidebar)
+        self._sidebar_success_label = QLabel("?깃났: 0", sidebar)
         self._sidebar_success_label.setGeometry(40, prog_y, 70, 20)
         self._sidebar_success_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
@@ -663,7 +671,7 @@ class MainWindow(QMainWindow):
         self._sidebar_failed_dot.setStyleSheet(
             f"background-color: {Colors.ERROR}; border-radius: 4px;"
         )
-        self._sidebar_failed_label = QLabel("실패: 0", sidebar)
+        self._sidebar_failed_label = QLabel("?ㅽ뙣: 0", sidebar)
         self._sidebar_failed_label.setGeometry(136, prog_y, 70, 20)
         self._sidebar_failed_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
@@ -674,15 +682,15 @@ class MainWindow(QMainWindow):
         self._sidebar_total_dot.setStyleSheet(
             f"background-color: {Colors.INFO}; border-radius: 4px;"
         )
-        self._sidebar_total_label = QLabel("전체: 0", sidebar)
+        self._sidebar_total_label = QLabel("?꾩껜: 0", sidebar)
         self._sidebar_total_label.setGeometry(232, prog_y, 70, 20)
         self._sidebar_total_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
         )
         prog_y += 30
 
-        # ── Mini Log Area ──────────────────────────────────
-        log_title = QLabel("작업 로그", sidebar)
+        # ?? Mini Log Area ??????????????????????????????????
+        log_title = QLabel("?묒뾽 濡쒓렇", sidebar)
         log_title.setGeometry(24, prog_y, 200, 20)
         log_title.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 700;"
@@ -732,7 +740,7 @@ class MainWindow(QMainWindow):
             f"}}"
         )
 
-    # ── Pages ───────────────────────────────────────────────
+    # ?? Pages ???????????????????????????????????????????????
 
     def _build_pages(self, parent):
         """Build 3 pages as QWidgets positioned to the right of the sidebar."""
@@ -783,16 +791,16 @@ class MainWindow(QMainWindow):
 
         return 82  # next available y
 
-    # ── Page 0: 링크 입력 ───────────────────────────────────
+    # ?? Page 0: 留곹겕 ?낅젰 ???????????????????????????????????
 
     def _build_page0_links(self, page):
-        cy = self._make_page_header(page, "◈", "링크 입력")
+        cy = self._make_page_header(page, "1", "Link Input")
 
         # Coupang Partners hyperlink (top right)
         coupang_link = QLabel(
             '<a href="https://partners.coupang.com/" '
             'style="color: #3B7BFF; text-decoration: none; font-weight: 600;">'
-            '쿠팡 파트너스 바로가기 →</a>',
+            '荑좏뙜 ?뚰듃?덉뒪 諛붾줈媛湲???/a>',
             page
         )
         coupang_link.setGeometry(CONTENT_W - 28 - 220, 28, 220, 24)
@@ -801,11 +809,11 @@ class MainWindow(QMainWindow):
         coupang_link.setStyleSheet("background: transparent;")
 
         # Link count badge
-        self.link_count_badge = Badge("0개 링크", Colors.TEXT_MUTED, page)
+        self.link_count_badge = Badge("0媛?留곹겕", Colors.TEXT_MUTED, page)
         self.link_count_badge.setGeometry(CONTENT_W - 28 - 220 - 100, 28, 90, 24)
 
         # Hint text
-        hint = QLabel("아래에 쿠팡 파트너스 URL을 붙여넣기 하세요 (한 줄에 하나씩)", page)
+        hint = QLabel("?꾨옒??荑좏뙜 ?뚰듃?덉뒪 URL??遺숈뿬?ｊ린 ?섏꽭??(??以꾩뿉 ?섎굹??", page)
         hint.setGeometry(28, cy, 700, 20)
         hint.setStyleSheet(muted_text_style("9pt"))
 
@@ -822,7 +830,7 @@ class MainWindow(QMainWindow):
         btn_y = cy + 24 + 160 + 12
 
         # Start button
-        self.start_btn = QPushButton("\u25B6  자동화 시작", page)
+        self.start_btn = QPushButton("\u25B6  ?먮룞???쒖옉", page)
         self.start_btn.setGeometry(28, btn_y, 240, 44)
         self.start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_btn.setStyleSheet(
@@ -847,7 +855,7 @@ class MainWindow(QMainWindow):
         self.start_btn.clicked.connect(self.start_upload)
 
         # Add links button
-        self.add_btn = QPushButton("링크 추가", page)
+        self.add_btn = QPushButton("留곹겕 異붽?", page)
         self.add_btn.setGeometry(278, btn_y, 160, 44)
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.setEnabled(False)
@@ -855,15 +863,15 @@ class MainWindow(QMainWindow):
         self.add_btn.clicked.connect(self.add_links_to_queue)
 
         # Stop button
-        self.stop_btn = QPushButton("중지", page)
+        self.stop_btn = QPushButton("以묒?", page)
         self.stop_btn.setGeometry(448, btn_y, 120, 44)
         self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.stop_btn.setEnabled(False)
         self.stop_btn.setProperty("class", "outline-danger")
         self.stop_btn.clicked.connect(self.stop_upload)
 
-        # ── Status Table ───────────────────────────────────
-        table_label = QLabel("작업 현황", page)
+        # ?? Status Table ???????????????????????????????????
+        table_label = QLabel("?묒뾽 ?꾪솴", page)
         table_label.setGeometry(28, btn_y + 54, 200, 20)
         table_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
@@ -876,7 +884,7 @@ class MainWindow(QMainWindow):
         self.link_table = QTableWidget(page)
         self.link_table.setGeometry(28, table_y, 944, table_h)
         self.link_table.setColumnCount(4)
-        self.link_table.setHorizontalHeaderLabels(["#", "링크", "상태", "상품명"])
+        self.link_table.setHorizontalHeaderLabels(["#", "Link", "Status", "Product"])
         self.link_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.link_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.link_table.setAlternatingRowColors(False)
@@ -913,64 +921,64 @@ class MainWindow(QMainWindow):
             f"}}"
         )
 
-    # ── Page 1: 업로드 설정 ─────────────────────────────────
+    # ?? Page 1: ?낅줈???ㅼ젙 ?????????????????????????????????
 
     def _build_page1_upload(self, page):
-        cy = self._make_page_header(page, "⬆", "업로드 설정")
+        cy = self._make_page_header(page, "2", "Upload Settings")
 
         _field_lbl_style = (
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
             " background: transparent;"
         )
 
-        # ── Upload Interval Section ────────────────────────
+        # ?? Upload Interval Section ????????????????????????
         sec1 = SectionFrame(page)
         sec1.setGeometry(28, cy, 944, 140)
 
-        sec1_title = QLabel("업로드 간격", sec1)
+        sec1_title = QLabel("?낅줈??媛꾧꺽", sec1)
         sec1_title.setGeometry(24, 16, 200, 22)
         sec1_title.setStyleSheet(section_title_style())
 
-        interval_hint = QLabel("최소 30초 - 업로드 사이 대기 시간을 설정합니다", sec1)
+        interval_hint = QLabel("Minimum 30 seconds between uploads.", sec1)
         interval_hint.setGeometry(24, 42, 500, 16)
         interval_hint.setStyleSheet(hint_text_style())
 
         self.hour_spin = QSpinBox(sec1)
         self.hour_spin.setGeometry(24, 68, 120, 38)
         self.hour_spin.setRange(0, 23)
-        self.hour_spin.setSuffix(" 시간")
+        self.hour_spin.setSuffix(" ?쒓컙")
 
         self.min_spin = QSpinBox(sec1)
         self.min_spin.setGeometry(156, 68, 100, 38)
         self.min_spin.setRange(0, 59)
-        self.min_spin.setSuffix(" 분")
+        self.min_spin.setSuffix(" min")
 
         self.sec_spin = QSpinBox(sec1)
         self.sec_spin.setGeometry(268, 68, 100, 38)
         self.sec_spin.setRange(0, 59)
-        self.sec_spin.setSuffix(" 초")
+        self.sec_spin.setSuffix(" sec")
 
-        # ── Upload Options Section ─────────────────────────
+        # ?? Upload Options Section ?????????????????????????
         sec2 = SectionFrame(page)
         sec2.setGeometry(28, cy + 156, 944, 90)
 
-        sec2_title = QLabel("업로드 옵션", sec2)
+        sec2_title = QLabel("?낅줈???듭뀡", sec2)
         sec2_title.setGeometry(24, 16, 200, 22)
         sec2_title.setStyleSheet(section_title_style())
 
-        self.video_check = QCheckBox("이미지보다 영상 업로드 우선", sec2)
+        self.video_check = QCheckBox("?대?吏蹂대떎 ?곸긽 ?낅줈???곗꽑", sec2)
         self.video_check.setGeometry(24, 48, 400, 24)
 
-        # ── Save Button ────────────────────────────────────
-        self._upload_save_btn = QPushButton("저장", page)
+        # ?? Save Button ????????????????????????????????????
+        self._upload_save_btn = QPushButton("Save Settings", page)
         self._upload_save_btn.setGeometry(832, cy + 268, 140, 42)
         self._upload_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._upload_save_btn.clicked.connect(self._save_settings)
 
-    # ── Page 2: 설정 ────────────────────────────────────────
+    # ?? Page 2: ?ㅼ젙 ????????????????????????????????????????
 
     def _build_page2_settings(self, page):
-        cy = self._make_page_header(page, "⚙", "설정")
+        cy = self._make_page_header(page, "3", "Settings")
 
         _field_lbl_style = (
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
@@ -992,7 +1000,7 @@ class MainWindow(QMainWindow):
 
         sy = 8  # y offset within scroll content
 
-        # ── Section 1: 계정 정보 ───────────────────────────
+        # ?? Section 1: 怨꾩젙 ?뺣낫 ???????????????????????????
         acct = SectionFrame(content)
         acct.setGeometry(28, sy, 944, 80)
 
@@ -1005,20 +1013,20 @@ class MainWindow(QMainWindow):
             f" border-radius: 20px; font-size: 14pt; font-weight: 700; }}"
         )
 
-        self._acct_username_label = QLabel("사용자", acct)
+        self._acct_username_label = QLabel("User", acct)
         self._acct_username_label.setGeometry(72, 16, 300, 22)
         self._acct_username_label.setStyleSheet(
             "color: #FFFFFF; font-size: 11pt; font-weight: 700; background: transparent;"
         )
 
-        self._acct_status_label = QLabel("활성 계정", acct)
+        self._acct_status_label = QLabel("?쒖꽦 怨꾩젙", acct)
         self._acct_status_label.setGeometry(72, 40, 300, 18)
         self._acct_status_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
         )
 
         # Plan badge (right side)
-        self._acct_plan_badge = QLabel("무료 체험", acct)
+        self._acct_plan_badge = QLabel("臾대즺 泥댄뿕", acct)
         self._acct_plan_badge.setGeometry(780, 16, 140, 26)
         self._acct_plan_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._acct_plan_badge.setStyleSheet(
@@ -1027,7 +1035,7 @@ class MainWindow(QMainWindow):
             f" border-radius: 13px; font-size: 9pt; font-weight: 700; }}"
         )
 
-        self._acct_work_label = QLabel("0 / 0 회 사용", acct)
+        self._acct_work_label = QLabel("0 / 0 ???ъ슜", acct)
         self._acct_work_label.setGeometry(780, 46, 140, 18)
         self._acct_work_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._acct_work_label.setStyleSheet(
@@ -1036,25 +1044,25 @@ class MainWindow(QMainWindow):
 
         sy += 92
 
-        # ── Section 2: Threads 계정 ────────────────────────
+        # ?? Section 2: Threads 怨꾩젙 ????????????????????????
         threads_sec = SectionFrame(content)
         threads_sec.setGeometry(28, sy, 944, 200)
 
-        threads_title = QLabel("Threads 계정", threads_sec)
+        threads_title = QLabel("Threads 怨꾩젙", threads_sec)
         threads_title.setGeometry(24, 12, 200, 22)
         threads_title.setStyleSheet(section_title_style())
 
-        name_label = QLabel("계정 이름", threads_sec)
+        name_label = QLabel("怨꾩젙 ?대쫫", threads_sec)
         name_label.setGeometry(24, 40, 100, 20)
         name_label.setStyleSheet(_field_lbl_style)
 
-        name_hint = QLabel("프로필 식별용", threads_sec)
+        name_hint = QLabel("Profile account name", threads_sec)
         name_hint.setGeometry(130, 40, 200, 20)
         name_hint.setStyleSheet(hint_text_style())
 
         self.username_edit = QLineEdit(threads_sec)
         self.username_edit.setGeometry(24, 64, 896, 34)
-        self.username_edit.setPlaceholderText("예: myaccount")
+        self.username_edit.setPlaceholderText("?? myaccount")
 
         # Status dot + label
         self._threads_status_dot = QLabel("", threads_sec)
@@ -1063,7 +1071,7 @@ class MainWindow(QMainWindow):
             f"background-color: {Colors.TEXT_MUTED}; border-radius: 5px;"
         )
 
-        self.login_status_label = QLabel("연결 안됨", threads_sec)
+        self.login_status_label = QLabel("?곌껐 ?덈맖", threads_sec)
         self.login_status_label.setGeometry(42, 108, 300, 20)
         self.login_status_label.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
@@ -1071,60 +1079,60 @@ class MainWindow(QMainWindow):
         )
 
         # Threads login button
-        self.threads_login_btn = QPushButton("Threads 로그인", threads_sec)
+        self.threads_login_btn = QPushButton("Threads Login", threads_sec)
         self.threads_login_btn.setGeometry(24, 140, 200, 38)
         self.threads_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.threads_login_btn.clicked.connect(self._open_threads_login)
 
         # Check login button
-        self.check_login_btn = QPushButton("상태 확인", threads_sec)
+        self.check_login_btn = QPushButton("?곹깭 ?뺤씤", threads_sec)
         self.check_login_btn.setGeometry(234, 140, 160, 38)
         self.check_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_login_btn.setProperty("class", "ghost")
         self.check_login_btn.clicked.connect(self._check_login_status)
 
-        hint_label = QLabel("로그인 후 브라우저를 닫으면 세션이 자동 저장됩니다.", threads_sec)
+        hint_label = QLabel("濡쒓렇????釉뚮씪?곗?瑜??レ쑝硫??몄뀡???먮룞 ??λ맗?덈떎.", threads_sec)
         hint_label.setGeometry(24, 180, 600, 16)
         hint_label.setStyleSheet(hint_text_style())
 
         sy += 212
 
-        # ── Section 3: API 설정 ────────────────────────────
+        # ?? Section 3: API ?ㅼ젙 ????????????????????????????
         api_sec = SectionFrame(content)
         api_sec.setGeometry(28, sy, 944, 100)
 
-        api_title = QLabel("API 설정", api_sec)
+        api_title = QLabel("API ?ㅼ젙", api_sec)
         api_title.setGeometry(24, 12, 200, 22)
         api_title.setStyleSheet(section_title_style())
 
-        api_label = QLabel("마스터 API 키", api_sec)
+        api_label = QLabel("Master API Key", api_sec)
         api_label.setGeometry(24, 38, 200, 16)
         api_label.setStyleSheet(_field_lbl_style)
 
-        api_hint = QLabel("Google AI Studio에서 발급", api_sec)
+        api_hint = QLabel("Google AI Studio?먯꽌 諛쒓툒", api_sec)
         api_hint.setGeometry(150, 38, 300, 16)
         api_hint.setStyleSheet(hint_text_style())
 
         self.gemini_key_edit = QLineEdit(api_sec)
         self.gemini_key_edit.setGeometry(24, 58, 896, 34)
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_key_edit.setPlaceholderText("Gemini API 키를 입력하세요")
+        self.gemini_key_edit.setPlaceholderText("Enter Gemini API key")
 
         sy += 112
 
-        # ── Section 4: 보안 설정 ───────────────────────────
+        # ?? Section 4: 蹂댁븞 ?ㅼ젙 ???????????????????????????
         security_sec = SectionFrame(content)
         security_sec.setGeometry(28, sy, 944, 110)
 
-        security_title = QLabel("보안 설정", security_sec)
+        security_title = QLabel("蹂댁븞 ?ㅼ젙", security_sec)
         security_title.setGeometry(24, 12, 200, 22)
         security_title.setStyleSheet(section_title_style())
 
-        self.allow_ai_fallback_check = QCheckBox("업로드 실패 시 AI 대체 업로드 허용", security_sec)
+        self.allow_ai_fallback_check = QCheckBox("?낅줈???ㅽ뙣 ??AI ?泥??낅줈???덉슜", security_sec)
         self.allow_ai_fallback_check.setGeometry(24, 44, 360, 22)
 
         security_hint = QLabel(
-            "비활성화 시 직접 업로드 실패를 즉시 실패로 처리합니다.",
+            "鍮꾪솢?깊솕 ??吏곸젒 ?낅줈???ㅽ뙣瑜?利됱떆 ?ㅽ뙣濡?泥섎━?⑸땲??",
             security_sec,
         )
         security_hint.setGeometry(24, 72, 520, 16)
@@ -1132,11 +1140,11 @@ class MainWindow(QMainWindow):
 
         sy += 122
 
-        # ── Section 5: 앱 정보 ─────────────────────────────
+        # ?? Section 5: ???뺣낫 ?????????????????????????????
         info_sec = SectionFrame(content)
         info_sec.setGeometry(28, sy, 944, 80)
 
-        info_title = QLabel("앱 정보", info_sec)
+        info_title = QLabel("???뺣낫", info_sec)
         info_title.setGeometry(24, 12, 200, 22)
         info_title.setStyleSheet(section_title_style())
 
@@ -1146,21 +1154,21 @@ class MainWindow(QMainWindow):
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
         )
 
-        dev_label = QLabel("개발: 쿠팡 파트너스 자동화 팀", info_sec)
+        dev_label = QLabel("媛쒕컻: 荑좏뙜 ?뚰듃?덉뒪 ?먮룞???", info_sec)
         dev_label.setGeometry(24, 58, 400, 16)
         dev_label.setStyleSheet(hint_text_style())
 
         sy += 92
 
-        # ── Section 6: 튜토리얼 ────────────────────────────
+        # ?? Section 6: ?쒗넗由ъ뼹 ????????????????????????????
         tutorial_sec = SectionFrame(content)
         tutorial_sec.setGeometry(28, sy, 944, 82)
 
-        tutorial_title = QLabel("튜토리얼", tutorial_sec)
+        tutorial_title = QLabel("?쒗넗由ъ뼹", tutorial_sec)
         tutorial_title.setGeometry(24, 12, 200, 22)
         tutorial_title.setStyleSheet(section_title_style())
 
-        self._tutorial_settings_btn = QPushButton("튜토리얼 재실행", tutorial_sec)
+        self._tutorial_settings_btn = QPushButton("View Tutorial", tutorial_sec)
         self._tutorial_settings_btn.setGeometry(24, 40, 180, 34)
         self._tutorial_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tutorial_settings_btn.setProperty("class", "ghost")
@@ -1168,35 +1176,35 @@ class MainWindow(QMainWindow):
 
         sy += 82
 
-        # ── Section 7: 문의하기 ────────────────────────────
+        # ?? Section 7: 臾몄쓽?섍린 ????????????????????????????
         contact_sec = SectionFrame(content)
         contact_sec.setGeometry(28, sy, 944, 82)
 
-        contact_title = QLabel("문의하기", contact_sec)
+        contact_title = QLabel("臾몄쓽?섍린", contact_sec)
         contact_title.setGeometry(24, 12, 200, 22)
         contact_title.setStyleSheet(section_title_style())
 
-        self._contact_btn = QPushButton("문의하기", contact_sec)
+        self._contact_btn = QPushButton("臾몄쓽?섍린", contact_sec)
         self._contact_btn.setGeometry(24, 40, 140, 34)
         self._contact_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._contact_btn.setProperty("class", "ghost")
         self._contact_btn.clicked.connect(self._open_contact)
 
-        contact_desc = QLabel("이용 중 문의사항은 아래 버튼을 통해 연락주세요.", contact_sec)
+        contact_desc = QLabel("?댁슜 以?臾몄쓽?ы빆? ?꾨옒 踰꾪듉???듯빐 ?곕씫二쇱꽭??", contact_sec)
         contact_desc.setGeometry(180, 40, 500, 16)
         contact_desc.setStyleSheet(hint_text_style())
 
         sy += 82
 
-        # ── Action Buttons Row ─────────────────────────────
-        self._update_settings_btn = QPushButton("업데이트 확인", content)
+        # ?? Action Buttons Row ?????????????????????????????
+        self._update_settings_btn = QPushButton("?낅뜲?댄듃 ?뺤씤", content)
         self._update_settings_btn.setGeometry(28, sy, 150, 42)
         self._update_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._update_settings_btn.setProperty("class", "ghost")
         self._update_settings_btn.clicked.connect(self.check_for_updates)
 
         # Save button (accent, right-aligned)
-        self._settings_save_btn = QPushButton("저장", content)
+        self._settings_save_btn = QPushButton("Save Settings", content)
         self._settings_save_btn.setGeometry(832, sy, 140, 42)
         self._settings_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._settings_save_btn.clicked.connect(self._save_settings)
@@ -1206,7 +1214,7 @@ class MainWindow(QMainWindow):
         # Set scroll content height
         content.setFixedHeight(sy + 20)
 
-    # ── StatusBar ───────────────────────────────────────────
+    # ?? StatusBar ???????????????????????????????????????????
 
     def _build_statusbar(self, parent):
         bar = QFrame(parent)
@@ -1237,7 +1245,7 @@ class MainWindow(QMainWindow):
         )
 
         # Server label (right side)
-        self._server_label = QLabel("서버 연결: --", bar)
+        self._server_label = QLabel("?쒕쾭 ?곌껐: --", bar)
         self._server_label.setGeometry(WIN_W - 400, 6, 200, 20)
         self._server_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._server_label.setStyleSheet(
@@ -1253,9 +1261,9 @@ class MainWindow(QMainWindow):
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
         )
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  PAGE SWITCHING
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _switch_page(self, index):
         """Show selected page, hide others. Also sync sidebar button."""
@@ -1265,9 +1273,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_sidebar_buttons') and 0 <= index < len(self._sidebar_buttons):
             self._sidebar_buttons[index].setChecked(True)
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  PROGRESS PANEL UPDATES
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _update_step(self, index, status):
         """Update a step indicator in the sidebar progress panel."""
@@ -1275,14 +1283,26 @@ class MainWindow(QMainWindow):
             return
 
         style_map = {
-            "pending": (f"color: {Colors.TEXT_MUTED};", "○",
-                        f"color: {Colors.TEXT_MUTED};"),
-            "active": (f"color: {Colors.WARNING};", "●",
-                       f"color: {Colors.WARNING}; font-weight: 700;"),
-            "done": (f"color: {Colors.SUCCESS};", "✓",
-                     f"color: {Colors.SUCCESS};"),
-            "error": (f"color: {Colors.ERROR};", "✗",
-                      f"color: {Colors.ERROR};"),
+            "pending": (
+                f"color: {Colors.TEXT_MUTED};",
+                "•",
+                f"color: {Colors.TEXT_MUTED};",
+            ),
+            "active": (
+                f"color: {Colors.WARNING};",
+                "●",
+                f"color: {Colors.WARNING}; font-weight: 700;",
+            ),
+            "done": (
+                f"color: {Colors.SUCCESS};",
+                "✓",
+                f"color: {Colors.SUCCESS};",
+            ),
+            "error": (
+                f"color: {Colors.ERROR};",
+                "✗",
+                f"color: {Colors.ERROR};",
+            ),
         }
 
         dot_style, dot_char, label_style = style_map.get(
@@ -1301,12 +1321,12 @@ class MainWindow(QMainWindow):
         for i in range(len(self._step_dots)):
             self._update_step(i, "pending")
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  LINK TABLE MANAGEMENT
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _populate_link_table(self, link_data):
-        """Populate the link table with initial data (all '대기' status)."""
+        """Populate the link table with initial data (all '?湲? status)."""
         self.link_table.setRowCount(0)
         self._link_url_row_map.clear()
 
@@ -1329,7 +1349,7 @@ class MainWindow(QMainWindow):
             self.link_table.setItem(row, 1, url_item)
 
             # Status column
-            status_item = QTableWidgetItem("대기")
+            status_item = QTableWidgetItem("Pending")
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             status_item.setForeground(QColor(Colors.TEXT_MUTED))
             self.link_table.setItem(row, 2, status_item)
@@ -1351,10 +1371,10 @@ class MainWindow(QMainWindow):
         if status_item:
             status_item.setText(status)
             color_map = {
-                "대기": Colors.TEXT_MUTED,
-                "진행중": Colors.WARNING,
-                "완료": Colors.SUCCESS,
-                "실패": Colors.ERROR,
+                "Pending": Colors.TEXT_MUTED,
+                "Running": Colors.WARNING,
+                "Done": Colors.SUCCESS,
+                "Failed": Colors.ERROR,
             }
             status_item.setForeground(QColor(color_map.get(status, Colors.TEXT_MUTED)))
 
@@ -1362,14 +1382,14 @@ class MainWindow(QMainWindow):
             name_item = self.link_table.item(row, 3)
             if name_item:
                 name_item.setText(product_name[:40])
-                if status == "완료":
+                if status == "Done":
                     name_item.setForeground(QColor(Colors.TEXT_PRIMARY))
-                elif status == "실패":
+                elif status == "Failed":
                     name_item.setForeground(QColor(Colors.ERROR))
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  BUSINESS LOGIC
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _append_log(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -1408,9 +1428,9 @@ class MainWindow(QMainWindow):
         self.status_label.setText(message)
 
         lower_message = str(message).lower()
-        if any(kw in lower_message for kw in ("error", "fail", "cancel", "오류", "취소", "실패", "중단")):
+        if any(kw in lower_message for kw in ("error", "fail", "cancel", "stop")):
             self.status_badge.update_style(Colors.ERROR, str(message)[:14])
-        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success", "완료", "대기")):
+        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success", "pending")):
             self.status_badge.update_style(Colors.SUCCESS, str(message)[:14])
         else:
             self.status_badge.update_style(Colors.WARNING, str(message)[:14])
@@ -1422,11 +1442,11 @@ class MainWindow(QMainWindow):
     def _set_results(self, success, failed):
         total = success + failed
         # Update sidebar progress labels
-        self._sidebar_success_label.setText(f"성공: {success}")
-        self._sidebar_failed_label.setText(f"실패: {failed}")
-        self._sidebar_total_label.setText(f"전체: {total}")
+        self._sidebar_success_label.setText(f"Success: {success}")
+        self._sidebar_failed_label.setText(f"Failed: {failed}")
+        self._sidebar_total_label.setText(f"Total: {total}")
         # Update queue progress
-        self._set_queue_progress(f"전체: {total} 처리됨")
+        self._set_queue_progress(f"Total processed: {total}")
 
     def _set_queue_progress(self, message: str):
         self._progress_queue_label.setText(str(message or ""))
@@ -1443,7 +1463,7 @@ class MainWindow(QMainWindow):
         self.add_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self.status_badge.update_style(Colors.SUCCESS, "Ready")
-        self._sidebar_status_label.setText("완료")
+        self._sidebar_status_label.setText("?꾨즺")
         self._reset_steps()
 
         while not self.link_queue.empty():
@@ -1462,22 +1482,22 @@ class MainWindow(QMainWindow):
 
         if results.get("cancelled"):
             msg = (
-                "업로드가 취소되었습니다.\n\n"
-                f"  완료: {uploaded}\n"
-                f"  실패: {failed}"
+                "Upload was cancelled.\n\n"
+                f"  Done: {uploaded}\n"
+                f"  Failed: {failed}"
             )
             if parse_failed > 0:
-                msg += f"\n  분석 오류: {parse_failed}"
-            show_info(self, "취소됨", msg)
+                msg += f"\n  Parse errors: {parse_failed}"
+            show_info(self, "Cancelled", msg)
         else:
             msg = (
-                "업로드가 완료되었습니다.\n\n"
-                f"  성공: {uploaded}\n"
-                f"  실패: {failed}"
+                "Upload completed.\n\n"
+                f"  Success: {uploaded}\n"
+                f"  Failed: {failed}"
             )
             if parse_failed > 0:
-                msg += f"\n  분석 오류: {parse_failed}"
-            show_info(self, "완료", msg)
+                msg += f"\n  Parse errors: {parse_failed}"
+            show_info(self, "Completed", msg)
 
     def _update_link_count(self):
         content = self.links_text.toPlainText()
@@ -1485,22 +1505,22 @@ class MainWindow(QMainWindow):
         unique_links = list(dict.fromkeys(links))
         count = len(unique_links)
         if count > 0:
-            self.link_count_badge.update_style(Colors.ACCENT, f"{count}개 링크")
+            self.link_count_badge.update_style(Colors.ACCENT, f"{count} links")
         else:
-            self.link_count_badge.update_style(Colors.TEXT_MUTED, "0개 링크")
+            self.link_count_badge.update_style(Colors.TEXT_MUTED, "0 links")
 
     def _extract_links(self, content: str) -> list:
         links = self.COUPANG_LINK_PATTERN.findall(content)
         unique_links = list(dict.fromkeys(links))
         return [(url, None) for url in unique_links]
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  SETTINGS LOGIC
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     @staticmethod
     def _sanitize_profile_name(username):
-        """프로필 디렉터리 이름용 사용자명 정리."""
+        """?꾨줈???붾젆?곕━ ?대쫫???ъ슜?먮챸 ?뺣━."""
         name = username.split('@')[0] if '@' in username else username
         return re.sub(r'[^\w\-.]', '_', name)
 
@@ -1533,7 +1553,7 @@ class MainWindow(QMainWindow):
         )
         if interval < 30:
             interval = 30
-            show_info(self, "알림", "최소 업로드 간격은 30초입니다.")
+            show_info(self, "?뚮┝", "理쒖냼 ?낅줈??媛꾧꺽? 30珥덉엯?덈떎.")
 
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
@@ -1548,7 +1568,7 @@ class MainWindow(QMainWindow):
         else:
             self.pipeline = CoupangPartnersPipeline(config.gemini_api_key)
 
-        show_info(self, "저장 완료", "설정이 저장되었습니다.")
+        show_info(self, "????꾨즺", "?ㅼ젙????λ릺?덉뒿?덈떎.")
         logger.info("settings saved")
 
     def _update_account_display(self):
@@ -1583,7 +1603,7 @@ class MainWindow(QMainWindow):
             expires_at = auth.get("expires_at")
             remaining_count = auth.get("remaining_count")
 
-        display_name = username or "사용자"
+        display_name = username or "User"
         plan_text = str(plan_type or "").strip().lower()
         status_text = str(subscription_status or "").strip().lower()
         if isinstance(is_paid, str):
@@ -1629,14 +1649,14 @@ class MainWindow(QMainWindow):
         if isinstance(remaining_count, (int, float)) and work_count <= 0:
             work_count = int(work_used) + int(remaining_count)
 
-        self._work_label.setText(f"{work_used} / {work_count} 회")
+        self._work_label.setText(f"{work_used} / {work_count} work")
 
         # Settings page account card
         self._acct_username_label.setText(display_name)
-        self._acct_work_label.setText(f"{work_used} / {work_count} 회 사용")
+        self._acct_work_label.setText(f"{work_used} / {work_count} used")
 
         if paid_account:
-            self._acct_plan_badge.setText("프로 구독")
+            self._acct_plan_badge.setText("?꾨줈 援щ룆")
             self._acct_plan_badge.setStyleSheet(
                 f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
                 f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(13, 89, 242, 0.3);"
@@ -1644,29 +1664,29 @@ class MainWindow(QMainWindow):
             )
         else:
             if status_text == "expired":
-                self._acct_plan_badge.setText("구독 만료")
+                self._acct_plan_badge.setText("援щ룆 留뚮즺")
             else:
-                self._acct_plan_badge.setText("무료 체험")
+                self._acct_plan_badge.setText("臾대즺 泥댄뿕")
 
         if expires_at:
-            self._acct_plan_badge.setToolTip(f"만료: {expires_at}")
+            self._acct_plan_badge.setToolTip(f"留뚮즺: {expires_at}")
         else:
             self._acct_plan_badge.setToolTip("")
 
         self._relayout_header_account_card()
 
         # Version label
-        self._version_label.setText(f"현재 버전: {self._app_version}")
+        self._version_label.setText(f"?꾩옱 踰꾩쟾: {self._app_version}")
 
     def _open_contact(self):
         """Open contact/support dialog."""
         show_info(
             self,
-            "문의하기",
-            "문의사항이 있으시면 아래로 연락해주세요.\n\n"
-            "이메일: support@paropartners.com\n"
-            "텔레그램: @support_bot\n\n"
-            "영업시간: 평일 10:00 - 18:00"
+            "臾몄쓽?섍린",
+            "臾몄쓽?ы빆???덉쑝?쒕㈃ ?꾨옒濡??곕씫?댁＜?몄슂.\n\n"
+            "?대찓?? support@paropartners.com\n"
+            "?붾젅洹몃옩: @support_bot\n\n"
+            "?곸뾽?쒓컙: ?됱씪 10:00 - 18:00"
         )
 
     def open_settings(self):
@@ -1674,31 +1694,31 @@ class MainWindow(QMainWindow):
         logger.info("open_settings invoked")
         self._switch_page(2)
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  THREADS LOGIN LOGIC
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _open_threads_login(self):
         username = self.username_edit.text().strip()
         if not username:
-            show_warning(self, "알림", "먼저 계정 이름을 입력하세요.")
+            show_warning(self, "?뚮┝", "癒쇱? 怨꾩젙 ?대쫫???낅젰?섏꽭??")
             return
 
         config.instagram_username = username
         config.save()
 
         self.threads_login_btn.setEnabled(False)
-        self.threads_login_btn.setText("여는 중...")
-        self._update_login_status("pending", "브라우저 여는 중...")
+        self.threads_login_btn.setText("?щ뒗 以?..")
+        self._update_login_status("pending", "釉뚮씪?곗? ?щ뒗 以?..")
 
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
+        profile_dir = self._get_profile_dir()
 
         def open_browser():
             try:
                 from src.computer_use_agent import ComputerUseAgent
 
-                profile_dir = self._get_profile_dir()
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=False,
@@ -1736,19 +1756,20 @@ class MainWindow(QMainWindow):
         if self._closed:
             return
         self.threads_login_btn.setEnabled(True)
-        self.threads_login_btn.setText("Threads 로그인")
+        self.threads_login_btn.setText("Threads Login")
 
     def _check_login_status(self):
         self.check_login_btn.setEnabled(False)
-        self.check_login_btn.setText("확인 중...")
-        self._update_login_status("pending", "확인 중...")
+        self.check_login_btn.setText("?뺤씤 以?..")
+        self._update_login_status("pending", "?뺤씤 以?..")
+
+        profile_dir = self._get_profile_dir()
 
         def check_status():
             try:
                 from src.computer_use_agent import ComputerUseAgent
                 from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
-                profile_dir = self._get_profile_dir()
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=True,
@@ -1807,19 +1828,19 @@ class MainWindow(QMainWindow):
                 return True
             is_logged_in, username = evt.result
             self.check_login_btn.setEnabled(True)
-            self.check_login_btn.setText("상태 확인")
+            self.check_login_btn.setText("?곹깭 ?뺤씤")
 
             if is_logged_in:
-                name = f"@{username}" if username else "연결됨"
+                name = f"@{username}" if username else "Connected"
                 self._update_login_status("success", name)
             else:
-                self._update_login_status("error", "연결 안됨")
+                self._update_login_status("error", "?곌껐 ?덈맖")
             return True
         return super().event(evt)
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  UPLOAD LOGIC
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     @staticmethod
     def _is_work_allowed(work_response):
@@ -1838,19 +1859,19 @@ class MainWindow(QMainWindow):
         content = self.links_text.toPlainText().strip()
         if not content:
             logger.warning("start_upload blocked: empty content")
-            show_warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
+            show_warning(self, "?뚮┝", "荑좏뙜 ?뚰듃?덉뒪 留곹겕瑜??낅젰?섏꽭??")
             return
 
         api_key = config.gemini_api_key
         if not api_key or len(api_key.strip()) < 10:
             logger.warning("start_upload blocked: invalid API key")
-            show_error(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
+            show_error(self, "?ㅼ젙 ?꾩슂", "?ㅼ젙?먯꽌 ?좏슚??Gemini API ?ㅻ? ?ㅼ젙?섏꽭??")
             return
 
         link_data = self._extract_links(content)
         if not link_data:
             logger.warning("start_upload blocked: no valid links found")
-            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "?뚮┝", "?좏슚??荑좏뙜 留곹겕瑜?李얠쓣 ???놁뒿?덈떎.")
             return
 
         config.load()
@@ -1859,27 +1880,31 @@ class MainWindow(QMainWindow):
 
         try:
             from src import auth_client
+            if not auth_client.is_logged_in():
+                logger.warning("start_upload blocked: user is not logged in")
+                show_warning(self, "?臾믩씜 ??쀫립", "嚥≪뮄????袁⑹뒄??몃빍??")
+                return
             work_check = auth_client.check_work_available()
             if not self._is_work_allowed(work_check):
                 quota_message = (
-                    work_check.get("message", "사용 가능한 작업량이 없습니다.")
+                    work_check.get("message", "?ъ슜 媛?ν븳 ?묒뾽?됱씠 ?놁뒿?덈떎.")
                     if isinstance(work_check, dict)
-                    else "작업량 확인에 실패했습니다."
+                    else "?묒뾽???뺤씤???ㅽ뙣?덉뒿?덈떎."
                 )
                 logger.warning("start_upload blocked: work unavailable message=%s", quota_message)
-                show_warning(self, "작업 제한", quota_message)
+                show_warning(self, "?묒뾽 ?쒗븳", quota_message)
                 return
         except Exception:
             logger.exception("start_upload blocked: quota pre-check failed")
-            show_warning(self, "작업 제한", "작업량 확인에 실패했습니다. 잠시 후 다시 시도해주세요.")
+            show_warning(self, "?묒뾽 ?쒗븳", "?묒뾽???뺤씤???ㅽ뙣?덉뒿?덈떎. ?좎떆 ???ㅼ떆 ?쒕룄?댁＜?몄슂.")
             return
 
         if not ask_yes_no(
             self,
-            "확인",
-            f"{len(link_data)}개 링크를 처리하고 업로드할까요?\n"
-            f"업로드 간격: {_format_interval(interval)}\n\n"
-            "(실행 중에 링크를 추가할 수 있습니다)",
+            "?뺤씤",
+            f"{len(link_data)}媛?留곹겕瑜?泥섎━?섍퀬 ?낅줈?쒗븷源뚯슂?\n"
+            f"?낅줈??媛꾧꺽: {_format_interval(interval)}\n\n"
+            "(?ㅽ뻾 以묒뿉 留곹겕瑜?異붽??????덉뒿?덈떎)",
         ):
             logger.info("start_upload cancelled by user")
             return
@@ -1888,13 +1913,13 @@ class MainWindow(QMainWindow):
         self.start_btn.setEnabled(False)
         self.add_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
-        self.status_badge.update_style(Colors.WARNING, "실행중")
-        self._sidebar_status_label.setText("실행중")
+        self.status_badge.update_style(Colors.WARNING, "Running")
+        self._sidebar_status_label.setText("Running")
 
-        self._sidebar_success_label.setText("성공: 0")
-        self._sidebar_failed_label.setText("실패: 0")
-        self._sidebar_total_label.setText("전체: 0")
-        self._progress_queue_label.setText(f"전체: 0 / {len(link_data)}")
+        self._sidebar_success_label.setText("Success: 0")
+        self._sidebar_failed_label.setText("Failed: 0")
+        self._sidebar_total_label.setText("Total: 0")
+        self._progress_queue_label.setText(f"Total: 0 / {len(link_data)}")
         self._reset_steps()
 
         # Populate link table
@@ -1911,10 +1936,10 @@ class MainWindow(QMainWindow):
         clean_links = "\n".join([item[0] for item in link_data])
         self.links_text.setPlainText(clean_links)
 
-        # 서버에 활동 로그 전송
+        # ?쒕쾭???쒕룞 濡쒓렇 ?꾩넚
         try:
             from src import auth_client
-            auth_client.log_action("batch_start", f"링크 {len(link_data)}개, 간격 {interval}초")
+            auth_client.log_action("batch_start", f"links={len(link_data)} interval={interval}s")
         except Exception:
             pass
 
@@ -1942,13 +1967,13 @@ class MainWindow(QMainWindow):
         content = self.links_text.toPlainText().strip()
         if not content:
             logger.warning("add_links_to_queue blocked: empty content")
-            show_warning(self, "알림", "추가할 링크를 입력하세요.")
+            show_warning(self, "?뚮┝", "異붽???留곹겕瑜??낅젰?섏꽭??")
             return
 
         link_data = self._extract_links(content)
         if not link_data:
             logger.warning("add_links_to_queue blocked: no valid links found")
-            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "?뚮┝", "?좏슚??荑좏뙜 留곹겕瑜?李얠쓣 ???놁뒿?덈떎.")
             return
 
         added = 0
@@ -1970,7 +1995,7 @@ class MainWindow(QMainWindow):
                     url_item = QTableWidgetItem(short_url)
                     url_item.setToolTip(url)
                     self.link_table.setItem(row, 1, url_item)
-                    status_item = QTableWidgetItem("대기")
+                    status_item = QTableWidgetItem("Pending")
                     status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     status_item.setForeground(QColor(Colors.TEXT_MUTED))
                     self.link_table.setItem(row, 2, status_item)
@@ -1981,12 +2006,14 @@ class MainWindow(QMainWindow):
 
         if added > 0:
             logger.info("add_links_to_queue: added=%d queue=%d", added, self.link_queue.qsize())
-            self.signals.log.emit(f"{added}개 새 링크 추가됨 (대기열: {self.link_queue.qsize()})")
+            self.signals.log.emit(
+                f"{added} new links added (queue: {self.link_queue.qsize()})"
+            )
             clean_links = "\n".join([item[0] for item in link_data])
             self.links_text.setPlainText(clean_links)
         else:
             logger.info("add_links_to_queue: no new links added")
-            show_info(self, "알림", "모든 링크가 이미 대기열에 있거나 처리되었습니다.")
+            show_info(self, "Info", "All links are already queued or processed.")
 
     def _run_upload_queue(self, interval, worker_config, pipeline_ref):
         logger.info("upload queue worker started: interval=%s", interval)
@@ -2075,9 +2102,9 @@ class MainWindow(QMainWindow):
                     work_check = auth_client.check_work_available()
                     if not self._is_work_allowed(work_check):
                         quota_message = (
-                            work_check.get("message", "사용 가능한 작업량이 없습니다.")
+                            work_check.get("message", "?ъ슜 媛?ν븳 ?묒뾽?됱씠 ?놁뒿?덈떎.")
                             if isinstance(work_check, dict)
-                            else "작업량 확인에 실패했습니다."
+                            else "?묒뾽???뺤씤???ㅽ뙣?덉뒿?덈떎."
                         )
                         log(f"Work quota check failed: {quota_message}")
                         results["cancelled"] = True
@@ -2095,11 +2122,11 @@ class MainWindow(QMainWindow):
                 log(f"Processing item {processed_count} (queue: {self.link_queue.qsize()})")
 
                 # Update progress
-                self.signals.queue_progress.emit(f"전체: {processed_count} / {total_links}")
+                self.signals.queue_progress.emit(f"Total: {processed_count} / {total_links}")
 
                 # Step 0: Link analysis
                 self.signals.step_update.emit(0, "active")
-                self.signals.link_status.emit(url, "진행중", "")
+                self.signals.link_status.emit(url, "Running", "")
 
                 log("Parsing product data...")
 
@@ -2113,7 +2140,7 @@ class MainWindow(QMainWindow):
                         results["parse_failed"] += 1
                         log("Parse failed. Skipping this item.")
                         self.signals.step_update.emit(1, "error")
-                        self.signals.link_status.emit(url, "실패", "분석 실패")
+                        self.signals.link_status.emit(url, "Failed", "Parse failed")
                         self.signals.reset_steps.emit()
                         continue
 
@@ -2125,7 +2152,7 @@ class MainWindow(QMainWindow):
                     results["parse_failed"] += 1
                     log(f"Parse error: {str(exc)[:80]}")
                     self.signals.step_update.emit(1, "error")
-                    self.signals.link_status.emit(url, "실패", "오류")
+                    self.signals.link_status.emit(url, "Failed", "Error")
                     self.signals.reset_steps.emit()
                     continue
 
@@ -2160,9 +2187,9 @@ class MainWindow(QMainWindow):
                             reserved_work_id = None
                         elif not self._is_work_allowed(reserve_result):
                             quota_message = (
-                                reserve_result.get("message", "사용 가능한 작업량이 없습니다.")
+                                reserve_result.get("message", "?ъ슜 媛?ν븳 ?묒뾽?됱씠 ?놁뒿?덈떎.")
                                 if isinstance(reserve_result, dict)
-                                else "작업량 확인에 실패했습니다."
+                                else "?묒뾽???뺤씤???ㅽ뙣?덉뒿?덈떎."
                             )
                             log(f"Work reservation failed: {quota_message}")
                             results["cancelled"] = True
@@ -2205,26 +2232,36 @@ class MainWindow(QMainWindow):
                                     if isinstance(use_result, dict)
                                     else "unknown"
                                 )
+                                if reservation_supported and reserved_work_id:
+                                    try:
+                                        auth_client.release_reserved_work(reserved_work_id)
+                                    except Exception:
+                                        logger.exception("failed to release reserved work after billing sync failure")
                                 recorded_success = False
                                 stop_for_billing_sync = True
                                 results["failed"] += 1
                                 log(f"Work usage sync failed: {billing_msg}. Upload stopped for safety.")
                                 self.signals.step_update.emit(3, "error")
-                                self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
+                                self.signals.link_status.emit(url, "Failed", f"Billing sync failed: {billing_msg}")
                             else:
                                 results["uploaded"] += 1
                                 log(f"Upload success: {product_name}")
                                 self.signals.step_update.emit(2, "done")
                                 self.signals.step_update.emit(3, "done")
-                                self.signals.link_status.emit(url, "완료", product_name)
+                                self.signals.link_status.emit(url, "Done", product_name)
                         except Exception:
                             logger.exception("failed to sync work usage after successful upload")
+                            if reservation_supported and reserved_work_id:
+                                try:
+                                    auth_client.release_reserved_work(reserved_work_id)
+                                except Exception:
+                                    logger.exception("failed to release reserved work after sync exception")
                             recorded_success = False
                             stop_for_billing_sync = True
                             results["failed"] += 1
                             log("Work usage sync failed. Upload stopped for safety.")
                             self.signals.step_update.emit(3, "error")
-                            self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
+                            self.signals.link_status.emit(url, "Failed", "Billing sync failed")
                     else:
                         if reservation_supported and reserved_work_id:
                             try:
@@ -2235,7 +2272,7 @@ class MainWindow(QMainWindow):
                         results["failed"] += 1
                         log(f"Upload failed: {product_name}")
                         self.signals.step_update.emit(2, "error")
-                        self.signals.link_status.emit(url, "실패", product_name)
+                        self.signals.link_status.emit(url, "Failed", product_name)
 
                     results["details"].append(
                         {
@@ -2257,7 +2294,7 @@ class MainWindow(QMainWindow):
                     results["failed"] += 1
                     log(f"Upload error: {str(exc)[:80]}")
                     self.signals.step_update.emit(2, "error")
-                    self.signals.link_status.emit(url, "실패", product_name)
+                    self.signals.link_status.emit(url, "Failed", product_name)
 
                 self.signals.results.emit(results["uploaded"], results["failed"])
                 self.signals.reset_steps.emit()
@@ -2281,13 +2318,13 @@ class MainWindow(QMainWindow):
                 f"Parse failed: {results['parse_failed']}"
             )
 
-            # 서버에 배치 완료 로그 전송
+            # ?쒕쾭??諛곗튂 ?꾨즺 濡쒓렇 ?꾩넚
             try:
                 from src import auth_client
                 summary = (
-                    f"성공: {results['uploaded']}, "
-                    f"실패: {results['failed']}, "
-                    f"파싱실패: {results['parse_failed']}"
+                    f"?깃났: {results['uploaded']}, "
+                    f"?ㅽ뙣: {results['failed']}, "
+                    f"?뚯떛?ㅽ뙣: {results['parse_failed']}"
                 )
                 if results["cancelled"]:
                     auth_client.log_action("batch_cancelled", summary)
@@ -2327,77 +2364,97 @@ class MainWindow(QMainWindow):
             self.signals.log.emit("Stop requested. The current item will finish first.")
             self.signals.status.emit("Stopping...")
             self.status_badge.update_style(Colors.WARNING, "Stopping")
-            self._sidebar_status_label.setText("중지중...")
+            self._sidebar_status_label.setText("以묒?以?..")
             self.is_running = False
             pipeline = self._active_pipeline or self.pipeline
             if pipeline is not None:
                 pipeline.cancel()
             try:
                 from src import auth_client
-                auth_client.log_action("batch_stop", "사용자가 작업을 중지함")
+                auth_client.log_action("batch_stop", "User requested stop")
             except Exception:
                 pass
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  HEARTBEAT / LOGOUT / UPDATE / TUTORIAL
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def _send_heartbeat(self):
         """Send heartbeat and reflect server connectivity in the UI."""
         logger.debug("heartbeat tick; is_running=%s", self.is_running)
-        try:
-            from src import auth_client
-
-            if not auth_client.is_logged_in():
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;"
-                )
-                self.status_label.setText("Logged out")
-                self._server_label.setText("서버 연결: 로그아웃")
-                if not self._session_expiry_notified:
-                    show_warning(self, "세션 만료", "로그인 세션이 만료되었거나 로그아웃되었습니다. 다시 로그인해주세요.")
-                    self._session_expiry_notified = True
+        with self._heartbeat_lock:
+            if self._heartbeat_inflight:
                 return
+            self._heartbeat_inflight = True
+        def run_heartbeat():
+            payload = {"error": False, "not_logged_in": False, "result": {}}
+            try:
+                from src import auth_client
+                if not auth_client.is_logged_in():
+                    payload["not_logged_in"] = True
+                else:
+                    task = "uploading" if self.is_running else "idle"
+                    result = auth_client.heartbeat(
+                        current_task=task,
+                        app_version=self._app_version
+                    )
+                    payload["result"] = result if isinstance(result, dict) else {}
+            except Exception:
+                logger.exception("heartbeat failed")
+                payload["error"] = True
+            self.signals.heartbeat_result.emit(payload)
+        threading.Thread(target=run_heartbeat, daemon=True, name="heartbeat-worker").start()
 
-            task = "uploading" if self.is_running else "idle"
-            result = auth_client.heartbeat(
-                current_task=task,
-                app_version=self._app_version
+    def _on_heartbeat_result(self, payload: dict):
+        with self._heartbeat_lock:
+            self._heartbeat_inflight = False
+        if self._closed:
+            return
+        if payload.get("not_logged_in"):
+            self._online_dot.setStyleSheet(
+                f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;"
             )
-            if isinstance(result, dict):
-                self._update_account_display()
-            if result.get("status") is True:
-                self._session_expiry_notified = False
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
-                )
-                self._server_label.setText("서버 연결: 정상")
-                if not self.is_running:
-                    self.status_label.setText("Connected")
-            else:
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.ERROR}; border-radius: 4px;"
-                )
-                self._server_label.setText("서버 연결: 끊김")
-                self.status_label.setText("Connection lost")
-        except Exception:
-            logger.exception("heartbeat failed")
+            self.status_label.setText("Logged out")
+            self._server_label.setText("Server: logged out")
+            if not self._session_expiry_notified:
+                show_warning(self, "Session expired", "Your login session expired. Please log in again.")
+                self._session_expiry_notified = True
+            return
+        if payload.get("error"):
             self._online_dot.setStyleSheet(
                 f"background-color: {Colors.ERROR}; border-radius: 4px;"
             )
-            self._server_label.setText("서버 연결: 오류")
+            self._server_label.setText("Server: error")
             self.status_label.setText("Connection error")
+            return
+        result = payload.get("result", {})
+        if isinstance(result, dict):
+            self._update_account_display()
+        if result.get("status") is True:
+            self._session_expiry_notified = False
+            self._online_dot.setStyleSheet(
+                f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
+            )
+            self._server_label.setText("Server: connected")
+            if not self.is_running:
+                self.status_label.setText("Connected")
+        else:
+            self._online_dot.setStyleSheet(
+                f"background-color: {Colors.ERROR}; border-radius: 4px;"
+            )
+            self._server_label.setText("Server: disconnected")
+            self.status_label.setText("Connection lost")
 
     def _do_logout(self):
-        """로그아웃 처리 후 앱 종료."""
+        """濡쒓렇?꾩썐 泥섎━ ????醫낅즺."""
         logger.info("logout requested")
         if self.is_running:
-            show_warning(self, "알림", "작업 중에는 로그아웃할 수 없습니다.\n먼저 작업을 중지해주세요.")
+            show_warning(self, "?뚮┝", "?묒뾽 以묒뿉??濡쒓렇?꾩썐?????놁뒿?덈떎.\n癒쇱? ?묒뾽??以묒??댁＜?몄슂.")
             return
         if ask_yes_no(
             self,
-            "로그아웃",
-            "로그아웃하고 프로그램을 종료하시겠습니까?",
+            "濡쒓렇?꾩썐",
+            "濡쒓렇?꾩썐?섍퀬 ?꾨줈洹몃옩??醫낅즺?섏떆寃좎뒿?덇퉴?",
         ):
             try:
                 from src import auth_client
@@ -2407,7 +2464,7 @@ class MainWindow(QMainWindow):
             QApplication.quit()
 
     def check_for_updates(self):
-        """업데이트 확인 (사용자 버튼 클릭)."""
+        """?낅뜲?댄듃 ?뺤씤 (?ъ슜??踰꾪듉 ?대┃)."""
         logger.info("manual update check opened")
         from src.update_dialog import UpdateDialog
 
@@ -2415,26 +2472,39 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _check_for_updates_silent(self):
-        """백그라운드 자동 업데이트 체크 (알림만 표시)."""
+        """Background automatic update check."""
         logger.info("silent update check started")
-        try:
-            from src.auto_updater import AutoUpdater
+        with self._update_check_lock:
+            if self._update_check_inflight:
+                return
+            self._update_check_inflight = True
+        def run_update_check():
+            payload = {"update_info": None}
+            try:
+                from src.auto_updater import AutoUpdater
+                updater = AutoUpdater(self._app_version)
+                update_info = updater.check_for_updates()
+                if update_info:
+                    payload["update_info"] = update_info
+            except Exception:
+                logger.exception("silent update check failed")
+            self.signals.update_check_result.emit(payload)
+        threading.Thread(target=run_update_check, daemon=True, name="update-check-worker").start()
 
-            updater = AutoUpdater(self._app_version)
-            update_info = updater.check_for_updates()
-
-            if update_info:
-                if ask_yes_no(
-                    self,
-                    "업데이트 알림",
-                    f"새 버전이 출시되었습니다. (v{update_info['version']})\n\n"
-                    f"지금 업데이트하시겠습니까?",
-                ):
-                    self.check_for_updates()
-        except Exception as e:
-            logger.exception("silent update check failed")
-            # Silent check: keep UI quiet; details are already in logs.
+    def _on_update_check_result(self, payload: dict):
+        with self._update_check_lock:
+            self._update_check_inflight = False
+        if self._closed:
             return
+        update_info = payload.get("update_info") if isinstance(payload, dict) else None
+        if update_info:
+            if ask_yes_no(
+                self,
+                "Update available",
+                f"A new version is available. (v{update_info['version']})\n\n"
+                f"Do you want to update now?",
+            ):
+                self.check_for_updates()
 
     def open_tutorial(self):
         logger.info("open_tutorial invoked")
@@ -2442,9 +2512,9 @@ class MainWindow(QMainWindow):
         dialog = TutorialDialog(self)
         dialog.exec()
 
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
     #  EVENTS
-    # ────────────────────────────────────────────────────────
+    # ????????????????????????????????????????????????????????
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2454,7 +2524,7 @@ class MainWindow(QMainWindow):
             self._tutorial_overlay.show_overlay()
 
     def paintEvent(self, event):
-        """메인 윈도우 하단 강조 라인."""
+        """硫붿씤 ?덈룄???섎떒 媛뺤“ ?쇱씤."""
         super().paintEvent(event)
         painter = QPainter(self)
         w, h = self.width(), self.height()
@@ -2467,13 +2537,13 @@ class MainWindow(QMainWindow):
         painter.fillRect(0, h - 4, w, 4, bot_grad)
 
     def closeEvent(self, event):
-        """윈도우 종료 시 로그아웃 처리."""
+        """?덈룄??醫낅즺 ??濡쒓렇?꾩썐 泥섎━."""
         logger.info("closeEvent invoked; is_running=%s", self.is_running)
         if self.is_running:
             if not ask_yes_no(
                 self,
-                "종료 확인",
-                "작업이 진행 중입니다. 정말 종료하시겠습니까?",
+                "醫낅즺 ?뺤씤",
+                "?묒뾽??吏꾪뻾 以묒엯?덈떎. ?뺣쭚 醫낅즺?섏떆寃좎뒿?덇퉴?",
             ):
                 event.ignore()
                 return
@@ -2487,3 +2557,4 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         event.accept()
+
