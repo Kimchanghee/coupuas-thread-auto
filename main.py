@@ -64,7 +64,7 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.3.2"
+VERSION = "v2.3.3"
 logger = logging.getLogger(__name__)
 
 
@@ -180,17 +180,17 @@ class SplashScreen(QSplashScreen):
         # ---- Title ----
         painter.setPen(QColor(Colors.TEXT_PRIMARY))
         painter.setFont(QFont(fn, 18, QFont.Weight.Bold))
-        painter.drawText(0, 112, w, 30, Qt.AlignmentFlag.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4")
+        painter.drawText(0, 112, w, 30, Qt.AlignmentFlag.AlignCenter, "쿠팡 파트너스")
 
         # ---- Subtitle ----
         painter.setPen(QColor(Colors.ACCENT))
         painter.setFont(QFont(fn, 12, QFont.Weight.DemiBold))
-        painter.drawText(0, 142, w, 22, Qt.AlignmentFlag.AlignCenter, "\uc2a4\ub808\ub4dc \uc790\ub3d9\ud654")
+        painter.drawText(0, 142, w, 22, Qt.AlignmentFlag.AlignCenter, "스레드 자동화")
 
         # ---- Tagline ----
         painter.setPen(QColor(Colors.TEXT_MUTED))
         painter.setFont(QFont(fn, 9))
-        painter.drawText(0, 172, w, 18, Qt.AlignmentFlag.AlignCenter, "\ucfe0\ud321 \ud30c\ud2b8\ub108\uc2a4 Threads \uc790\ub3d9 \uc5c5\ub85c\ub4dc")
+        painter.drawText(0, 172, w, 18, Qt.AlignmentFlag.AlignCenter, "쿠팡 파트너스 Threads 자동 업로드")
 
         # ---- Status message ----
         painter.setPen(QColor(Colors.TEXT_SECONDARY))
@@ -286,11 +286,11 @@ def main():
     app.processEvents()
 
     steps = [
-        ("\uc124\uc815 \ubd88\ub7ec\uc624\ub294 \uc911...", 20),
-        ("\uc11c\ube44\uc2a4 \ucd08\uae30\ud654 \uc911...", 40),
-        ("\uc778\ud130\ud398\uc774\uc2a4 \uad6c\uc131 \uc911...", 60),
-        ("\ube0c\ub77c\uc6b0\uc800 \uc138\uc158 \ud655\uc778 \uc911...", 80),
-        ("\uc900\ube44 \uc644\ub8cc!", 100),
+        ("설정 불러오는 중...", 20),
+        ("서비스 초기화 중...", 40),
+        ("인터페이스 구성 중...", 60),
+        ("브라우저 세션 확인 중...", 80),
+        ("준비 완료!", 100),
     ]
 
     for message, progress in steps:

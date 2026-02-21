@@ -7,6 +7,7 @@ import hashlib
 import os
 import random
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -18,19 +19,23 @@ import requests
 class ImageSearchService:
     """1688 image search service with retry and fallback query generation."""
 
-    CACHE_DIR = str(Path(__file__).resolve().parents[2] / "media" / "cache")
+    CACHE_DIR = str(Path.home() / ".shorts_thread_maker" / "media_cache")
     MAX_RETRIES = 10
     TARGET_IMAGES = 2
     MAX_IMAGE_BYTES = 8 * 1024 * 1024
     MIN_IMAGE_BYTES = 5 * 1024
     DOWNLOAD_CHUNK_SIZE = 64 * 1024
+    MIN_FREE_DISK_BYTES = 200 * 1024 * 1024
+    MAX_CACHE_FILES = 500
+    MAX_CACHE_BYTES = 1 * 1024 * 1024 * 1024
     ALLOWED_IMAGE_HOST_SUFFIXES = ("alicdn.com",)
 
     def __init__(self):
         os.makedirs(self.CACHE_DIR, exist_ok=True)
         self._gemini_client = None
-        self._gemini_api_key = ""
+        self._gemini_key_fingerprint = ""
         self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash")
+        self._prune_cache()
 
     def _get_gemini_client(self, api_key: str):
         """Lazily initialize Gemini client for translation/query variation."""
@@ -38,12 +43,44 @@ class ImageSearchService:
         if not normalized_key:
             return None
 
-        if self._gemini_client is None or self._gemini_api_key != normalized_key:
+        key_fingerprint = hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()
+        if self._gemini_client is None or self._gemini_key_fingerprint != key_fingerprint:
             from google import genai
 
             self._gemini_client = genai.Client(api_key=normalized_key)
-            self._gemini_api_key = normalized_key
+            self._gemini_key_fingerprint = key_fingerprint
         return self._gemini_client
+
+    def _has_sufficient_disk_space(self) -> bool:
+        try:
+            usage = shutil.disk_usage(self.CACHE_DIR)
+            return usage.free >= self.MIN_FREE_DISK_BYTES
+        except Exception:
+            return True
+
+    def _prune_cache(self) -> None:
+        try:
+            cache_dir = Path(self.CACHE_DIR)
+            if not cache_dir.exists():
+                return
+
+            files = [p for p in cache_dir.glob("*") if p.is_file()]
+            if not files:
+                return
+
+            files.sort(key=lambda p: p.stat().st_mtime)
+            total_bytes = sum(p.stat().st_size for p in files)
+
+            while files and (len(files) > self.MAX_CACHE_FILES or total_bytes > self.MAX_CACHE_BYTES):
+                oldest = files.pop(0)
+                size = oldest.stat().st_size
+                try:
+                    oldest.unlink(missing_ok=True)
+                except Exception:
+                    break
+                total_bytes -= size
+        except Exception:
+            pass
 
     def _generate_gemini_text(self, prompt: str, api_key: str) -> str:
         client = self._get_gemini_client(api_key)
@@ -297,6 +334,8 @@ class ImageSearchService:
         try:
             if not self._is_allowed_image_url(url):
                 return None
+            if not self._has_sufficient_disk_space():
+                return None
 
             hash_name = hashlib.sha256(url.encode()).hexdigest()[:12]
             ext = url.split(".")[-1].split("?")[0][:4].lower()
@@ -343,6 +382,7 @@ class ImageSearchService:
                     os.remove(filepath)
                 return None
 
+            self._prune_cache()
             return filepath
         except Exception:
             try:

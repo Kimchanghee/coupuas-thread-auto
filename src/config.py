@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
@@ -16,6 +17,7 @@ class Config:
     _SECRET_KEYS = ("gemini_api_key", "threads_api_key", "instagram_password")
 
     def __init__(self):
+        self._lock = threading.RLock()
         self.config_dir = Path.home() / ".shorts_thread_maker"
         self.config_file = self.config_dir / "config.json"
         self.secrets_file = self.config_dir / "secrets.json"
@@ -30,35 +32,36 @@ class Config:
 
     def load(self):
         """Load config and encrypted secrets."""
-        self._set_defaults()
-        data = {}
-        if self.config_file.exists():
-            try:
-                with open(self.config_file, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                    if isinstance(loaded, dict):
-                        data = loaded
-            except (json.JSONDecodeError, OSError):
-                logger.exception("Failed to load config file")
-                data = {}
+        with self._lock:
+            self._set_defaults()
+            data = {}
+            if self.config_file.exists():
+                try:
+                    with open(self.config_file, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                        if isinstance(loaded, dict):
+                            data = loaded
+                except (json.JSONDecodeError, OSError):
+                    logger.exception("Failed to load config file")
+                    data = {}
 
-        self._load_from_dict(data)
-        self._load_secrets()
+            self._load_from_dict(data)
+            self._load_secrets()
 
-        # Backward-compat migration for old plaintext values.
-        migrated = False
-        legacy_plaintext_present = False
-        for key in self._SECRET_KEYS:
-            legacy_value = str(data.get(key, "") or "").strip()
-            if legacy_value:
-                legacy_plaintext_present = True
-            if not getattr(self, key, "") and legacy_value:
-                setattr(self, key, legacy_value)
-                migrated = True
-        if migrated or legacy_plaintext_present:
-            self.save()
-        elif not self.config_file.exists():
-            self.save()
+            # Backward-compat migration for old plaintext values.
+            migrated = False
+            legacy_plaintext_present = False
+            for key in self._SECRET_KEYS:
+                legacy_value = str(data.get(key, "") or "").strip()
+                if legacy_value:
+                    legacy_plaintext_present = True
+                if not getattr(self, key, "") and legacy_value:
+                    setattr(self, key, legacy_value)
+                    migrated = True
+            if migrated or legacy_plaintext_present:
+                self.save()
+            elif not self.config_file.exists():
+                self.save()
 
     def _load_from_dict(self, data: dict):
         self.upload_interval = int(data.get("upload_interval", 60) or 60)
@@ -137,37 +140,38 @@ class Config:
 
     def save(self):
         """Save non-sensitive config and encrypted secrets."""
-        data = {
-            "upload_interval": self.upload_interval,
-            "instagram_username": self.instagram_username,
-            "media_download_dir": self.media_download_dir,
-            "prefer_video": self.prefer_video,
-            "allow_ai_fallback": self.allow_ai_fallback,
-            "instruction": self.instruction,
-            "tutorial_shown": self.tutorial_shown,
-        }
-        try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=str(self.config_dir),
-                prefix="config_",
-                suffix=".tmp",
-                delete=False,
-            ) as tmp:
-                json.dump(data, tmp, ensure_ascii=False, indent=2)
-                temp_path = tmp.name
-            secure_file_permissions(temp_path)
-            os.replace(temp_path, self.config_file)
-            secure_file_permissions(self.config_file)
-        except OSError:
-            logger.exception("Failed to save config file")
-            if "temp_path" in locals():
-                try:
-                    Path(temp_path).unlink(missing_ok=True)
-                except Exception:
-                    pass
-        self._save_secrets()
+        with self._lock:
+            data = {
+                "upload_interval": self.upload_interval,
+                "instagram_username": self.instagram_username,
+                "media_download_dir": self.media_download_dir,
+                "prefer_video": self.prefer_video,
+                "allow_ai_fallback": self.allow_ai_fallback,
+                "instruction": self.instruction,
+                "tutorial_shown": self.tutorial_shown,
+            }
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=str(self.config_dir),
+                    prefix="config_",
+                    suffix=".tmp",
+                    delete=False,
+                ) as tmp:
+                    json.dump(data, tmp, ensure_ascii=False, indent=2)
+                    temp_path = tmp.name
+                secure_file_permissions(temp_path)
+                os.replace(temp_path, self.config_file)
+                secure_file_permissions(self.config_file)
+            except OSError:
+                logger.exception("Failed to save config file")
+                if "temp_path" in locals():
+                    try:
+                        Path(temp_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            self._save_secrets()
 
 
 config = Config()

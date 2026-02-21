@@ -17,11 +17,24 @@ class _FakeSession:
         self.response = response
         self.calls = []
 
-    def post(self, url, json=None, timeout=None):
+    def post(self, url, json=None, timeout=None, headers=None):
         self.calls.append(
             {
+                "method": "POST",
                 "url": url,
                 "json": json,
+                "timeout": timeout,
+                "headers": headers or {},
+            }
+        )
+        return self.response
+
+    def get(self, url, params=None, timeout=None):
+        self.calls.append(
+            {
+                "method": "GET",
+                "url": url,
+                "params": params or {},
                 "timeout": timeout,
             }
         )
@@ -258,6 +271,18 @@ def test_login_merges_plan_and_expiry_fields(monkeypatch):
     assert state["subscription_status"] == "active"
     assert state["expires_at"] == "2026-12-31T23:59:59Z"
     assert state["remaining_count"] == 47
+
+
+def test_check_username_rejects_empty_input_without_network(monkeypatch):
+    _reset_auth_state()
+    session = _FakeSession(_FakeResponse(200, {"available": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.check_username("")
+
+    assert result["available"] is False
+    assert "아이디" in result["message"]
+    assert session.calls == []
 
 
 def test_reserve_work_returns_unsupported_on_404(monkeypatch):

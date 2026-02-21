@@ -260,6 +260,17 @@ class ComputerUseAgent:
         except Exception:
             pass
 
+    def clear_saved_session(self) -> None:
+        """Delete persisted browser session state for this profile."""
+        secure_path = Path(self._get_storage_state_path())
+        legacy_path = self.legacy_profile_path / "storage_state.json"
+        for path in (secure_path, legacy_path):
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+
     def close(self):
         """Close browser and persist storage state."""
         try:

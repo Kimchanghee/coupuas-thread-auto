@@ -658,12 +658,21 @@ def _get_session_user_and_token() -> tuple[Any, Any]:
         return _auth_state.get("user_id"), _auth_state.get("token")
 
 
+def _build_auth_headers(token: Any) -> Dict[str, str]:
+    token_text = str(token or "").strip()
+    if not token_text:
+        return {}
+    return {"Authorization": f"Bearer {token_text}"}
+
+
 def check_username(username: str) -> Dict[str, Any]:
     err = _check_api_url()
     if err:
         return {"available": False, "message": err}
 
     username = str(username or "").strip().lower()
+    if not username:
+        return {"available": False, "message": "아이디를 입력해주세요."}
     try:
         resp = _session.get(
             f"{API_SERVER_URL}/user/check-username/{username}",
@@ -856,16 +865,20 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
 
 def logout() -> bool:
     user_id, token = _get_session_user_and_token()
+    server_ok = True
 
     if user_id and token:
         try:
-            _session.post(
+            resp = _session.post(
                 f"{API_SERVER_URL}/user/logout/god",
                 json={"id": user_id, "key": token},
+                headers=_build_auth_headers(token),
                 timeout=10,
             )
+            server_ok = resp.status_code == 200
         except Exception as e:
             logger.warning("Logout API error (ignored): %s", e)
+            server_ok = False
 
     _clear_auth_state_memory()
 
@@ -875,7 +888,7 @@ def logout() -> bool:
         cred.pop("user_id", None)
         _save_cred(cred)
 
-    return True
+    return server_ok
 
 
 def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
@@ -895,6 +908,7 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
                 "current_task": current_task,
                 "app_version": app_version,
             },
+            headers=_build_auth_headers(token),
             timeout=10,
         )
         if resp.status_code == 200:
@@ -918,6 +932,7 @@ def check_work_available() -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/check",
             json={"user_id": user_id, "token": token},
+            headers=_build_auth_headers(token),
             timeout=10,
         )
         if resp.status_code == 200:
@@ -941,6 +956,7 @@ def use_work() -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/use",
             json={"user_id": user_id, "token": token},
+            headers=_build_auth_headers(token),
             timeout=10,
         )
         if resp.status_code == 200:
@@ -980,6 +996,7 @@ def reserve_work() -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/reserve",
             json=_reservation_body(user_id, token),
+            headers=_build_auth_headers(token),
             timeout=10,
         )
         if resp.status_code in {404, 405, 501}:
@@ -1010,6 +1027,7 @@ def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/commit",
             json=_reservation_body(user_id, token, reservation_id),
+            headers=_build_auth_headers(token),
             timeout=10,
         )
         payload = _safe_json(resp)
@@ -1036,6 +1054,7 @@ def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/release",
             json=_reservation_body(user_id, token, reservation_id),
+            headers=_build_auth_headers(token),
             timeout=10,
         )
         if resp.status_code in {404, 405, 501}:
