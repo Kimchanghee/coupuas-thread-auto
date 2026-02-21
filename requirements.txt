@@ -1,36 +1,15 @@
-# CEO Thread Auto - 필요한 패키지
-
-# ===== 핵심 의존성 =====
-
-# GUI
-PyQt6==6.5.0
-
-# Google Gemini API
-google-generativeai==0.8.0
-# Gemini Computer Use (preview)
-google-genai==0.1.0
-
-# 이미지 처리
+# Runtime dependencies
+PyQt6==6.10.2
+google-generativeai==0.8.6
+google-genai==1.56.0
 Pillow==12.1.1
-
-# 이미지 검색 (바나나프로용)
 duckduckgo-search==6.0.0
+requests==2.32.5
+selenium==4.41.0
+webdriver-manager==4.0.2
+playwright==1.58.0
+python-dotenv==1.2.1
 
-# HTTP 요청
-requests==2.32.4
-
-# 브라우저 자동화 (Threads 업로드용)
-selenium==4.15.0
-webdriver-manager==4.0.0
-playwright==1.50.0
-
-# 추가 유틸리티
-python-dotenv==1.0.0
-
-# ===== 빌드 도구 =====
-
-# PyInstaller (exe 빌드용)
-pyinstaller==6.11.1
-
-# 자동 업데이트
-packaging==23.0
+# Build/update dependencies
+pyinstaller==6.19.0
+packaging==25.0

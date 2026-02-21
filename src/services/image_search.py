@@ -216,10 +216,10 @@ class ImageSearchService:
             }
 
             patterns = [
-                r"(https?://cbu01\.alicdn\.com/img/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
-                r"(https?://img\.alicdn\.com/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
-                r"(https?://cbu\d+\.alicdn\.com/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
-                r"(https?://gw\.alicdn\.com/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
+                r"(https://cbu01\.alicdn\.com/img/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
+                r"(https://img\.alicdn\.com/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
+                r"(https://cbu\d+\.alicdn\.com/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
+                r"(https://gw\.alicdn\.com/[^\"'>\s]+\.(?:jpg|jpeg|png|webp))",
             ]
 
             for search_url in search_urls:
@@ -253,7 +253,7 @@ class ImageSearchService:
     def _is_allowed_image_url(cls, url: str) -> bool:
         try:
             parsed = urlparse(str(url or ""))
-            if parsed.scheme not in {"http", "https"}:
+            if parsed.scheme != "https":
                 return False
             host = (parsed.hostname or "").lower().strip()
             if not host:

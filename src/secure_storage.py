@@ -6,6 +6,16 @@ import base64
 import os
 from typing import Optional
 
+_DEFAULT_DPAPI_ENTROPY = b"coupuas-thread-auto-v2-entropy"
+
+
+def _entropy_bytes() -> bytes:
+    """Return additional DPAPI entropy for this application scope."""
+    env_value = os.getenv("COUPUAS_DPAPI_ENTROPY", "").strip()
+    if env_value:
+        return env_value.encode("utf-8")
+    return _DEFAULT_DPAPI_ENTROPY
+
 
 def protect_secret(value: str, purpose: str = "coupuas-thread-auto") -> Optional[str]:
     """Return DPAPI-protected secret on Windows. Returns None when unavailable."""
@@ -29,17 +39,23 @@ def protect_secret(value: str, purpose: str = "coupuas-thread-auto") -> Optional
         kernel32 = ctypes.windll.kernel32
 
         plain_bytes = value.encode("utf-8")
+        entropy_bytes = _entropy_bytes()
         in_buffer = ctypes.create_string_buffer(plain_bytes, len(plain_bytes))
+        entropy_buffer = ctypes.create_string_buffer(entropy_bytes, len(entropy_bytes))
         in_blob = DATA_BLOB(
             len(plain_bytes),
             ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_ubyte)),
+        )
+        entropy_blob = DATA_BLOB(
+            len(entropy_bytes),
+            ctypes.cast(entropy_buffer, ctypes.POINTER(ctypes.c_ubyte)),
         )
         out_blob = DATA_BLOB()
 
         if not crypt32.CryptProtectData(
             ctypes.byref(in_blob),
             purpose,
-            None,
+            ctypes.byref(entropy_blob),
             None,
             None,
             0,
@@ -78,17 +94,23 @@ def unprotect_secret(value: str) -> str:
 
         encoded = value.split(":", 1)[1]
         protected = base64.b64decode(encoded.encode("ascii"))
+        entropy_bytes = _entropy_bytes()
         in_buffer = ctypes.create_string_buffer(protected, len(protected))
+        entropy_buffer = ctypes.create_string_buffer(entropy_bytes, len(entropy_bytes))
         in_blob = DATA_BLOB(
             len(protected),
             ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_ubyte)),
+        )
+        entropy_blob = DATA_BLOB(
+            len(entropy_bytes),
+            ctypes.cast(entropy_buffer, ctypes.POINTER(ctypes.c_ubyte)),
         )
         out_blob = DATA_BLOB()
 
         if not crypt32.CryptUnprotectData(
             ctypes.byref(in_blob),
             None,
-            None,
+            ctypes.byref(entropy_blob),
             None,
             None,
             0,

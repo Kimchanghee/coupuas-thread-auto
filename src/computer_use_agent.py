@@ -47,12 +47,16 @@ class ExecutedAction:
 
 
 class ComputerUseAgent:
-    ALLOWED_NAVIGATION_HOST_SUFFIXES = (
+    ALLOWED_NAVIGATION_HOSTS = {
         "threads.net",
+        "www.threads.net",
         "instagram.com",
+        "www.instagram.com",
         "facebook.com",
-        "google.com",
-    )
+        "www.facebook.com",
+        "www.google.com",
+    }
+    MAX_TYPE_TEXT_LENGTH = 4000
     ALLOWED_SAFE_KEYS = {
         "ENTER",
         "TAB",
@@ -82,12 +86,14 @@ class ComputerUseAgent:
             headless: whether to run browser in headless mode
             profile_dir: logical profile id (used to derive encrypted session path)
         """
-        self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
-
-        if self.api_key and self.api_key != "dummy-key-for-session-setup":
-            self.client = genai.Client(api_key=self.api_key)
+        resolved_api_key = str(api_key or os.environ.get("GOOGLE_API_KEY") or "").strip()
+        if resolved_api_key and resolved_api_key != "dummy-key-for-session-setup":
+            self.client = genai.Client(api_key=resolved_api_key)
         else:
             self.client = None
+        # Avoid keeping plaintext API key as a long-lived instance field.
+        self.api_key = ""
+        resolved_api_key = ""
 
         self.playwright = None
         self.browser = None
@@ -129,12 +135,16 @@ class ComputerUseAgent:
             # Not an IP literal. Continue domain checks.
             pass
 
-        if any(
-            host == suffix or host.endswith(f".{suffix}")
-            for suffix in cls.ALLOWED_NAVIGATION_HOST_SUFFIXES
-        ):
-            return True
-        return False
+        return host in cls.ALLOWED_NAVIGATION_HOSTS
+
+    @classmethod
+    def _sanitize_type_text(cls, value: Any) -> str:
+        text = str(value or "")
+        if len(text) > cls.MAX_TYPE_TEXT_LENGTH:
+            raise ValueError("Input text exceeds maximum allowed length")
+        if any(ord(ch) < 32 and ch not in {"\n", "\r", "\t"} for ch in text):
+            raise ValueError("Input text contains disallowed control characters")
+        return text
 
     @classmethod
     def _normalize_keys(cls, keys: str) -> str:
@@ -354,7 +364,7 @@ class ComputerUseAgent:
                 elif fname == "type_text_at":
                     x = _denormalize_x(args["x"], screen_width)
                     y = _denormalize_y(args["y"], screen_height)
-                    text = args.get("text", "")
+                    text = self._sanitize_type_text(args.get("text", ""))
                     press_enter = bool(args.get("press_enter", False))
                     clear_before = bool(args.get("clear_before_typing", True))
                     page.mouse.click(x, y)

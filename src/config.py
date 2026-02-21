@@ -2,6 +2,8 @@
 
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
@@ -110,13 +112,27 @@ class Config:
 
         try:
             if payload:
-                with open(self.secrets_file, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, ensure_ascii=False, indent=2)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=str(self.config_dir),
+                    prefix="secrets_",
+                    suffix=".tmp",
+                    delete=False,
+                ) as tmp:
+                    json.dump(payload, tmp, ensure_ascii=False, indent=2)
+                    temp_path = tmp.name
+                os.replace(temp_path, self.secrets_file)
                 secure_file_permissions(self.secrets_file)
             elif self.secrets_file.exists():
                 self.secrets_file.unlink()
         except Exception:
             logger.exception("Failed to save secrets file")
+            if "temp_path" in locals():
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def save(self):
         """Save non-sensitive config and encrypted secrets."""
@@ -130,11 +146,25 @@ class Config:
             "tutorial_shown": self.tutorial_shown,
         }
         try:
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(self.config_dir),
+                prefix="config_",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                json.dump(data, tmp, ensure_ascii=False, indent=2)
+                temp_path = tmp.name
+            os.replace(temp_path, self.config_file)
             secure_file_permissions(self.config_file)
         except OSError:
             logger.exception("Failed to save config file")
+            if "temp_path" in locals():
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
         self._save_secrets()
 
 

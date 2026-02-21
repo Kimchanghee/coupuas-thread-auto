@@ -49,6 +49,8 @@ class CoupangParser:
             return ""
         if not value.startswith(("http://", "https://")):
             value = f"https://{value}"
+        if value.startswith("http://"):
+            value = "https://" + value[len("http://"):]
         return value
 
     @staticmethod
@@ -65,7 +67,7 @@ class CoupangParser:
     def _is_allowed_coupang_url(cls, url: str) -> bool:
         try:
             parsed = urlparse(cls._normalize_url(url))
-            if parsed.scheme not in ("http", "https"):
+            if parsed.scheme != "https":
                 return False
             return cls._is_allowed_coupang_host(parsed.hostname or "")
         except Exception:
@@ -408,8 +410,8 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
 
     def extract_links_from_text(self, text: str) -> list:
         """텍스트에서 쿠팡 링크 추출"""
-        pattern1 = r'https?://link\.coupang\.com/[^\s<>\"\']+'
-        pattern2 = r'https?://(?:www\.)?coupang\.com/vp/products/\d+[^\s<>\"\']+'
+        pattern1 = r'https://link\.coupang\.com/[^\s<>\"\']+'
+        pattern2 = r'https://(?:www\.)?coupang\.com/vp/products/\d+[^\s<>\"\']+'
 
         links = []
         links.extend(re.findall(pattern1, text))

@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   notify:
     runs-on: ubuntu-latest
@@ -11,12 +14,13 @@ jobs:
       - name: Dispatch to thread-genius repo
         uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3.0.0
         with:
+          # Use a fine-grained PAT scoped only to Kimchanghee/thread-genius repository dispatch.
           token: ${{ secrets.DISPATCH_TOKEN }}
           repository: Kimchanghee/thread-genius
           event-type: new-release
-          client-payload: |
+          client-payload: >-
             {
-              "tag_name": "${{ github.event.release.tag_name }}",
-              "release_name": "${{ github.event.release.name }}",
-              "body": "${{ github.event.release.body }}"
+              "tag_name": ${{ toJSON(github.event.release.tag_name) }},
+              "release_name": ${{ toJSON(github.event.release.name) }},
+              "body": ${{ toJSON(github.event.release.body) }}
             }

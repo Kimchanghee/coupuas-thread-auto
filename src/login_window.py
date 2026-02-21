@@ -5,6 +5,7 @@
 """
 import re
 import logging
+import time
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
     QPushButton, QCheckBox, QStackedWidget,
@@ -52,6 +53,8 @@ class LoginWindow(QMainWindow):
         super().__init__()
         self.oldPos = None
         self._username_available = False
+        self._failed_login_attempts = 0
+        self._login_cooldown_until = 0.0
         self._setup_ui()
 
     def _setup_ui(self):
@@ -413,6 +416,12 @@ class LoginWindow(QMainWindow):
 
     # ─── Login logic ────────────────────────────────────────
     def _do_login(self, force=False):
+        now = time.time()
+        if now < self._login_cooldown_until:
+            wait_seconds = int(self._login_cooldown_until - now) + 1
+            self.login_status.setText(f"로그인 시도가 너무 많습니다. {wait_seconds}초 후 다시 시도하세요.")
+            return
+
         uid = self.login_id.text().strip()
         pw = self.login_pw.text()
 
@@ -435,6 +444,8 @@ class LoginWindow(QMainWindow):
 
         status = result.get("status")
         if status is True:
+            self._failed_login_attempts = 0
+            self._login_cooldown_until = 0.0
             logger.info(f"Login success: user_id={result.get('id')}")
 
             # Save credentials if remember is checked
@@ -454,8 +465,11 @@ class LoginWindow(QMainWindow):
             ):
                 self._do_login(force=True)
         else:
+            self._failed_login_attempts += 1
+            backoff_seconds = min(60, 2 ** min(self._failed_login_attempts, 6))
+            self._login_cooldown_until = time.time() + backoff_seconds
             msg = auth_client.friendly_login_message(result)
-            self.login_status.setText(msg)
+            self.login_status.setText(f"{msg} ({backoff_seconds}초 후 재시도)")
             self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
 
     # ─── Register logic ─────────────────────────────────────

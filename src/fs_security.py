@@ -15,15 +15,37 @@ def _to_path(value: PathLike) -> Path:
     return value if isinstance(value, Path) else Path(str(value))
 
 
+def _resolve_current_user_principal() -> str:
+    try:
+        completed = subprocess.run(
+            ["whoami", "/user", "/fo", "csv", "/nh"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        text = (completed.stdout or "").strip()
+        if text:
+            parts = [item.strip().strip('"') for item in text.split(",")]
+            if len(parts) >= 2 and parts[1].startswith("S-1-"):
+                # icacls requires SID principals with * prefix.
+                return f"*{parts[1]}"
+    except Exception:
+        pass
+
+    username = str(os.environ.get("USERNAME") or getpass.getuser() or "").strip()
+    return username
+
+
 def _apply_windows_acl(path: Path, is_dir: bool) -> None:
     if not path.exists():
         return
 
-    username = str(os.environ.get("USERNAME") or getpass.getuser() or "").strip()
-    if not username:
+    principal = _resolve_current_user_principal()
+    if not principal:
         return
 
-    user_acl = f"{username}:(OI)(CI)F" if is_dir else f"{username}:(F)"
+    user_acl = f"{principal}:(OI)(CI)F" if is_dir else f"{principal}:(F)"
     cmd = [
         "icacls",
         str(path),

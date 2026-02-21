@@ -21,6 +21,7 @@ class AutoUpdater:
     """Manage auto update flow via GitHub Releases."""
 
     GITHUB_OWNER = "Kimchanghee"
+    GITHUB_OWNER_ID = 9594198
     GITHUB_REPO = "coupuas-thread-auto"
 
     API_BASE = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
@@ -34,6 +35,7 @@ class AutoUpdater:
     EXPECTED_EXE_NAME = "CoupangThreadAuto.exe"
     REQUIRE_SIGNED_UPDATES = True
     MAX_UPDATE_SIZE_BYTES = 200 * 1024 * 1024
+    MINIMUM_SAFE_VERSION = "2.2.3"
     # Release CI injects the production signer thumbprint into this constant at build time.
     DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = set()
     DEFAULT_TRUSTED_PUBLISHERS = {"paro partners"}
@@ -157,10 +159,28 @@ class AutoUpdater:
         return None
 
     def _verify_release_author(self, release_data: Dict) -> bool:
-        author_login = str((release_data.get("author") or {}).get("login", "")).strip().lower()
-        if not author_login:
+        author = release_data.get("author") or {}
+        try:
+            author_id = int(author.get("id"))
+        except (TypeError, ValueError):
+            author_id = 0
+        author_login = str(author.get("login", "")).strip().lower()
+        if not author_id and not author_login:
             return False
-        return author_login == self.GITHUB_OWNER.lower()
+        if author_id and author_id != int(self.GITHUB_OWNER_ID):
+            return False
+        if author_login and author_login != self.GITHUB_OWNER.lower():
+            return False
+        return True
+
+    def _is_version_allowed(self, latest_version: str) -> bool:
+        latest = str(latest_version or "").lstrip("v").strip()
+        if not latest:
+            return False
+        minimum_safe = str(self.MINIMUM_SAFE_VERSION or "").lstrip("v").strip()
+        if minimum_safe and version.parse(latest) < version.parse(minimum_safe):
+            return False
+        return True
 
     def _verify_authenticode_signature(self, file_path: str) -> bool:
         if os.name != "nt":
@@ -221,6 +241,8 @@ class AutoUpdater:
 
         latest_version = str(release_data.get("tag_name", "")).lstrip("v")
         if not latest_version:
+            return None
+        if not self._is_version_allowed(latest_version):
             return None
 
         if version.parse(latest_version) <= version.parse(self.current_version or "0"):
@@ -382,6 +404,10 @@ class AutoUpdater:
                     backup_exe,
                     "-ExpectedSha256",
                     expected_sha,
+                    "-TrustedThumbprints",
+                    ",".join(sorted(self.trusted_thumbprints)),
+                    "-TrustedPublishers",
+                    ",".join(sorted(self.trusted_publishers)),
                 ],
                 shell=False,
             )
@@ -396,9 +422,42 @@ class AutoUpdater:
     [Parameter(Mandatory=$true)][string]$CurrentExe,
     [Parameter(Mandatory=$true)][string]$UpdateFile,
     [Parameter(Mandatory=$true)][string]$BackupExe,
-    [string]$ExpectedSha256 = ''
+    [string]$ExpectedSha256 = '',
+    [string]$TrustedThumbprints = '',
+    [string]$TrustedPublishers = ''
 )
 $ErrorActionPreference = 'Stop'
+
+function Normalize-Identity([string]$value) {
+    if (-not $value) { return '' }
+    return [regex]::Replace($value.ToLowerInvariant(), '[^a-z0-9]+', '')
+}
+
+function Parse-TrustedList([string]$value) {
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (-not $value) { return $set }
+    foreach ($item in $value.Split(',')) {
+        $trimmed = $item.Trim()
+        if ($trimmed) {
+            [void]$set.Add($trimmed.ToUpperInvariant())
+        }
+    }
+    return $set
+}
+
+function Get-SubjectIdentities([string]$subject) {
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (-not $subject) { return $set }
+    $matches = [regex]::Matches($subject, '(?:^|,\\s*)(CN|O|OU)\\s*=\\s*([^,]+)')
+    foreach ($m in $matches) {
+        $normalized = Normalize-Identity($m.Groups[2].Value)
+        if ($normalized) {
+            [void]$set.Add($normalized)
+        }
+    }
+    return $set
+}
+
 try {
     Start-Sleep -Seconds 2
     if (-not (Test-Path -LiteralPath $UpdateFile)) {
@@ -414,25 +473,70 @@ try {
     if ($sig.Status -ne 'Valid') {
         throw 'Update signature is invalid.'
     }
+    $cert = $sig.SignerCertificate
+    if (-not $cert) {
+        throw 'Update signer certificate is missing.'
+    }
 
-    $deleted = $false
-    for ($i = 0; $i -lt 15; $i++) {
-        try {
-            Remove-Item -LiteralPath $CurrentExe -Force -ErrorAction Stop
-        } catch {
+    $thumb = ''
+    if ($cert.Thumbprint) {
+        $thumb = $cert.Thumbprint.ToUpperInvariant()
+    }
+    $trustedThumbSet = Parse-TrustedList($TrustedThumbprints)
+    if ($trustedThumbSet.Count -gt 0 -and -not $trustedThumbSet.Contains($thumb)) {
+        throw 'Update signer thumbprint is not trusted.'
+    }
+
+    $trustedPublisherSet = New-Object 'System.Collections.Generic.HashSet[string]'
+    if ($TrustedPublishers) {
+        foreach ($item in $TrustedPublishers.Split(',')) {
+            $normalized = Normalize-Identity($item.Trim())
+            if ($normalized) {
+                [void]$trustedPublisherSet.Add($normalized)
+            }
         }
-        if (-not (Test-Path -LiteralPath $CurrentExe)) {
-            $deleted = $true
+    }
+    if ($trustedPublisherSet.Count -gt 0) {
+        $subjectIds = Get-SubjectIdentities($cert.Subject)
+        $publisherMatch = $false
+        foreach ($subjectId in $subjectIds) {
+            if ($trustedPublisherSet.Contains($subjectId)) {
+                $publisherMatch = $true
+                break
+            }
+        }
+        if (-not $publisherMatch) {
+            throw 'Update signer publisher is not trusted.'
+        }
+    }
+
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        try {
+            if (-not (Test-Path -LiteralPath $CurrentExe)) {
+                throw 'Current executable is missing.'
+            }
+            $stream = [System.IO.File]::Open(
+                $CurrentExe,
+                [System.IO.FileMode]::Open,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+            $stream.Close()
+            $ready = $true
             break
+        } catch {
         }
         Start-Sleep -Milliseconds 500
     }
-    if (-not $deleted) {
-        throw 'Failed to stop current process for replacement.'
+    if (-not $ready) {
+        throw 'Failed to acquire executable lock for replacement.'
     }
 
-    Copy-Item -LiteralPath $UpdateFile -Destination $CurrentExe -Force
-    Remove-Item -LiteralPath $BackupExe -Force -ErrorAction SilentlyContinue
+    $targetDir = Split-Path -Parent $CurrentExe
+    $tempReplacement = Join-Path $targetDir ([System.IO.Path]::GetRandomFileName() + '.exe')
+    Copy-Item -LiteralPath $UpdateFile -Destination $tempReplacement -Force
+    [System.IO.File]::Replace($tempReplacement, $CurrentExe, $BackupExe, $true)
     Remove-Item -LiteralPath $UpdateFile -Force -ErrorAction SilentlyContinue
     Start-Process -FilePath $CurrentExe
 } catch {
@@ -443,6 +547,9 @@ try {
     } catch {
     }
 } finally {
+    if ($tempReplacement -and (Test-Path -LiteralPath $tempReplacement)) {
+        Remove-Item -LiteralPath $tempReplacement -Force -ErrorAction SilentlyContinue
+    }
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }
 """

@@ -148,7 +148,14 @@ def setup_logging(
     if _INITIALIZED:
         return get_log_file(app_name)
 
-    log_level_name = level or os.getenv("THREAD_AUTO_LOG_LEVEL", "DEBUG")
+    is_frozen = bool(getattr(sys, "frozen", False))
+    if level:
+        log_level_name = level
+    elif is_frozen:
+        # Ignore runtime env overrides in production binaries.
+        log_level_name = "INFO"
+    else:
+        log_level_name = os.getenv("THREAD_AUTO_LOG_LEVEL", "DEBUG")
     log_level = _resolve_level(log_level_name)
     log_dir = get_log_dir()
     log_dir.mkdir(parents=True, exist_ok=True)

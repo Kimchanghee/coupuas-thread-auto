@@ -7,6 +7,7 @@ import os
 import re
 import socket
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -54,6 +55,7 @@ _CRED_FILE = _CRED_DIR / "auth.json"
 _API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
 _SENSITIVE_CRED_FIELDS = {"token"}
+_INVALID_LOCK_SENTINEL = "__invalid_api_host_lock__"
 _MIN_PASSWORD_LENGTH = 8
 _WORK_RESERVATION_SUPPORTED: Optional[bool] = None
 _TOKEN_TTL_DEFAULT_SECONDS = 43200
@@ -86,6 +88,8 @@ def _check_api_url() -> Optional[str]:
     parsed = urlparse(API_SERVER_URL)
     if parsed.scheme == "http":
         host = (parsed.hostname or "").lower()
+        if getattr(sys, "frozen", False):
+            return "HTTPS API URL is required in production builds."
         if host not in {"localhost", "127.0.0.1", "::1"}:
             return "Only HTTPS API URL is allowed for security."
     host_lock_error = _check_api_host_lock(parsed)
@@ -113,31 +117,78 @@ def _unprotect_secret(value: str) -> str:
     return plain
 
 
+def _read_api_host_lock() -> str:
+    try:
+        if not _API_HOST_LOCK_FILE.exists():
+            return ""
+        raw = _API_HOST_LOCK_FILE.read_text(encoding="utf-8").strip()
+        if not raw:
+            return ""
+        if raw.startswith("dpapi:"):
+            plain = _unprotect_secret(raw).strip().lower()
+            if plain:
+                return plain
+            return _INVALID_LOCK_SENTINEL
+        # Frozen production binaries should never trust plaintext lock files.
+        if getattr(sys, "frozen", False):
+            logger.warning("Detected unprotected API host lock file in production mode")
+            return _INVALID_LOCK_SENTINEL
+        # Legacy plaintext compatibility path (development mode only).
+        return raw.lower()
+    except Exception:
+        logger.warning("Failed to read API host lock file")
+        if getattr(sys, "frozen", False) and _API_HOST_LOCK_FILE.exists():
+            return _INVALID_LOCK_SENTINEL
+        return ""
+
+
+def _write_api_host_lock(host: str) -> bool:
+    _ensure_cred_dir()
+    protected = _protect_secret(str(host or "").strip().lower())
+    if not protected:
+        logger.warning("Failed to protect API host lock")
+        return False
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(_CRED_DIR),
+            prefix="api_host_",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp.write(protected)
+            temp_path = tmp.name
+        os.replace(temp_path, _API_HOST_LOCK_FILE)
+        secure_file_permissions(_API_HOST_LOCK_FILE)
+        return True
+    except Exception:
+        logger.warning("Failed to write API host lock file")
+        if temp_path:
+            try:
+                Path(temp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        return False
+
+
 def _check_api_host_lock(parsed) -> Optional[str]:
     host = (parsed.hostname or "").lower()
     if not host or host in {"localhost", "127.0.0.1", "::1"}:
         return None
 
     _ensure_cred_dir()
-    locked_host = ""
-    try:
-        if _API_HOST_LOCK_FILE.exists():
-            locked_host = _API_HOST_LOCK_FILE.read_text(encoding="utf-8").strip().lower()
-    except Exception:
-        logger.warning("Failed to read API host lock file")
+    locked_host = _read_api_host_lock()
+    if locked_host == _INVALID_LOCK_SENTINEL:
+        return "Blocked API host lock due to integrity validation failure."
 
     if locked_host and locked_host != host:
-        return (
-            f"Blocked API host change: locked={locked_host}, current={host}. "
-            "Delete api_host.lock after verifying trusted server to migrate."
-        )
+        return "Blocked API host change due to security policy."
 
     if not locked_host:
-        try:
-            _API_HOST_LOCK_FILE.write_text(host, encoding="utf-8")
-            secure_file_permissions(_API_HOST_LOCK_FILE)
-        except Exception:
-            logger.warning("Failed to write API host lock file")
+        if not _write_api_host_lock(host):
+            return "Failed to persist API host lock."
     return None
 
 
@@ -173,11 +224,25 @@ def _save_cred(data: dict) -> None:
 
     with _LOCK:
         try:
-            with open(_CRED_FILE, "w", encoding="utf-8") as f:
-                json.dump(serialized, f, ensure_ascii=False, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(_CRED_DIR),
+                prefix="auth_",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                json.dump(serialized, tmp, ensure_ascii=False, indent=2)
+                temp_path = tmp.name
+            os.replace(temp_path, _CRED_FILE)
             secure_file_permissions(_CRED_FILE)
         except Exception as e:
             logger.error("Failed to save credentials: %s", e)
+            if "temp_path" in locals():
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
 
 
 def _clear_cred() -> None:
