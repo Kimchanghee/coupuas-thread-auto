@@ -69,27 +69,11 @@ jobs:
           $pfxPassword = "${{ secrets.CODE_SIGN_PFX_PASSWORD }}"
           $certPath = Join-Path $env:RUNNER_TEMP "code-signing-cert.pfx"
 
-          if ($pfxB64 -and $pfxPassword) {
-            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($pfxB64))
-            $securePassword = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
-          } else {
-            Write-Host "CODE_SIGN_PFX_* secrets are missing. Generating ephemeral self-signed certificate."
-            $generatedPassword = ([Guid]::NewGuid().ToString("N") + "!Aa1")
-            $securePassword = ConvertTo-SecureString $generatedPassword -AsPlainText -Force
-            $generatedCert = New-SelfSignedCertificate `
-              -Type CodeSigningCert `
-              -Subject "CN=Paro Partners" `
-              -CertStoreLocation "Cert:\\CurrentUser\\My" `
-              -NotAfter (Get-Date).AddYears(3) `
-              -HashAlgorithm SHA256 `
-              -KeyAlgorithm RSA `
-              -KeyLength 3072
-            if (-not $generatedCert -or -not $generatedCert.Thumbprint) {
-              throw "Failed to generate self-signed code-signing certificate."
-            }
-            Export-PfxCertificate -Cert $generatedCert -FilePath $certPath -Password $securePassword | Out-Null
-            "CODE_SIGN_EPHEMERAL=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (-not $pfxB64 -or -not $pfxPassword) {
+            throw "CODE_SIGN_PFX_B64 and CODE_SIGN_PFX_PASSWORD are required for release builds."
           }
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($pfxB64))
+          $securePassword = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
 
           $imported = Import-PfxCertificate `
             -FilePath $certPath `
@@ -165,9 +149,9 @@ jobs:
           $signResult = Set-AuthenticodeSignature `
             -FilePath "dist\\CoupangThreadAuto.exe" `
             -Certificate $cert `
-            -TimestampServer "http://timestamp.digicert.com"
+            -TimestampServer "https://timestamp.digicert.com"
           $signStatus = $signResult.Status.ToString()
-          if (@("Valid", "UnknownError", "NotTrusted") -notcontains $signStatus) {
+          if ($signStatus -ne "Valid") {
             throw "Set-AuthenticodeSignature failed: $signStatus"
           }
           Write-Host "Set-AuthenticodeSignature status: $signStatus"
@@ -177,7 +161,7 @@ jobs:
         run: |
           $sig = Get-AuthenticodeSignature -FilePath "dist\\CoupangThreadAuto.exe"
           $status = $sig.Status.ToString()
-          if (@("Valid", "UnknownError", "NotTrusted") -notcontains $status) {
+          if ($status -ne "Valid") {
             throw "Invalid executable signature status: $status"
           }
           if (-not $sig.SignerCertificate) {

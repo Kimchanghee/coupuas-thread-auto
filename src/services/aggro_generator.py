@@ -22,7 +22,7 @@ class AggroGenerator:
 
 2. 바로가기 아이콘 이용 시, 수신자의 사전 동의를 얻지 않은 메신저, SNS 등으로 메시지를 발송하는 행위는 불법 스팸 전송 행위로 간주되어 규제기관의 행정제재 또는 형사 처벌의 대상이 될 수 있으니 이 점 유의하시기 바랍니다."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str = ""):
         """
         Args:
             api_key: Google Gemini API 키
@@ -41,7 +41,7 @@ class AggroGenerator:
         else:
             self.model = None
 
-    def generate_aggro_text(self, product_title: str, product_keywords: str = "") -> str:
+    def generate_aggro_text(self, product_title: str, product_keywords: str = "", api_key: str = "") -> str:
         """
         상품에 대한 어그로성 한줄 문구 생성
 
@@ -52,6 +52,9 @@ class AggroGenerator:
         Returns:
             어그로성 한줄 문구
         """
+        if api_key:
+            self.set_api_key(api_key)
+
         if not self.model:
             return f"이거 보고 충동구매 했는데 후회 1도 없음 {product_title[:15]}"
 
@@ -105,7 +108,7 @@ Threads에 올릴 클릭을 유도하는 한줄 문구를 작성해.
             print(f"  ⚠️ 어그로 문구 생성 오류: {e}")
             return f"이거 뭐야?! ㅋㅋ"
 
-    def generate_product_post(self, product_info: dict) -> dict:
+    def generate_product_post(self, product_info: dict, api_key: str = "") -> dict:
         """
         상품 정보로 스레드 포스트 데이터 생성
 
@@ -132,7 +135,7 @@ Threads에 올릴 클릭을 유도하는 한줄 문구를 작성해.
         video_path = product_info.get('video_path')
 
         # 어그로 문구 생성
-        aggro_text = self.generate_aggro_text(title, keywords)
+        aggro_text = self.generate_aggro_text(title, keywords, api_key=api_key)
 
         # 미디어 선택 (영상 우선)
         media_path = video_path if video_path else image_path
@@ -163,7 +166,7 @@ Threads에 올릴 클릭을 유도하는 한줄 문구를 작성해.
             'original_url': original_url
         }
 
-    def generate_batch(self, products: list) -> list:
+    def generate_batch(self, products: list, api_key: str = "") -> list:
         """
         여러 상품에 대해 일괄 포스트 생성
 
@@ -176,7 +179,7 @@ Threads에 올릴 클릭을 유도하는 한줄 문구를 작성해.
         results = []
         for i, product in enumerate(products, 1):
             print(f"  📝 [{i}/{len(products)}] 어그로 문구 생성: {product.get('title', '')[:30]}...")
-            post_data = self.generate_product_post(product)
+            post_data = self.generate_product_post(product, api_key=api_key)
             results.append(post_data)
 
         return results

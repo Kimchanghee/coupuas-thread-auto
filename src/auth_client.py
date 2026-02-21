@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -267,7 +268,10 @@ def _normalize_password_for_backend(password: str) -> str:
     """
     if not isinstance(password, str):
         password = str(password or "")
-    return password
+    normalized = password.strip()
+    if re.fullmatch(r"[a-fA-F0-9]{64}", normalized):
+        return normalized.lower()
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def _localize_message(message: str) -> str:

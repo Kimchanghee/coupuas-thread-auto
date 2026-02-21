@@ -9,17 +9,18 @@ import base64
 import json
 import time
 from typing import Optional, Dict
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 
 # Gemini API 재시도 설정
 MAX_RETRIES = 5
 RETRY_DELAY = 60  # 1분
 ALLOWED_COUPANG_DOMAINS = ("coupang.com",)
+MAX_REDIRECT_HOPS = 5
 
 
 def _redact_api_key(value: object) -> str:
     text = str(value or "")
-    return re.sub(r"(key=)[^&\\s]+", r"\\1[REDACTED]", text)
+    return re.sub(r"(key=)[^&\s]+", r"\1[REDACTED]", text)
 
 
 class CoupangParser:
@@ -131,7 +132,6 @@ class CoupangParser:
                 print(f"  [Parse] Product ID: {info['product_id']}")
 
             # 2. Gemini URL Context로 상품 정보 추출 시도
-            print(f"  [Parse] API Key: {'Yes' if self.google_api_key else 'No'}")
             if self.google_api_key:
                 gemini_result = self._fetch_with_gemini_url_context(final_url)
                 if gemini_result:
@@ -369,19 +369,43 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
 
     def _follow_redirect(self, url: str) -> Optional[str]:
         """리다이렉트를 따라가서 최종 URL 반환"""
-        try:
-            normalized = self._normalize_url(url)
-            if not self._is_allowed_coupang_url(normalized):
-                return None
+        normalized = self._normalize_url(url)
+        if not self._is_allowed_coupang_url(normalized):
+            return None
 
-            response = self.session.head(normalized, allow_redirects=True, timeout=10)
-            final_url = self._normalize_url(response.url)
-            return final_url if self._is_allowed_coupang_url(final_url) else None
-        except:
+        current_url = normalized
+        try:
+            for _ in range(MAX_REDIRECT_HOPS):
+                response = self.session.head(current_url, allow_redirects=False, timeout=10)
+                status = int(response.status_code or 0)
+                if 300 <= status < 400:
+                    location = str(response.headers.get("Location", "")).strip()
+                    if not location:
+                        return None
+                    next_url = self._normalize_url(urljoin(current_url, location))
+                    if not self._is_allowed_coupang_url(next_url):
+                        return None
+                    current_url = next_url
+                    continue
+                return current_url if self._is_allowed_coupang_url(current_url) else None
+            return None
+        except Exception:
             try:
-                response = self.session.get(normalized, allow_redirects=True, timeout=10)
-                final_url = self._normalize_url(response.url)
-                return final_url if self._is_allowed_coupang_url(final_url) else None
+                current_url = normalized
+                for _ in range(MAX_REDIRECT_HOPS):
+                    response = self.session.get(current_url, allow_redirects=False, timeout=10)
+                    status = int(response.status_code or 0)
+                    if 300 <= status < 400:
+                        location = str(response.headers.get("Location", "")).strip()
+                        if not location:
+                            return None
+                        next_url = self._normalize_url(urljoin(current_url, location))
+                        if not self._is_allowed_coupang_url(next_url):
+                            return None
+                        current_url = next_url
+                        continue
+                    return current_url if self._is_allowed_coupang_url(current_url) else None
+                return None
             except Exception as e:
                 print(f"  [!] Redirect error: {e}")
                 return None

@@ -1,3 +1,5 @@
+import hashlib
+
 from src import auth_client
 
 
@@ -56,7 +58,7 @@ def test_login_payload_includes_required_ip(monkeypatch):
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
     assert payload["id"] == "sampleuser"
-    assert payload["pw"] == "SamplePass123"
+    assert payload["pw"] == hashlib.sha256("SamplePass123".encode("utf-8")).hexdigest()
     assert payload["force"] is False
     assert payload["ip"] == "10.20.30.40"
 
@@ -116,6 +118,25 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
 
     assert result["success"] is False
     assert "body.name" in result["message"]
+
+
+def test_register_payload_hashes_password(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(422, {"success": False, "message": "invalid"})
+    session = _FakeSession(response)
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    auth_client.register(
+        name="Tester1",
+        username="sampleuser",
+        password="SamplePass123",
+        contact="01012345678",
+        email="sample@example.com",
+    )
+
+    assert len(session.calls) == 1
+    payload = session.calls[0]["json"]
+    assert payload["password"] == hashlib.sha256("SamplePass123".encode("utf-8")).hexdigest()
 
 
 def test_register_200_failure_with_error_object_returns_message(monkeypatch):
