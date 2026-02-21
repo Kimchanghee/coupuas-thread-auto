@@ -158,7 +158,23 @@ jobs:
       - name: Sign executable
         shell: pwsh
         run: |
-          & signtool sign `
+          $signTool = (Get-Command signtool -ErrorAction SilentlyContinue).Source
+          if (-not $signTool) {
+            $candidates = Get-ChildItem `
+              -Path "C:\\Program Files (x86)\\Windows Kits\\10\\bin" `
+              -Recurse `
+              -Filter "signtool.exe" `
+              -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*\\x64\\*" }
+            if ($candidates) {
+              $signTool = ($candidates | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+            }
+          }
+          if (-not $signTool) {
+            throw "signtool.exe not found on runner."
+          }
+          Write-Host "Using signtool: $signTool"
+
+          & $signTool sign `
             /fd SHA256 `
             /td SHA256 `
             /tr "https://timestamp.digicert.com" `
