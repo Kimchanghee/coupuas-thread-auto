@@ -118,7 +118,7 @@ jobs:
               raise SystemExit("CODE_SIGN_CERT_THUMBPRINT is missing")
 
           updated, count = re.subn(
-              r"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS\\s*=\\s*set\\(\\)",
+              r"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS\s*=\s*set\(\)",
               f"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = {{'{thumb}'}}",
               src,
               count=1,
