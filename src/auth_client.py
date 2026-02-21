@@ -753,12 +753,6 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
                         _auth_state["token_issued_at"] = time.time()
                         _auth_state["work_count"] = result_data.get("work_count", 0)
                         _auth_state["work_used"] = 0
-                        saved_username = _auth_state["username"]
-                    _save_cred({
-                        "user_id": user_id,
-                        "username": saved_username,
-                        "token": token,
-                    })
                     _merge_account_state(result_data)
             return data
 
@@ -826,14 +820,6 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                     _auth_state["token_issued_at"] = time.time()
                     _auth_state["work_count"] = data.get("work_count", 0)
                     _auth_state["work_used"] = data.get("work_used", 0)
-                    saved_user_id = _auth_state["user_id"]
-                    saved_username = _auth_state["username"]
-                    saved_token = _auth_state["token"]
-                _save_cred({
-                    "user_id": saved_user_id,
-                    "username": saved_username,
-                    "token": saved_token,
-                })
                 _merge_account_state(data)
             elif data.get("status") is False and not data.get("message"):
                 data["message"] = _normalize_api_message(
@@ -987,6 +973,8 @@ def reserve_work() -> Dict[str, Any]:
     user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
+    if _WORK_RESERVATION_SUPPORTED is False:
+        return {"success": False, "unsupported": True, "message": "work reservation not supported"}
 
     try:
         resp = _session.post(
@@ -1093,6 +1081,14 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
 def get_saved_credentials() -> Optional[Dict[str, str]]:
     cred = _load_cred()
     return cred if cred.get("username") else None
+
+
+def remember_username(username: str) -> None:
+    name = str(username or "").strip().lower()
+    if not name:
+        _clear_cred()
+        return
+    _save_cred({"username": name})
 
 
 def friendly_login_message(res: Dict[str, Any]) -> str:

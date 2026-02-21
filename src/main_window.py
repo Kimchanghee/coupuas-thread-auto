@@ -2155,9 +2155,9 @@ class MainWindow(QMainWindow):
                         from src import auth_client
                         reserve_result = auth_client.reserve_work()
                         if isinstance(reserve_result, dict) and reserve_result.get("unsupported"):
-                            log("Work reservation endpoint is not available. Upload stopped for security.")
-                            results["cancelled"] = True
-                            break
+                            log("Work reservation endpoint unavailable. Using legacy billing sync.")
+                            reservation_supported = False
+                            reserved_work_id = None
                         elif not self._is_work_allowed(reserve_result):
                             quota_message = (
                                 reserve_result.get("message", "사용 가능한 작업량이 없습니다.")
@@ -2198,7 +2198,7 @@ class MainWindow(QMainWindow):
                             if reservation_supported and reserved_work_id:
                                 use_result = auth_client.commit_reserved_work(reserved_work_id)
                             else:
-                                use_result = {"success": False, "message": "work reservation missing"}
+                                use_result = auth_client.use_work()
                             if not isinstance(use_result, dict) or not bool(use_result.get("success")):
                                 billing_msg = (
                                     use_result.get("message", "unknown")

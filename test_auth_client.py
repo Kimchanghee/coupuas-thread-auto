@@ -262,6 +262,7 @@ def test_login_merges_plan_and_expiry_fields(monkeypatch):
 
 def test_reserve_work_returns_unsupported_on_404(monkeypatch):
     _reset_auth_state()
+    auth_client._WORK_RESERVATION_SUPPORTED = None
     auth_client._auth_state["user_id"] = 1
     auth_client._auth_state["token"] = "token-1"
     monkeypatch.setattr(auth_client, "_session", _FakeSession(_FakeResponse(404, {})))
@@ -270,3 +271,42 @@ def test_reserve_work_returns_unsupported_on_404(monkeypatch):
 
     assert result["success"] is False
     assert result.get("unsupported") is True
+
+
+def test_reserve_work_short_circuits_when_unsupported_cached(monkeypatch):
+    _reset_auth_state()
+    auth_client._WORK_RESERVATION_SUPPORTED = False
+    auth_client._auth_state["user_id"] = 1
+    auth_client._auth_state["token"] = "token-1"
+    session = _FakeSession(_FakeResponse(200, {"success": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.reserve_work()
+
+    assert result["success"] is False
+    assert result.get("unsupported") is True
+    assert len(session.calls) == 0
+
+
+def test_remember_username_persists_lowercase(monkeypatch):
+    captured = {}
+
+    def _fake_save(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
+    auth_client.remember_username("Test_User")
+
+    assert captured["payload"] == {"username": "test_user"}
+
+
+def test_remember_username_empty_clears_saved_value(monkeypatch):
+    state = {"cleared": False}
+
+    def _fake_clear():
+        state["cleared"] = True
+
+    monkeypatch.setattr(auth_client, "_clear_cred", _fake_clear)
+    auth_client.remember_username("")
+
+    assert state["cleared"] is True

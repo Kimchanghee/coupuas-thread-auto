@@ -221,20 +221,7 @@ jobs:
           tag_name: ${{ needs.build.outputs.version }}
           name: Release ${{ needs.build.outputs.version }}
           body: |
-            ## Coupang Partners Thread Auto ${{ needs.build.outputs.version }}
-
-            ### Download
-            - [CoupangThreadAuto.exe](https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.version }}/CoupangThreadAuto.exe)
-            - [CoupangThreadAuto.exe.sha256](https://github.com/${{ github.repository }}/releases/download/${{ needs.build.outputs.version }}/CoupangThreadAuto.exe.sha256)
-
-            ### Installation
-            1. Download CoupangThreadAuto.exe
-            2. Run the downloaded file
-            3. Updates will be installed automatically
-
-            ### System Requirements
-            - Windows 10 or later
-            - Internet connection
+            일부 버그 수정
           draft: false
           prerelease: false
           files: |

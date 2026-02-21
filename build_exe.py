@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 APP_NAME = "CoupangThreadAuto"
 MAIN_SCRIPT = "main.py"
@@ -80,6 +82,58 @@ EXCLUDES = [
 ]
 
 
+def _normalize_thumbprint(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    normalized = re.sub(r"[^a-fA-F0-9]", "", raw).upper()
+    if len(normalized) != 40:
+        return ""
+    return normalized
+
+
+def pin_updater_signer_thumbprint():
+    """
+    Temporarily pin update signer thumbprint in src/auto_updater.py for this build.
+    Returns a restore callback or None.
+    """
+    thumb = _normalize_thumbprint(
+        os.getenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINT")
+        or os.getenv("CODE_SIGN_CERT_THUMBPRINT")
+    )
+    if not thumb:
+        print("  - No trusted signer thumbprint env set; updater pin left unchanged.")
+        return None
+
+    updater_path = Path("src") / "auto_updater.py"
+    if not updater_path.exists():
+        print("  - auto_updater.py not found; skipping thumbprint pin.")
+        return None
+
+    original = updater_path.read_text(encoding="utf-8")
+    pattern = r"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS\s*=\s*(?:set\(\)|\{[^}]*\})"
+    replacement = f"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = {{'{thumb}'}}"
+    updated, count = re.subn(pattern, replacement, original, count=1)
+    if count != 1:
+        print("  - Failed to patch trusted signer thumbprint line; skipping.")
+        return None
+    if updated == original:
+        print(f"  - Trusted signer thumbprint already pinned: {thumb}")
+        return None
+
+    updater_path.write_text(updated, encoding="utf-8")
+    print(f"  - Pinned updater trusted signer thumbprint: {thumb}")
+
+    def _restore():
+        try:
+            updater_path.write_text(original, encoding="utf-8")
+            print("  - Restored auto_updater.py thumbprint pin source state.")
+        except Exception as exc:
+            print(f"  - Failed to restore auto_updater.py after build: {exc}")
+
+    return _restore
+
+
 def get_playwright_driver_path() -> str | None:
     try:
         import playwright
@@ -98,13 +152,16 @@ def build_exe() -> bool:
     print("Coupang Partners Thread Auto - EXE build")
     print("=" * 60)
 
-    print("\n[1/5] Cleaning previous build artifacts...")
+    print("\n[1/6] Cleaning previous build artifacts...")
     for folder in ["build", "dist"]:
         if os.path.exists(folder):
             shutil.rmtree(folder)
             print(f"  - Removed {folder}")
 
-    print("\n[2/5] Building PyInstaller command...")
+    print("\n[2/6] Preparing updater signer pin...")
+    restore_updater_pin = pin_updater_signer_thumbprint()
+
+    print("\n[3/6] Building PyInstaller command...")
     cmd = [
         sys.executable,
         "-m",
@@ -143,7 +200,7 @@ def build_exe() -> bool:
 
     cmd.append(os.path.abspath(MAIN_SCRIPT))
 
-    print("\n[3/5] Running PyInstaller...")
+    print("\n[4/6] Running PyInstaller...")
     print(f"  Command preview: {' '.join(cmd[:10])} ...")
     try:
         subprocess.run(cmd, check=True)
@@ -151,15 +208,18 @@ def build_exe() -> bool:
     except subprocess.CalledProcessError as exc:
         print(f"  - Build failed: {exc}")
         return False
+    finally:
+        if restore_updater_pin:
+            restore_updater_pin()
 
-    print("\n[4/5] Preparing runtime folders...")
+    print("\n[5/6] Preparing runtime folders...")
     dist_folder = "dist"
     os.makedirs(os.path.join(dist_folder, "media", "cache"), exist_ok=True)
     os.makedirs(os.path.join(dist_folder, "user_data"), exist_ok=True)
     print("  - Created dist/media/cache")
     print("  - Created dist/user_data")
 
-    print("\n[5/5] Verifying build output...")
+    print("\n[6/6] Verifying build output...")
     exe_path = os.path.join(dist_folder, f"{APP_NAME}.exe")
     if not os.path.exists(exe_path):
         print("  - EXE file not found.")

@@ -461,13 +461,15 @@ class LoginWindow(QMainWindow):
             self._login_cooldown_until = 0.0
             logger.info(f"Login success: user_id={result.get('id')}")
 
-            # Save credentials if remember is checked
-            if self.remember_cb.isChecked():
-                auth_client._save_cred({
-                    "user_id": result.get("id"),
-                    "username": self.login_id.text().strip().lower(),
-                    "token": result.get("key"),
-                })
+            # Respect explicit opt-in for username persistence only.
+            saved_username = self.login_id.text().strip().lower()
+            try:
+                if self.remember_cb.isChecked():
+                    auth_client.remember_username(saved_username)
+                else:
+                    auth_client.remember_username("")
+            except Exception:
+                logger.exception("Failed to persist username preference")
 
             self.login_success.emit(result)
         elif status == "EU003":
