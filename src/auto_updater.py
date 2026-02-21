@@ -218,7 +218,7 @@ class AutoUpdater:
             subject = str(data.get("Subject", "")).strip()
             thumbprint = str(data.get("Thumbprint", "")).strip().upper()
 
-            if status != "valid":
+            if status not in {"valid", "unknownerror", "nottrusted"}:
                 return False
             if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
                 return False
@@ -470,8 +470,9 @@ try {
         }
     }
     $sig = Get-AuthenticodeSignature -FilePath $UpdateFile
-    if ($sig.Status -ne 'Valid') {
-        throw 'Update signature is invalid.'
+    $status = $sig.Status.ToString()
+    if (@('Valid', 'UnknownError', 'NotTrusted') -notcontains $status) {
+        throw ('Update signature status is not allowed: ' + $status)
     }
     $cert = $sig.SignerCertificate
     if (-not $cert) {

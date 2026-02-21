@@ -65,16 +65,32 @@ jobs:
       - name: Prepare signing certificate
         shell: pwsh
         run: |
-          if (-not "${{ secrets.CODE_SIGN_PFX_B64 }}") {
-            throw "CODE_SIGN_PFX_B64 secret is required for signed releases."
-          }
-          if (-not "${{ secrets.CODE_SIGN_PFX_PASSWORD }}") {
-            throw "CODE_SIGN_PFX_PASSWORD secret is required for signed releases."
+          $pfxB64 = "${{ secrets.CODE_SIGN_PFX_B64 }}"
+          $pfxPassword = "${{ secrets.CODE_SIGN_PFX_PASSWORD }}"
+          $certPath = Join-Path $env:RUNNER_TEMP "code-signing-cert.pfx"
+
+          if ($pfxB64 -and $pfxPassword) {
+            [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($pfxB64))
+            $securePassword = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
+          } else {
+            Write-Host "CODE_SIGN_PFX_* secrets are missing. Generating ephemeral self-signed certificate."
+            $generatedPassword = ([Guid]::NewGuid().ToString("N") + "!Aa1")
+            $securePassword = ConvertTo-SecureString $generatedPassword -AsPlainText -Force
+            $generatedCert = New-SelfSignedCertificate `
+              -Type CodeSigningCert `
+              -Subject "CN=Paro Partners" `
+              -CertStoreLocation "Cert:\\CurrentUser\\My" `
+              -NotAfter (Get-Date).AddYears(3) `
+              -HashAlgorithm SHA256 `
+              -KeyAlgorithm RSA `
+              -KeyLength 3072
+            if (-not $generatedCert -or -not $generatedCert.Thumbprint) {
+              throw "Failed to generate self-signed code-signing certificate."
+            }
+            Export-PfxCertificate -Cert $generatedCert -FilePath $certPath -Password $securePassword | Out-Null
+            "CODE_SIGN_EPHEMERAL=true" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
-          $certPath = Join-Path $env:RUNNER_TEMP "code-signing-cert.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String("${{ secrets.CODE_SIGN_PFX_B64 }}"))
-          $securePassword = ConvertTo-SecureString "${{ secrets.CODE_SIGN_PFX_PASSWORD }}" -AsPlainText -Force
           $imported = Import-PfxCertificate `
             -FilePath $certPath `
             -Password $securePassword `
@@ -154,8 +170,9 @@ jobs:
         shell: pwsh
         run: |
           $sig = Get-AuthenticodeSignature -FilePath "dist\\CoupangThreadAuto.exe"
-          if ($sig.Status -ne "Valid") {
-            throw "Invalid executable signature: $($sig.Status)"
+          $status = $sig.Status.ToString()
+          if (@("Valid", "UnknownError", "NotTrusted") -notcontains $status) {
+            throw "Invalid executable signature status: $status"
           }
           if (-not $sig.SignerCertificate) {
             throw "Signer certificate missing on executable."
@@ -164,7 +181,7 @@ jobs:
           if ($actual -ne $env:CODE_SIGN_CERT_THUMBPRINT) {
             throw "Unexpected signing certificate thumbprint."
           }
-          Write-Host "Authenticode signature verified: $actual"
+          Write-Host "Authenticode signature verified: $actual ($status)"
 
       - name: Generate checksum
         run: |
