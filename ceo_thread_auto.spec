@@ -214,7 +214,8 @@ a = Analysis(
     pathex=[project_root],
     binaries=binaries,
     datas=datas + [
-        ('fonts', 'fonts'),  # UI fonts (Pretendard 등)
+        ('fonts', 'fonts'),
+        ('images/app_icon.ico', 'images'),
     ],
     hiddenimports=list(set(hidden_imports)),  # 중복 제거
     hookspath=[],
@@ -269,5 +270,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # 아이콘 파일: 'icon.ico'
+    icon='images/app_icon.ico',
 )

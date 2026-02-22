@@ -58,14 +58,15 @@ from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import (
     QPixmap, QFont, QPainter, QColor, QLinearGradient,
-    QPainterPath, QPen, QBrush, QFontDatabase
+    QPainterPath, QPen, QBrush, QFontDatabase, QIcon
 )
 
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.3.5"
+VERSION = "v2.3.6"
 logger = logging.getLogger(__name__)
+APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
 
 def _create_main_window(login_win, auth_result, main_window_cls=None):
@@ -111,6 +112,33 @@ def _init_qt_app_font(app: QApplication) -> None:
     except Exception:
         pass
     app.setFont(qf)
+
+
+def _resolve_runtime_path(relative_path: Path) -> Path:
+    """Resolve resource path for source and frozen builds."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(Path(meipass))
+        candidates.append(Path(sys.executable).resolve().parent)
+    candidates.append(Path(__file__).resolve().parent)
+
+    for base in candidates:
+        path = base / relative_path
+        if path.exists():
+            return path
+    return candidates[0] / relative_path
+
+
+def _apply_app_icon(app: QApplication) -> None:
+    """Apply application icon when available."""
+    try:
+        icon_path = _resolve_runtime_path(APP_ICON_REL_PATH)
+        if icon_path.exists():
+            app.setWindowIcon(QIcon(str(icon_path)))
+    except Exception:
+        pass
 
 
 class SplashScreen(QSplashScreen):
@@ -258,6 +286,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
+    _apply_app_icon(app)
     _init_qt_app_font(app)
 
     # Resolve system fonts for consistent rendering (fixes broken font-family in QSS)

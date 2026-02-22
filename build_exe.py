@@ -11,7 +11,7 @@ from pathlib import Path
 
 APP_NAME = "CoupangThreadAuto"
 MAIN_SCRIPT = "main.py"
-ICON_PATH = None  # Set to "icon.ico" when available.
+ICON_PATH = str((Path(__file__).resolve().parent / "images" / "app_icon.ico").resolve())
 
 HIDDEN_IMPORTS = [
     # Google AI
@@ -69,6 +69,7 @@ HIDDEN_IMPORTS = [
 
 DATAS = [
     ("fonts", "fonts"),
+    (str(Path("images") / "app_icon.ico"), "images"),
 ]
 
 EXCLUDES = [
