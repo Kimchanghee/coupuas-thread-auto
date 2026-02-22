@@ -2,230 +2,124 @@ name: Build and Release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release (e.g., v2.2.0)"
-        required: true
-        type: string
+      tags:
+            - "v*.*.*"
+              workflow_dispatch:
+                  inputs:
+                        version:
+                                description: "Version to release (e.g., v2.2.0)"
+                                        required: true
+                                                type: string
 
-permissions:
-  contents: read
+                                                permissions:
+                                                  contents: read
 
-jobs:
-  build:
-    runs-on: windows-latest
-    permissions:
-      contents: read
-    outputs:
-      version: ${{ steps.get_version.outputs.VERSION }}
+                                                  jobs:
+                                                    build:
+                                                        runs-on: windows-latest
+                                                            permissions:
+                                                                  contents: read
+                                                                      outputs:
+                                                                            version: ${{ steps.get_version.outputs.VERSION }}
+                                                                                steps:
+                                                                                      - name: Checkout code
+                                                                                              uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install dependencies (locked + hashed)
-        run: |
-          python -m pip install --upgrade pip
-          pip install --require-hashes -r requirements.lock
-          playwright install chromium
-
-      - name: Audit dependencies
-        run: |
-          python -m pip install pip-audit
-          python -m pip_audit -r requirements.lock --disable-pip
-
-      - name: Get version
-        id: get_version
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Validate release version
-        shell: bash
-        run: |
-          VERSION="${{ steps.get_version.outputs.VERSION }}"
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid version format: $VERSION"
-            exit 1
-          fi
-
-      - name: Prepare signing certificate
-        shell: pwsh
-        run: |
-          $pfxB64 = "${{ secrets.CODE_SIGN_PFX_B64 }}"
-          $pfxPassword = "${{ secrets.CODE_SIGN_PFX_PASSWORD }}"
-          $certPath = Join-Path $env:RUNNER_TEMP "code-signing-cert.pfx"
-
-          if (-not $pfxB64 -or -not $pfxPassword) {
-            throw "CODE_SIGN_PFX_B64 and CODE_SIGN_PFX_PASSWORD are required for release builds."
-          }
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($pfxB64))
-          $securePassword = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
-
-          $imported = Import-PfxCertificate `
-            -FilePath $certPath `
-            -Password $securePassword `
-            -CertStoreLocation "Cert:\\CurrentUser\\My"
-          if (-not $imported -or -not $imported.Thumbprint) {
-            throw "Failed to import signing certificate."
-          }
-
-          $thumb = $imported.Thumbprint.ToUpperInvariant()
-          "CODE_SIGN_CERT_PATH=$certPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "CODE_SIGN_CERT_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Pin trusted signer thumbprint in updater
-        shell: bash
-        run: |
-          python - << 'PY'
-          import os
-          import pathlib
-          import re
-
-          file_path = pathlib.Path("src/auto_updater.py")
-          src = file_path.read_text(encoding="utf-8")
-          thumb = os.environ.get("CODE_SIGN_CERT_THUMBPRINT", "").strip().upper()
-          if not thumb:
-              raise SystemExit("CODE_SIGN_CERT_THUMBPRINT is missing")
-
-          updated, count = re.subn(
-              r"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS\s*=\s*set\(\)",
-              f"DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = {{'{thumb}'}}",
-              src,
-              count=1,
-          )
-          if count != 1:
-              raise SystemExit("Failed to inject trusted signer thumbprint")
-          file_path.write_text(updated, encoding="utf-8")
-          print("Trusted signer thumbprint pinned for release build")
-          PY
-
-      - name: Update version in main.py
-        shell: bash
-        run: |
-          VERSION="${{ steps.get_version.outputs.VERSION }}"
-          sed -i "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" main.py
-          echo "Updated version to $VERSION"
-          grep "VERSION =" main.py
-
-      - name: Build executable
-        env:
-          PYTHONIOENCODING: utf-8
-          PYTHONUTF8: 1
-        run: |
-          python build_exe.py
-
-      - name: Verify build
-        run: |
-          if (Test-Path "dist\\CoupangThreadAuto.exe") {
-            Write-Host "Build successful!"
-            $size = (Get-Item "dist\\CoupangThreadAuto.exe").Length / 1MB
-            Write-Host "File size: $([math]::Round($size, 2)) MB"
-          } else {
-            Write-Error "Build failed - EXE not found"
-            exit 1
-          }
-
-      - name: Sign executable
-        shell: pwsh
-        run: |
-          $cert = Get-ChildItem -Path "Cert:\\CurrentUser\\My\\$env:CODE_SIGN_CERT_THUMBPRINT" -ErrorAction SilentlyContinue
-          if (-not $cert) {
-            throw "Signing certificate not found in CurrentUser\\My store."
-          }
-          $signResult = Set-AuthenticodeSignature `
-            -FilePath "dist\\CoupangThreadAuto.exe" `
-            -Certificate $cert `
-            -TimestampServer "https://timestamp.digicert.com"
-          $signStatus = $signResult.Status.ToString()
-          if ($signStatus -ne "Valid") {
-            throw "Set-AuthenticodeSignature failed: $signStatus"
-          }
-          Write-Host "Set-AuthenticodeSignature status: $signStatus"
-
-      - name: Verify executable signature
-        shell: pwsh
-        run: |
-          $sig = Get-AuthenticodeSignature -FilePath "dist\\CoupangThreadAuto.exe"
-          $status = $sig.Status.ToString()
-          if ($status -ne "Valid") {
-            throw "Invalid executable signature status: $status"
-          }
-          if (-not $sig.SignerCertificate) {
-            throw "Signer certificate missing on executable."
-          }
-          $actual = $sig.SignerCertificate.Thumbprint.ToUpperInvariant()
-          if ($actual -ne $env:CODE_SIGN_CERT_THUMBPRINT) {
-            throw "Unexpected signing certificate thumbprint."
-          }
-          Write-Host "Authenticode signature verified: $actual ($status)"
-
-      - name: Generate checksum
-        run: |
-          $hash = (Get-FileHash "dist\\CoupangThreadAuto.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash  CoupangThreadAuto.exe" | Out-File -FilePath "dist\\CoupangThreadAuto.exe.sha256" -Encoding ascii
-          Write-Host "SHA256: $hash"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: CoupangThreadAuto-release
-          path: |
-            dist/CoupangThreadAuto.exe
-            dist/CoupangThreadAuto.exe.sha256
-          retention-days: 30
-
-      - name: Cleanup signing material
-        if: always()
-        shell: pwsh
-        run: |
-          if ($env:CODE_SIGN_CERT_THUMBPRINT) {
-            $cert = Get-ChildItem -Path "Cert:\\CurrentUser\\My\\$env:CODE_SIGN_CERT_THUMBPRINT" -ErrorAction SilentlyContinue
-            if ($cert) {
-              Remove-Item -LiteralPath $cert.PSPath -Force -ErrorAction SilentlyContinue
-            }
-          }
-          if ($env:CODE_SIGN_CERT_PATH) {
-            Remove-Item -LiteralPath $env:CODE_SIGN_CERT_PATH -Force -ErrorAction SilentlyContinue
-          }
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.8
-        with:
-          name: CoupangThreadAuto-release
-          path: dist
-
-      - name: Create Release
-        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
-        with:
-          tag_name: ${{ needs.build.outputs.version }}
-          name: Release ${{ needs.build.outputs.version }}
-          body: |
-            일부 버그 수정
-          draft: false
-          prerelease: false
-          files: |
-            dist/CoupangThreadAuto.exe
-            dist/CoupangThreadAuto.exe.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                                                                                                    - name: Set up Python
+                                                                                                            uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+                                                                                                                    with:
+                                                                                                                              python-version: "3.11"
+                                                                                                                                        cache: "pip"
+                                                                                                                                        
+                                                                                                                                              - name: Install dependencies (locked + hashed)
+                                                                                                                                                      run: |
+                                                                                                                                                                python -m pip install --upgrade pip
+                                                                                                                                                                          pip install --require-hashes -r requirements.lock
+                                                                                                                                                                                    playwright install chromium
+                                                                                                                                                                                    
+                                                                                                                                                                                          - name: Get version
+                                                                                                                                                                                                  id: get_version
+                                                                                                                                                                                                          shell: bash
+                                                                                                                                                                                                                  run: |
+                                                                                                                                                                                                                            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+                                                                                                                                                                                                                                        echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+                                                                                                                                                                                                                                                  else
+                                                                                                                                                                                                                                                              echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+                                                                                                                                                                                                                                                                        fi
+                                                                                                                                                                                                                                                                        
+                                                                                                                                                                                                                                                                              - name: Validate release version
+                                                                                                                                                                                                                                                                                      shell: bash
+                                                                                                                                                                                                                                                                                              run: |
+                                                                                                                                                                                                                                                                                                        VERSION="${{ steps.get_version.outputs.VERSION }}"
+                                                                                                                                                                                                                                                                                                                  if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                                                                                                                                                                                                                                                                                                                              echo "Invalid version format: $VERSION"
+                                                                                                                                                                                                                                                                                                                                          exit 1
+                                                                                                                                                                                                                                                                                                                                                    fi
+                                                                                                                                                                                                                                                                                                                                                    
+                                                                                                                                                                                                                                                                                                                                                          - name: Update version in main.py
+                                                                                                                                                                                                                                                                                                                                                                  shell: bash
+                                                                                                                                                                                                                                                                                                                                                                          run: |
+                                                                                                                                                                                                                                                                                                                                                                                    VERSION="${{ steps.get_version.outputs.VERSION }}"
+                                                                                                                                                                                                                                                                                                                                                                                              sed -i "s/VERSION = \".*\"/VERSION = \"$VERSION\"/" main.py
+                                                                                                                                                                                                                                                                                                                                                                                                        echo "Updated version to $VERSION"
+                                                                                                                                                                                                                                                                                                                                                                                                                  grep "VERSION =" main.py
+                                                                                                                                                                                                                                                                                                                                                                                                                  
+                                                                                                                                                                                                                                                                                                                                                                                                                        - name: Build executable
+                                                                                                                                                                                                                                                                                                                                                                                                                                env:
+                                                                                                                                                                                                                                                                                                                                                                                                                                          PYTHONIOENCODING: utf-8
+                                                                                                                                                                                                                                                                                                                                                                                                                                                    PYTHONUTF8: 1
+                                                                                                                                                                                                                                                                                                                                                                                                                                                            run: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      python build_exe.py
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                            - name: Verify build
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    run: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              if (Test-Path "dist\\CoupangThreadAuto.exe") {
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          Write-Host "Build successful!"
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      $size = (Get-Item "dist\\CoupangThreadAuto.exe").Length / 1MB
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  Write-Host "File size: $([math]::Round($size, 2)) MB"
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            } else {
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        Write-Error "Build failed - EXE not found"
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    exit 1
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    - name: Generate checksum
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            run: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      $hash = (Get-FileHash "dist\\CoupangThreadAuto.exe" -Algorithm SHA256).Hash.ToLower()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                "$hash CoupangThreadAuto.exe" | Out-File -FilePath "dist\\CoupangThreadAuto.exe.sha256" -Encoding ascii
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          Write-Host "SHA256: $hash"
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                - name: Upload build artifacts
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                with:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          name: CoupangThreadAuto-release
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    path: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                dist/CoupangThreadAuto.exe
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            dist/CoupangThreadAuto.exe.sha256
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      retention-days: 30
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        release:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            needs: build
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                runs-on: ubuntu-latest
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    permissions:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          contents: write
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              steps:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    - name: Download build artifacts
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.1.8
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    with:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              name: CoupangThreadAuto-release
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        path: dist
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              - name: Create Release
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              with:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        tag_name: ${{ needs.build.outputs.version }}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  name: Release ${{ needs.build.outputs.version }}
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            body: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        새로운 버전이 출시되었습니다.
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  draft: false
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            prerelease: false
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      files: |
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  dist/CoupangThreadAuto.exe
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              dist/CoupangThreadAuto.exe.sha256
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      env:
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
