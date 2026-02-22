@@ -68,6 +68,7 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: 1
+          COUPUAS_ALLOW_UNPINNED_UPDATER_SIGNER: "1"
         run: |
           python build_exe.py
 
