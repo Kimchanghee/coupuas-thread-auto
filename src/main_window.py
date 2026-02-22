@@ -2435,17 +2435,42 @@ class MainWindow(QMainWindow):
             update_info = updater.check_for_updates()
 
             if update_info:
-                if ask_yes_no(
-                    self,
-                    "업데이트 알림",
-                    f"새 버전이 출시되었습니다. (v{update_info['version']})\n\n"
-                    f"지금 업데이트하시겠습니까?",
-                ):
-                    self.check_for_updates()
+                version_text = str(update_info.get("version", "") or "").strip()
+                logger.info("auto update found; starting immediate update flow (version=%s)", version_text)
+                self._run_auto_update_flow(update_info)
         except Exception as e:
             logger.exception("silent update check failed")
             # Silent check: keep UI quiet; details are already in logs.
             return
+
+
+    def _run_auto_update_flow(self, update_info: dict):
+        """Run download/install immediately without confirmation prompts."""
+        if not isinstance(update_info, dict) or not update_info:
+            return
+
+        def worker():
+            try:
+                from src.auto_updater import AutoUpdater
+
+                updater = AutoUpdater(self._app_version)
+                update_file = updater.download_update(update_info)
+                if not update_file:
+                    logger.warning("auto update download failed")
+                    return
+
+                expected_sha256 = str(update_info.get("expected_sha256", "") or "")
+                if updater.install_update(update_file, expected_sha256=expected_sha256):
+                    logger.info("auto update installer launched; quitting application")
+                    app = QApplication.instance()
+                    if app is not None:
+                        app.quit()
+                else:
+                    logger.warning("auto update install failed")
+            except Exception:
+                logger.exception("auto update flow failed")
+
+        threading.Thread(target=worker, daemon=True, name="auto-update-worker").start()
 
     def open_tutorial(self):
         logger.info("open_tutorial invoked")
