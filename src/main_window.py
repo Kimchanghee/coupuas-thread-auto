@@ -1693,12 +1693,12 @@ class MainWindow(QMainWindow):
 
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
+        profile_dir = self._get_profile_dir()
 
         def open_browser():
             try:
                 from src.computer_use_agent import ComputerUseAgent
 
-                profile_dir = self._get_profile_dir()
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=False,

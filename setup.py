@@ -12,7 +12,7 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
 
 setup(
     name="ceo-thread-auto",
-    version="2.3.3",
+    version="2.3.4",
     description="Thread auto uploader",
     author="Paro Partners",
     python_requires=">=3.9",
