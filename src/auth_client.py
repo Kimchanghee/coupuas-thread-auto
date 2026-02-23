@@ -60,7 +60,8 @@ _CRED_DIR = Path.home() / ".shorts_thread_maker"
 _CRED_FILE = _CRED_DIR / "auth.json"
 _API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
-_SENSITIVE_CRED_FIELDS = {"token"}
+_SAVED_PASSWORD_KEY = "saved_password"
+_SENSITIVE_CRED_FIELDS = {"token", _SAVED_PASSWORD_KEY}
 _INVALID_LOCK_SENTINEL = "__invalid_api_host_lock__"
 _MIN_REGISTER_PASSWORD_LENGTH = 8
 _MIN_LOGIN_PASSWORD_LENGTH = 6
@@ -317,13 +318,22 @@ def _clear_cred() -> bool:
 
 
 def _clear_saved_username_only() -> None:
-    """Best-effort fallback to remove only the saved username field."""
+    """Legacy helper for compatibility; clears saved login form fields."""
+    _clear_saved_login_fields()
+
+
+def _clear_saved_login_fields() -> None:
+    """Best-effort fallback to remove saved username/password fields only."""
     cred = _load_cred()
     if not isinstance(cred, dict) or not cred:
         return
-    if "username" not in cred:
+    changed = False
+    for field in ("username", _SAVED_PASSWORD_KEY, "remember_pw"):
+        if field in cred:
+            cred.pop(field, None)
+            changed = True
+    if not changed:
         return
-    cred.pop("username", None)
     if cred:
         _save_cred(cred)
     else:
@@ -1270,33 +1280,63 @@ def get_saved_credentials() -> Optional[Dict[str, str]]:
     if not isinstance(cred, dict):
         return None
 
+    changed = False
     raw_username = cred.get("username")
     normalized_username = _normalize_saved_username(raw_username)
+    raw_password = cred.get(_SAVED_PASSWORD_KEY)
+    normalized_password = str(raw_password or "") if isinstance(raw_password, str) else ""
+
     if normalized_username:
         if normalized_username != raw_username:
-            sanitized = dict(cred)
-            sanitized["username"] = normalized_username
-            _save_cred(sanitized)
-        return {"username": normalized_username}
+            cred["username"] = normalized_username
+            changed = True
+        result = {"username": normalized_username}
+        if normalized_password:
+            result["password"] = normalized_password
+        elif _SAVED_PASSWORD_KEY in cred:
+            cred.pop(_SAVED_PASSWORD_KEY, None)
+            changed = True
+        if changed:
+            _save_cred(cred)
+        return result
 
     if raw_username:
         logger.warning("저장된 아이디 형식이 올바르지 않아 자동 정리합니다.")
-        sanitized = dict(cred)
-        sanitized.pop("username", None)
-        if sanitized:
-            _save_cred(sanitized)
+        cred.pop("username", None)
+        changed = True
+    if _SAVED_PASSWORD_KEY in cred:
+        cred.pop(_SAVED_PASSWORD_KEY, None)
+        changed = True
+    if changed:
+        if cred:
+            _save_cred(cred)
         else:
             _clear_cred()
     return None
 
 
-def remember_username(username: str) -> None:
+def remember_login_credentials(username: str, password: str = "") -> None:
     name = _normalize_saved_username(username)
     if not name:
-        if not _clear_cred():
-            _clear_saved_username_only()
+        _clear_saved_login_fields()
         return
-    _save_cred({"username": name})
+
+    cred = _load_cred()
+    if not isinstance(cred, dict):
+        cred = {}
+
+    cred["username"] = name
+    password_text = str(password or "")
+    if password_text:
+        cred[_SAVED_PASSWORD_KEY] = password_text
+    else:
+        cred.pop(_SAVED_PASSWORD_KEY, None)
+    _save_cred(cred)
+
+
+def remember_username(username: str) -> None:
+    # Backward-compatibility wrapper.
+    remember_login_credentials(username, "")
 
 
 def friendly_login_message(res: Dict[str, Any]) -> str:

@@ -223,8 +223,8 @@ class LoginWindow(QMainWindow):
         self._apply_input_style(self.login_pw)
 
         # Remember
-        self.remember_cb = QCheckBox("아이디 저장", page)
-        self.remember_cb.setGeometry(50, 328, 200, 22)
+        self.remember_cb = QCheckBox("아이디/비밀번호 저장", page)
+        self.remember_cb.setGeometry(50, 328, 220, 22)
         self.remember_cb.setFont(QFont(fn, 9))
         self.remember_cb.setStyleSheet(f"""
             QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; }}
@@ -282,17 +282,18 @@ class LoginWindow(QMainWindow):
         self._load_saved_login()
 
     def _load_saved_login(self):
-        """Load saved username."""
+        """Load saved username/password."""
         cred = auth_client.get_saved_credentials()
         if cred and cred.get("username"):
             self.login_id.setText(cred["username"])
+            self.login_pw.setText(cred.get("password", ""))
             self.remember_cb.setChecked(True)
 
     def _on_remember_toggled(self, checked: bool):
         if checked:
             return
         try:
-            auth_client.remember_username("")
+            auth_client.remember_login_credentials("", "")
         except Exception:
             logger.exception("아이디 저장 해제 상태를 반영하지 못했습니다.")
 
@@ -486,13 +487,14 @@ class LoginWindow(QMainWindow):
             except Exception:
                 logger.debug("로그인 성공 활동 로그 전송에 실패했습니다.", exc_info=True)
 
-            # Respect explicit opt-in for username persistence only.
+            # Respect explicit opt-in for login form persistence.
             saved_username = self.login_id.text().strip().lower()
+            saved_password = self.login_pw.text()
             try:
                 if self.remember_cb.isChecked():
-                    auth_client.remember_username(saved_username)
+                    auth_client.remember_login_credentials(saved_username, saved_password)
                 else:
-                    auth_client.remember_username("")
+                    auth_client.remember_login_credentials("", "")
             except Exception:
                 logger.exception("아이디 저장 설정을 반영하지 못했습니다.")
 
