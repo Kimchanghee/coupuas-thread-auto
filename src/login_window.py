@@ -480,7 +480,7 @@ class LoginWindow(QMainWindow):
 
         status = result.get("status")
         if status is True:
-            logger.info("로그인 성공: user_id=%s", result.get("id"))
+            logger.info("로그인 성공: user_id=%s", result.get("id") or result.get("user_id"))
             try:
                 auth_client.log_action("ui_login_success", "로그인 창에서 로그인 성공")
             except Exception:

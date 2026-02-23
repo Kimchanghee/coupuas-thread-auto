@@ -967,12 +967,29 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
             _merge_account_state(data)
             if data.get("status") is True:
                 with _AUTH_STATE_LOCK:
-                    _auth_state["user_id"] = data.get("id")
+                    resolved_user_id = (
+                        data.get("id")
+                        if data.get("id") is not None
+                        else data.get("user_id")
+                    )
+                    if resolved_user_id is None:
+                        resolved_user_id = _auth_state.get("user_id")
+                    if resolved_user_id is not None:
+                        _auth_state["user_id"] = resolved_user_id
                     _auth_state["username"] = username
-                    _auth_state["token"] = data.get("key")
-                    _auth_state["token_issued_at"] = time.time()
-                    _auth_state["work_count"] = data.get("work_count", 0)
-                    _auth_state["work_used"] = data.get("work_used", 0)
+                    resolved_token = str(
+                        data.get("key")
+                        or data.get("token")
+                        or _auth_state.get("token")
+                        or ""
+                    ).strip()
+                    if resolved_token:
+                        _auth_state["token"] = resolved_token
+                        _auth_state["token_issued_at"] = time.time()
+                    if isinstance(data.get("work_count"), (int, float)):
+                        _auth_state["work_count"] = int(data.get("work_count"))
+                    if isinstance(data.get("work_used"), (int, float)):
+                        _auth_state["work_used"] = int(data.get("work_used"))
                 _merge_account_state(data)
             elif data.get("status") is False:
                 data["message"] = _normalize_api_message(
