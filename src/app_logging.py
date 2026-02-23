@@ -138,6 +138,10 @@ def get_log_file(app_name: str = "coupuas-thread-auto") -> Path:
 
 
 def _is_allowed_logger_name(name: str) -> bool:
+    allow_all = os.getenv("THREAD_AUTO_LOG_ALL_LOGGERS", "1").strip() != "0"
+    if allow_all:
+        return True
+
     logger_name = str(name or "")
     for prefix in _ALLOWED_LOGGER_PREFIXES:
         if logger_name == prefix or logger_name.startswith(f"{prefix}."):
@@ -289,10 +293,8 @@ def setup_logging(
     is_frozen = bool(getattr(sys, "frozen", False))
     if level:
         log_level_name = level
-    elif is_frozen:
-        # Ignore runtime env overrides in production binaries.
-        log_level_name = "INFO"
     else:
+        # 기본값을 DEBUG로 두어 터미널에서 가능한 모든 로그를 확인할 수 있게 합니다.
         log_level_name = os.getenv("THREAD_AUTO_LOG_LEVEL", "DEBUG")
 
     log_level = _resolve_level(log_level_name)
