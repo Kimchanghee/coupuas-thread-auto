@@ -1,4 +1,6 @@
+import base64
 import hashlib
+import json
 
 import requests
 
@@ -74,15 +76,30 @@ def _reset_auth_state():
             "user_id": None,
             "username": None,
             "token": None,
+            "token_issued_at": None,
+            "phone": None,
             "work_count": 0,
             "work_used": 0,
             "remaining_count": None,
+            "user_type": None,
             "plan_type": None,
             "is_paid": None,
             "subscription_status": None,
             "expires_at": None,
+            "subscription_url": None,
         }
     )
+
+
+def _make_unverified_jwt(payload):
+    header = {"alg": "none", "typ": "JWT"}
+    header_part = base64.urlsafe_b64encode(
+        json.dumps(header, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    payload_part = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii").rstrip("=")
+    return f"{header_part}.{payload_part}."
 
 
 def test_login_payload_includes_required_ip(monkeypatch):
@@ -334,6 +351,44 @@ def test_login_merges_plan_and_expiry_fields(monkeypatch):
     assert state["remaining_count"] == 47
 
 
+def test_heartbeat_merges_user_type_and_marks_paid(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = 1001
+    auth_client._auth_state["token"] = "token-1"
+    monkeypatch.setattr(
+        auth_client,
+        "_session",
+        _FakeSession(_FakeResponse(200, {"status": True, "user_type": "subscriber"})),
+    )
+
+    result = auth_client.heartbeat(current_task="idle")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["user_type"] == "subscriber"
+    assert state["is_paid"] is True
+
+
+def test_heartbeat_payload_includes_ip(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = 1001
+    auth_client._auth_state["token"] = "token-1"
+    session = _FakeSession(_FakeResponse(200, {"status": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.heartbeat(current_task="idle", app_version="1.2.3")
+
+    assert result["status"] is True
+    assert session.calls
+    payload = session.calls[-1]["json"]
+    assert payload["id"] == 1001
+    assert payload["key"] == "token-1"
+    assert payload["ip"] == "10.20.30.40"
+    assert payload["current_task"] == "idle"
+    assert payload["app_version"] == "1.2.3"
+
+
 def test_login_success_keeps_user_id_when_backend_uses_user_id_field(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(
@@ -378,6 +433,106 @@ def test_login_success_accepts_token_field_when_key_missing(monkeypatch):
     assert state["user_id"] == 1002
     assert state["token"] == "token-from-token-field"
     assert auth_client.is_logged_in() is True
+
+
+def test_login_success_without_user_id_falls_back_to_username(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(
+        200,
+        {
+            "status": True,
+            "key": "token-without-user-id",
+        },
+    )
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("paiduser", "SamplePass123")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["user_id"] == "paiduser"
+    assert state["token"] == "token-without-user-id"
+    assert auth_client.is_logged_in() is True
+
+
+def test_login_success_ignores_null_like_user_id_and_uses_username(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(
+        200,
+        {
+            "status": True,
+            "id": "None",
+            "key": "token-null-id",
+        },
+    )
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("paiduser", "SamplePass123")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["user_id"] == "paiduser"
+    assert state["token"] == "token-null-id"
+    assert auth_client.is_logged_in() is True
+
+
+def test_login_extracts_nested_user_id_from_data_data(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(
+        200,
+        {
+            "status": True,
+            "data": {
+                "data": {
+                    "id": "7001",
+                    "username": "paiduser",
+                },
+                "token": "nested-token",
+            },
+        },
+    )
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("paiduser", "SamplePass123")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["user_id"] == "7001"
+    assert state["token"] == "nested-token"
+
+
+def test_get_session_user_and_token_repairs_mismatched_user_id_from_token_sub():
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "wrong-user"
+    auth_client._auth_state["token"] = _make_unverified_jwt({"sub": 321})
+
+    user_id, token = auth_client._get_session_user_and_token()
+
+    assert user_id == 321
+    assert token == auth_client._auth_state["token"]
+    assert auth_client._auth_state["user_id"] == 321
+
+
+def test_create_payapp_checkout_repairs_user_id_before_request(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "wrong-user"
+    auth_client._auth_state["token"] = _make_unverified_jwt({"sub": 777})
+    session = _FakeSession(
+        _FakeResponse(200, {"success": True, "payurl": "https://pay.example/ok"})
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.create_payapp_checkout("01012345678")
+
+    assert result["success"] is True
+    assert session.calls, "payment request should be sent"
+    sent = session.calls[-1]
+    assert sent["headers"]["X-User-ID"] == "777"
+    assert sent["json"]["user_id"] == "777"
+    assert auth_client._auth_state["user_id"] == 777
 
 
 def test_check_username_rejects_empty_input_without_network(monkeypatch):
@@ -522,6 +677,25 @@ def test_friendly_login_message_localizes_unprotected_api_host_lock():
     )
 
     assert "API 호스트 잠금" in result
+
+
+def test_localize_message_for_missing_payapp_userid():
+    result = auth_client._localize_message(
+        "Payment configuration is incomplete. Please contact support. (PAYAPP_USERID missing)"
+    )
+
+    assert "결제 서버 설정" in result
+    assert "PAYAPP_USERID" in result
+
+
+def test_localize_message_for_missing_payapp_linkkey_linkval():
+    result = auth_client._localize_message(
+        "Payment configuration is incomplete. Please contact support. (PAYAPP_LINKKEY/PAYAPP_LINKVAL missing)"
+    )
+
+    assert "결제 서버 설정" in result
+    assert "PAYAPP_LINKKEY" in result
+    assert "PAYAPP_LINKVAL" in result
 
 
 def test_login_network_error_message_is_localized(monkeypatch):

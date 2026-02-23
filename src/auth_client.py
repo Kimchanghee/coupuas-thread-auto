@@ -2,6 +2,7 @@
 """Auth client for dashboard API."""
 
 import json
+import base64
 import logging
 import os
 import re
@@ -51,6 +52,20 @@ API_SERVER_URL = (
     or _DEFAULT_API_SERVER_URL
 ).rstrip("/")
 PROGRAM_TYPE = "stmaker"
+_DEFAULT_FREE_TRIAL_WORK_COUNT = 5
+_FIXED_PAYAPP_PLAN_ID = "stmaker_business_month"
+_ALLOWED_PAYAPP_PAYMENT_TYPES = frozenset(
+    {
+        "card",
+        "phone",
+        "vbank",
+        "kpay",
+        "npay",
+        "sapay",
+        "apay",
+        "tpay",
+    }
+)
 
 if not API_SERVER_URL:
     logger.warning("API_SERVER_URL이 설정되지 않았습니다.")
@@ -379,6 +394,14 @@ def _localize_message(message: str) -> str:
         "server url is not configured. set api_server_url in .env.": "서버 URL이 설정되지 않았습니다. .env 파일의 API_SERVER_URL을 확인해주세요.",
         "https api url is required in production builds.": "배포 버전에서는 HTTPS API URL만 허용됩니다.",
         "only https api url is allowed for security.": "보안 정책으로 HTTPS API URL만 허용됩니다.",
+        "missing auth token": "로그인 인증 정보가 없습니다. 다시 로그인해주세요.",
+        "invalid auth token": "로그인 인증 정보가 유효하지 않습니다. 다시 로그인해주세요.",
+        "session expired or revoked": "로그인 세션이 만료되었거나 해제되었습니다. 다시 로그인해주세요.",
+        "token/user mismatch": "로그인 정보가 현재 계정과 일치하지 않습니다. 다시 로그인해주세요.",
+        "user mismatch": "로그인 정보가 현재 계정과 일치하지 않습니다. 다시 로그인해주세요.",
+        "payment configuration is incomplete. please contact support. (payapp_userid missing)": "결제 서버 설정이 누락되었습니다. 관리자에게 PAYAPP_USERID 설정을 요청해주세요.",
+        "payment configuration is incomplete. please contact support. (payapp_linkkey/payapp_linkval missing)": "결제 서버 설정이 누락되었습니다. 관리자에게 PAYAPP_LINKKEY / PAYAPP_LINKVAL 설정을 요청해주세요.",
+        "payment server configuration error.": "결제 서버 URL 설정(PAYMENT_API_BASE_URL) 오류입니다. 관리자에게 문의해주세요.",
     }
     if normalized_lower in direct_map:
         return direct_map[normalized_lower]
@@ -514,6 +537,10 @@ def _extract_api_message(payload: Dict[str, Any], default_message: str = "") -> 
     if isinstance(message, str) and message.strip():
         return _localize_message(message.strip())
 
+    detail = payload.get("detail")
+    if isinstance(detail, str) and detail.strip():
+        return _localize_message(detail.strip())
+
     error = payload.get("error")
     if isinstance(error, dict):
         error_message = error.get("message")
@@ -611,13 +638,16 @@ _auth_state: Dict[str, Any] = {
     "username": None,
     "token": None,
     "token_issued_at": None,
+    "phone": None,
     "work_count": 0,
     "work_used": 0,
     "remaining_count": None,
+    "user_type": None,
     "plan_type": None,
     "is_paid": None,
     "subscription_status": None,
     "expires_at": None,
+    "subscription_url": None,
 }
 
 
@@ -632,13 +662,16 @@ def _clear_auth_state_memory() -> None:
         _auth_state["username"] = None
         _auth_state["token"] = None
         _auth_state["token_issued_at"] = None
+        _auth_state["phone"] = None
         _auth_state["work_count"] = 0
         _auth_state["work_used"] = 0
         _auth_state["remaining_count"] = None
+        _auth_state["user_type"] = None
         _auth_state["plan_type"] = None
         _auth_state["is_paid"] = None
         _auth_state["subscription_status"] = None
         _auth_state["expires_at"] = None
+        _auth_state["subscription_url"] = None
 
 
 def _is_token_expired() -> bool:
@@ -668,20 +701,31 @@ def _coerce_bool(value: Any) -> Optional[bool]:
     return None
 
 
+def _normalize_session_user_id(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.lower() in {"none", "null", "undefined"}:
+            return None
+        return text
+    return value
+
+
 def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
     if not isinstance(payload, dict):
         return None
 
     candidate_maps = [payload]
-    data = payload.get("data")
-    if isinstance(data, dict):
-        candidate_maps.insert(0, data)
-    account = payload.get("account")
-    if isinstance(account, dict):
-        candidate_maps.insert(0, account)
-    subscription = payload.get("subscription")
-    if isinstance(subscription, dict):
-        candidate_maps.insert(0, subscription)
+    for container_key in ("data", "account", "subscription", "profile", "billing", "payment"):
+        container = payload.get(container_key)
+        if isinstance(container, dict):
+            candidate_maps.insert(0, container)
+            nested_data = container.get("data")
+            if isinstance(nested_data, dict):
+                candidate_maps.insert(0, nested_data)
 
     for mapping in candidate_maps:
         for key in keys:
@@ -691,11 +735,33 @@ def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _extract_token_subject_unverified(token: Any) -> Any:
+    token_text = str(token or "").strip()
+    if not token_text:
+        return None
+    parts = token_text.split(".")
+    if len(parts) < 2:
+        return None
+
+    payload_part = parts[1]
+    padding = "=" * ((4 - (len(payload_part) % 4)) % 4)
+    try:
+        payload_raw = base64.urlsafe_b64decode(f"{payload_part}{padding}".encode("ascii"))
+        payload = json.loads(payload_raw.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return _normalize_session_user_id(payload.get("sub"))
+
+
 def _merge_account_state(payload: Dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         return
     with _AUTH_STATE_LOCK:
-        user_id = _extract_state_value(payload, "user_id", "id")
+        user_id = _normalize_session_user_id(
+            _extract_state_value(payload, "user_id", "id", "uid")
+        )
         if user_id is not None:
             _auth_state["user_id"] = user_id
 
@@ -709,6 +775,10 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
             if token_text:
                 _auth_state["token"] = token_text
                 _auth_state["token_issued_at"] = time.time()
+
+        phone = _extract_state_value(payload, "phone", "contact", "mobile", "phone_number")
+        if isinstance(phone, str) and phone.strip():
+            _auth_state["phone"] = re.sub(r"[^0-9]", "", phone)
 
         work_count = _extract_state_value(payload, "work_count", "quota_total", "limit_count")
         if isinstance(work_count, (int, float)):
@@ -725,6 +795,10 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
                 computed_used = _auth_state["work_count"] - int(remaining_count)
                 if computed_used >= 0:
                     _auth_state["work_used"] = computed_used
+
+        user_type = _extract_state_value(payload, "user_type", "account_type", "role")
+        if isinstance(user_type, str) and user_type.strip():
+            _auth_state["user_type"] = user_type.strip().lower()
 
         plan_type = _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier")
         if isinstance(plan_type, str) and plan_type.strip():
@@ -745,6 +819,18 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
         if isinstance(expires_at, str) and expires_at.strip():
             _auth_state["expires_at"] = expires_at.strip()
 
+        subscription_url = _extract_state_value(
+            payload,
+            "payapp_url",
+            "subscription_url",
+            "checkout_url",
+            "payment_url",
+            "billing_url",
+            "subscribe_url",
+        )
+        if isinstance(subscription_url, str) and subscription_url.strip():
+            _auth_state["subscription_url"] = subscription_url.strip()
+
         is_paid_value = _extract_state_value(payload, "is_paid", "paid", "pro")
         coerced_is_paid = _coerce_bool(is_paid_value)
         if coerced_is_paid is not None:
@@ -754,6 +840,16 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
             plan_value = str(_auth_state.get("plan_type") or "").strip().lower()
             if plan_value:
                 _auth_state["is_paid"] = plan_value not in {"free", "trial", "basic", "starter"}
+
+        if _auth_state.get("is_paid") is None:
+            user_type_value = str(_auth_state.get("user_type") or "").strip().lower()
+            if user_type_value:
+                _auth_state["is_paid"] = user_type_value in {"subscriber", "admin", "paid", "pro", "premium"}
+
+        if _auth_state.get("is_paid") is None:
+            work_count_value = _auth_state.get("work_count")
+            if isinstance(work_count_value, int):
+                _auth_state["is_paid"] = work_count_value < 0
 
         status_value = str(_auth_state.get("subscription_status") or "").strip().lower()
         if status_value in {"expired", "inactive", "cancelled"}:
@@ -780,7 +876,13 @@ def _get_session_user_and_token() -> tuple[Any, Any]:
         _clear_auth_state_memory()
         return None, None
     with _AUTH_STATE_LOCK:
-        return _auth_state.get("user_id"), _auth_state.get("token")
+        user_id = _normalize_session_user_id(_auth_state.get("user_id"))
+        token = _auth_state.get("token")
+        token_user_id = _extract_token_subject_unverified(token)
+        if token_user_id is not None and str(token_user_id) != str(user_id):
+            _auth_state["user_id"] = token_user_id
+            user_id = token_user_id
+        return user_id, token
 
 
 def _build_auth_headers(token: Any) -> Dict[str, str]:
@@ -788,6 +890,213 @@ def _build_auth_headers(token: Any) -> Dict[str, str]:
     if not token_text:
         return {}
     return {"Authorization": f"Bearer {token_text}"}
+
+
+def get_free_trial_work_count(default: int = _DEFAULT_FREE_TRIAL_WORK_COUNT) -> int:
+    raw_value = str(
+        os.getenv("THREAD_AUTO_FREE_TRIAL_WORK_COUNT", str(default))
+    ).strip()
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        parsed = int(default)
+    return max(1, parsed)
+
+
+def _normalize_phone_number(value: Any) -> str:
+    return re.sub(r"[^0-9]", "", str(value or ""))
+
+
+def _resolve_default_payapp_plan_id() -> str:
+    return _FIXED_PAYAPP_PLAN_ID
+
+
+def _resolve_default_payapp_payment_type() -> str:
+    env_value = str(os.getenv("THREAD_AUTO_PAYAPP_PAYMENT_TYPE", "")).strip().lower()
+    if env_value:
+        return env_value
+    return "vbank"
+
+
+def create_payapp_checkout(
+    phone: str,
+    *,
+    plan_id: Optional[str] = None,
+    payment_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
+
+    user_id, token = _get_session_user_and_token()
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+
+    phone_digits = _normalize_phone_number(phone)
+    if not re.fullmatch(r"01[016789]\d{7,8}", phone_digits):
+        return {"success": False, "message": "휴대폰 번호를 정확히 입력해주세요. (예: 01012345678)"}
+
+    resolved_plan_id = _resolve_default_payapp_plan_id()
+    if isinstance(plan_id, str):
+        requested_plan_id = plan_id.strip()
+        if requested_plan_id and requested_plan_id != resolved_plan_id:
+            logger.info(
+                "고정 결제 플랜 적용: requested_plan_id=%s ignored, fixed_plan_id=%s",
+                requested_plan_id,
+                resolved_plan_id,
+            )
+    if not resolved_plan_id:
+        return {"success": False, "message": "결제 플랜 정보가 없습니다."}
+
+    resolved_payment_type = str(payment_type or _resolve_default_payapp_payment_type()).strip().lower()
+    if resolved_payment_type not in _ALLOWED_PAYAPP_PAYMENT_TYPES:
+        return {
+            "success": False,
+            "message": (
+                "지원하지 않는 결제 수단입니다. "
+                f"({resolved_payment_type})"
+            ),
+        }
+
+    headers = _build_auth_headers(token)
+    headers["X-User-ID"] = str(user_id)
+    body = {
+        "user_id": str(user_id),
+        "phone": phone_digits,
+        "plan_id": resolved_plan_id,
+        "payment_type": resolved_payment_type,
+    }
+
+    try:
+        resp = _request_with_retry(
+            "POST",
+            f"{API_SERVER_URL}/payments/payapp/create",
+            json=body,
+            headers=headers,
+            timeout=30,
+            retries=1,
+        )
+        payload = _safe_json(resp)
+
+        if resp.status_code == 200:
+            _merge_account_state(payload)
+            if payload.get("success") is False:
+                return {
+                    "success": False,
+                    "message": _extract_api_message(payload, "결제 요청에 실패했습니다."),
+                    "plan_id": resolved_plan_id,
+                }
+            if not payload:
+                payload = {"success": False, "message": "결제 서버 응답이 비었습니다."}
+            payload.setdefault("success", bool(payload.get("payurl")))
+            payload.setdefault("plan_id", resolved_plan_id)
+            return payload
+
+        if resp.status_code == 422:
+            return {
+                "success": False,
+                "message": _extract_validation_message(resp, "입력값이 올바르지 않습니다."),
+                "plan_id": resolved_plan_id,
+            }
+        if resp.status_code in {401, 403}:
+            return {
+                "success": False,
+                "message": _extract_api_message(
+                    payload,
+                    "로그인 세션이 만료되었습니다. 다시 로그인해주세요.",
+                ),
+                "plan_id": resolved_plan_id,
+            }
+        if resp.status_code == 429:
+            return {
+                "success": False,
+                "message": _normalize_api_message(
+                    payload=payload,
+                    status_code=resp.status_code,
+                    context="payment",
+                    default_message="결제 요청이 많아 잠시 제한되었습니다.",
+                ),
+                "plan_id": resolved_plan_id,
+            }
+        return {
+            "success": False,
+            "message": _extract_api_message(payload, f"결제 서버 오류 ({resp.status_code})"),
+            "plan_id": resolved_plan_id,
+        }
+    except requests.exceptions.RequestException as e:
+        logger.warning("PayApp 결제 요청 실패: %s", e)
+        return {
+            "success": False,
+            "message": _request_error_message(
+                e,
+                default_message="결제 요청 중 통신 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            ),
+            "plan_id": resolved_plan_id,
+        }
+    except Exception:
+        logger.exception("PayApp 결제 요청 중 오류가 발생했습니다.")
+        return {
+            "success": False,
+            "message": "결제 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            "plan_id": resolved_plan_id,
+        }
+
+
+def get_payment_status(payment_id: str) -> Dict[str, Any]:
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
+
+    payment_id = str(payment_id or "").strip()
+    if not payment_id:
+        return {"success": False, "message": "결제 ID가 필요합니다."}
+
+    user_id, token = _get_session_user_and_token()
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+
+    headers = _build_auth_headers(token)
+    headers["X-User-ID"] = str(user_id)
+
+    try:
+        resp = _request_with_retry(
+            "GET",
+            f"{API_SERVER_URL}/payments/status",
+            params={"payment_id": payment_id},
+            headers=headers,
+            timeout=10,
+            retries=1,
+        )
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            _merge_account_state(payload)
+            payload.setdefault("success", True)
+            return payload
+        if resp.status_code in {401, 403}:
+            return {
+                "success": False,
+                "message": _extract_api_message(
+                    payload,
+                    "로그인 세션이 만료되었습니다. 다시 로그인해주세요.",
+                ),
+            }
+        if resp.status_code == 404:
+            return {"success": False, "message": "결제 정보를 찾을 수 없습니다."}
+        return {
+            "success": False,
+            "message": _extract_api_message(payload, f"결제 상태 조회 실패 ({resp.status_code})"),
+        }
+    except requests.exceptions.RequestException as e:
+        return {
+            "success": False,
+            "message": _request_error_message(
+                e,
+                default_message="결제 상태 조회 중 통신 오류가 발생했습니다.",
+            ),
+        }
+    except Exception:
+        logger.exception("결제 상태 조회 중 오류가 발생했습니다.")
+        return {"success": False, "message": "결제 상태 조회 중 오류가 발생했습니다."}
 
 
 def check_username(username: str) -> Dict[str, Any]:
@@ -977,16 +1286,13 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
             _merge_account_state(data)
             if data.get("status") is True:
                 with _AUTH_STATE_LOCK:
-                    resolved_user_id = (
+                    resolved_user_id = _normalize_session_user_id(
                         data.get("id")
                         if data.get("id") is not None
                         else data.get("user_id")
                     )
                     if resolved_user_id is None:
-                        resolved_user_id = _auth_state.get("user_id")
-                    if resolved_user_id is not None:
-                        _auth_state["user_id"] = resolved_user_id
-                    _auth_state["username"] = username
+                        resolved_user_id = _normalize_session_user_id(_auth_state.get("user_id"))
                     resolved_token = str(
                         data.get("key")
                         or data.get("token")
@@ -996,6 +1302,13 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                     if resolved_token:
                         _auth_state["token"] = resolved_token
                         _auth_state["token_issued_at"] = time.time()
+                    if resolved_user_id is None:
+                        resolved_user_id = _extract_token_subject_unverified(resolved_token)
+                    if resolved_user_id is None:
+                        # Legacy fallback when backend omits user id and token sub.
+                        resolved_user_id = username
+                    _auth_state["user_id"] = resolved_user_id
+                    _auth_state["username"] = username
                     if isinstance(data.get("work_count"), (int, float)):
                         _auth_state["work_count"] = int(data.get("work_count"))
                     if isinstance(data.get("work_used"), (int, float)):
@@ -1083,6 +1396,7 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
             json={
                 "id": user_id,
                 "key": token,
+                "ip": _resolve_client_ip(),
                 "current_task": current_task,
                 "app_version": app_version,
             },
@@ -1093,7 +1407,24 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
             payload = _safe_json(resp)
             _merge_account_state(payload)
             return payload
-        return {"status": False}
+        payload = _safe_json(resp)
+        if resp.status_code == 422:
+            return {
+                "status": False,
+                "message": _extract_validation_message(
+                    resp,
+                    "세션 확인 요청 형식이 올바르지 않습니다.",
+                ),
+            }
+        if resp.status_code in {401, 403}:
+            return {
+                "status": False,
+                "message": _extract_api_message(
+                    payload,
+                    "로그인 세션이 만료되었습니다. 다시 로그인해주세요.",
+                ),
+            }
+        return {"status": False, "message": _extract_api_message(payload, f"세션 확인 실패 ({resp.status_code})")}
     except Exception:
         return {"status": False}
 

@@ -138,8 +138,8 @@ def goto_threads_with_fallback(
                 short = _short_error_text(exc)
                 errors.append(f"{url} -> {short}")
                 if logger is not None:
-                    logger.warning(
-                        "Threads 접속 실패 (%s/%s): %s (%s)",
+                    logger.debug(
+                        "Threads 접속 재시도 (%s/%s): %s (%s)",
                         attempt + 1,
                         max_retry + 1,
                         url,
@@ -149,5 +149,11 @@ def goto_threads_with_fallback(
                     time.sleep(0.4 * (attempt + 1))
 
     last_error = errors[-1] if errors else "원인을 확인할 수 없습니다."
+    if logger is not None:
+        logger.warning(
+            "Threads 접속 실패: 모든 후보 도메인 시도 후 실패 (%s개 URL, URL당 %s회 시도). 마지막 오류: %s",
+            len(candidates),
+            max_retry + 1,
+            last_error,
+        )
     raise RuntimeError(f"Threads 접속 실패: {last_error}")
-

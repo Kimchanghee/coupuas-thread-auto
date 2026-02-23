@@ -38,7 +38,7 @@ class AutoUpdater:
     MINIMUM_SAFE_VERSION = "2.2.3"
     # Release CI injects the production signer thumbprint into this constant at build time.
     DEFAULT_TRUSTED_SIGNER_THUMBPRINTS = set()
-    DEFAULT_TRUSTED_PUBLISHERS = {"paro partners"}
+    DEFAULT_TRUSTED_PUBLISHERS = {"ym"}
 
     def __init__(self, current_version: str):
         self.current_version = str(current_version or "").lstrip("v")

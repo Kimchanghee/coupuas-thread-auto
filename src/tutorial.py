@@ -8,8 +8,9 @@
 """
 from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox, QFrame
 from PyQt6.QtCore import Qt, QRectF, QRect, QPoint
-from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion, QPainterPath
+from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion, QPainterPath, QFont
 
+from src.app_icon import apply_window_icon
 from src.theme import (
     Colors, Radius, Gradients,
     close_btn_style, ghost_btn_style, accent_btn_style,
@@ -196,6 +197,7 @@ class TutorialDialog(QDialog):
         self.setWindowTitle("사용법 안내")
         self.setFixedSize(self.DLG_W, self.DLG_H)
         self.setModal(True)
+        apply_window_icon(self)
 
         self._page_index = 0
         self._pages = TUTORIAL_PAGES
@@ -256,8 +258,9 @@ class TutorialDialog(QDialog):
             dot.setStyleSheet(f"background-color: {Colors.TEXT_MUTED}; border-radius: {dot_sz // 2}px;")
             self._dot_labels.append(dot)
 
-        self.prev_btn = QPushButton("\u2190 이전", self)
-        self.prev_btn.setGeometry(24, 580, 100, 36)
+        self.prev_btn = QPushButton("이전", self)
+        prev_w = max(104, self.prev_btn.fontMetrics().horizontalAdvance(self.prev_btn.text()) + 36)
+        self.prev_btn.setGeometry(24, 580, prev_w, 36)
         self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.prev_btn.setStyleSheet(
             ghost_btn_style() + "\nQPushButton { font-size: 13pt; }"
@@ -265,7 +268,8 @@ class TutorialDialog(QDialog):
         self.prev_btn.clicked.connect(self._prev_page)
 
         self.skip_btn = QPushButton("건너뛰기", self)
-        self.skip_btn.setGeometry(W // 2 - 55, 580, 110, 36)
+        skip_w = max(110, self.skip_btn.fontMetrics().horizontalAdvance(self.skip_btn.text()) + 30)
+        self.skip_btn.setGeometry((W - skip_w) // 2, 580, skip_w, 36)
         self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
@@ -277,7 +281,8 @@ class TutorialDialog(QDialog):
         self.skip_btn.clicked.connect(self.accept)
 
         self.next_btn = QPushButton("다음 \u2192", self)
-        self.next_btn.setGeometry(W - 124, 580, 100, 36)
+        next_w = max(104, self.next_btn.fontMetrics().horizontalAdvance(self.next_btn.text()) + 32)
+        self.next_btn.setGeometry(W - 24 - next_w, 580, next_w, 36)
         self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
@@ -629,34 +634,49 @@ class TutorialOverlay(QWidget):
         # 건너뛰기 버튼 (카드 안)
         self.skip_btn = QPushButton("건너뛰기", self.tooltip_card)
         self.skip_btn.setFixedHeight(34)
+        self.skip_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
         self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.skip_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {Colors.TEXT_MUTED};
-                border: none; border-radius: {Radius.MD}; font-size: 12pt;
+                border: none; border-radius: {Radius.MD};
+                padding: 0 10px;
             }}
             QPushButton:hover {{ color: {Colors.TEXT_SECONDARY}; }}
         """)
         self.skip_btn.clicked.connect(self._close_overlay)
 
         # 이전 버튼 (카드 안)
-        self.prev_btn = QPushButton("\u2190 이전", self.tooltip_card)
+        self.prev_btn = QPushButton("이전", self.tooltip_card)
         self.prev_btn.setFixedHeight(34)
+        self.prev_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Medium))
         self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.prev_btn.setStyleSheet(
-            ghost_btn_style() + "\nQPushButton { font-size: 12pt; border: none; }"
-        )
+        self.prev_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER_SUBTLE};
+                border-radius: {Radius.MD};
+                padding: 0 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {Colors.BG_ELEVATED};
+                border-color: {Colors.BORDER_LIGHT};
+                color: {Colors.TEXT_PRIMARY};
+            }}
+        """)
         self.prev_btn.clicked.connect(self._prev_step)
 
         # 다음 버튼 (카드 안)
         self.next_btn = QPushButton("다음", self.tooltip_card)
         self.next_btn.setFixedHeight(34)
+        self.next_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
         self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.next_btn.setStyleSheet(f"""
             QPushButton {{
                 background: {Gradients.ACCENT_BTN}; color: #FFFFFF;
                 border: none; border-radius: {Radius.MD};
-                font-size: 12pt; font-weight: 600;
+                padding: 0 12px;
             }}
             QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
             QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
@@ -711,17 +731,26 @@ class TutorialOverlay(QWidget):
 
         # 버튼 영역 (구분선 아래)
         btn_y = sep_y + 14
-        btn_w = 80
+        btn_gap = 10
+
+        skip_w = max(92, self.skip_btn.fontMetrics().horizontalAdvance(self.skip_btn.text()) + 24)
+        prev_w = max(92, self.prev_btn.fontMetrics().horizontalAdvance(self.prev_btn.text()) + 24)
+        next_w = max(92, self.next_btn.fontMetrics().horizontalAdvance(self.next_btn.text()) + 24)
+
+        total_w = skip_w + prev_w + next_w + (btn_gap * 2)
+        if total_w > inner_w:
+            fit_w = max(82, (inner_w - (btn_gap * 2)) // 3)
+            skip_w = prev_w = next_w = fit_w
 
         # 건너뛰기: 좌측
-        self.skip_btn.setGeometry(pad, btn_y, btn_w, 34)
+        self.skip_btn.setGeometry(pad, btn_y, skip_w, 34)
 
         # 이전: 중앙
-        prev_x = pad + (inner_w - btn_w) // 2
-        self.prev_btn.setGeometry(prev_x, btn_y, btn_w, 34)
+        prev_x = pad + (inner_w - prev_w) // 2
+        self.prev_btn.setGeometry(prev_x, btn_y, prev_w, 34)
 
         # 다음: 우측
-        self.next_btn.setGeometry(pad + inner_w - btn_w, btn_y, btn_w, 34)
+        self.next_btn.setGeometry(pad + inner_w - next_w, btn_y, next_w, 34)
 
         # 체크박스 (마지막 단계에서만 표시, 버튼 아래)
         check_y = btn_y + 42

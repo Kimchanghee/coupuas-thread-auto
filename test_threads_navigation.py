@@ -27,6 +27,22 @@ class _FakePage:
         return item
 
 
+class _FakeLogger:
+    def __init__(self):
+        self.infos = []
+        self.debugs = []
+        self.warnings = []
+
+    def info(self, msg, *args):
+        self.infos.append(msg % args if args else msg)
+
+    def debug(self, msg, *args):
+        self.debugs.append(msg % args if args else msg)
+
+    def warning(self, msg, *args):
+        self.warnings.append(msg % args if args else msg)
+
+
 def test_goto_threads_with_fallback_uses_next_domain_when_first_fails(monkeypatch):
     monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URL", "https://www.threads.net")
     monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URLS", "https://www.threads.com")
@@ -64,3 +80,52 @@ def test_friendly_threads_navigation_error_localizes_http_500():
 def test_is_browser_launch_error_detects_missing_executable():
     assert is_browser_launch_error("Browser executable doesn't exist at C:\\foo")
 
+
+def test_goto_threads_with_fallback_does_not_warn_when_eventually_success(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URL", "https://www.threads.net")
+    monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URLS", "https://www.threads.com")
+
+    logger = _FakeLogger()
+    page = _FakePage(
+        [
+            RuntimeError("net::ERR_HTTP_RESPONSE_CODE_FAILURE"),
+            _FakeResponse(200),
+        ]
+    )
+
+    resolved = goto_threads_with_fallback(
+        page,
+        path="/login",
+        retries_per_url=0,
+        logger=logger,
+    )
+
+    assert resolved == "https://www.threads.com/login"
+    assert len(logger.warnings) == 0
+    assert len(logger.debugs) >= 1
+
+
+def test_goto_threads_with_fallback_warns_once_when_all_domains_fail(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URL", "https://www.threads.net")
+    monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URLS", "https://www.threads.com")
+
+    logger = _FakeLogger()
+    page = _FakePage(
+        [
+            RuntimeError("net::ERR_HTTP_RESPONSE_CODE_FAILURE"),
+            RuntimeError("net::ERR_HTTP_RESPONSE_CODE_FAILURE"),
+        ]
+    )
+
+    try:
+        goto_threads_with_fallback(
+            page,
+            path="/login",
+            retries_per_url=0,
+            logger=logger,
+        )
+        assert False, "Expected RuntimeError"
+    except RuntimeError as exc:
+        assert "Threads 접속 실패" in str(exc)
+
+    assert len(logger.warnings) == 1

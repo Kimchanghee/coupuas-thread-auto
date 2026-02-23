@@ -13,6 +13,7 @@ from src.theme import (
     accent_btn_style, ghost_btn_style, progress_bar_style,
     dialog_style, header_title_style
 )
+from src.app_icon import apply_window_icon
 from src.auto_updater import AutoUpdater
 from src.ui_messages import ask_yes_no, show_error, show_warning
 
@@ -79,6 +80,7 @@ class UpdateDialog(QDialog):
         self.setWindowTitle("업데이트 확인")
         self.setFixedSize(520, 450)
         self.setModal(True)
+        apply_window_icon(self)
 
         self._build_ui()
         self._check_for_updates()

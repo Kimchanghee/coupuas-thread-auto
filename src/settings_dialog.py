@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
+from src.app_icon import apply_window_icon
 from src.theme import (
     Colors, Radius, Spacing, Gradients, Typography,
     section_title_style, section_icon_style, header_title_style,
@@ -136,6 +137,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("설정")
         self.setFixedSize(self.DLG_W, self.DLG_H)
         self.setModal(True)
+        apply_window_icon(self)
 
         self._closed = False
         self._browser_cancel = threading.Event()
@@ -187,7 +189,6 @@ class SettingsDialog(QDialog):
 
         self._build_api_section()
         self._build_upload_section()
-        self._build_security_section()
         self._build_threads_section()
 
         self.content_layout.addStretch()
@@ -267,15 +268,6 @@ class SettingsDialog(QDialog):
 
         self.content_layout.addWidget(section)
 
-    def _build_security_section(self):
-        section = SectionCard("보안 설정", "*")
-        layout = section.content_layout()
-
-        self.allow_ai_fallback_check = QCheckBox("AI 자동 업로드 fallback 허용 (권장: 비활성화)")
-        layout.addWidget(self.allow_ai_fallback_check)
-
-        self.content_layout.addWidget(section)
-
     def _build_threads_section(self):
         section = SectionCard("Threads 계정", "*")
         layout = section.content_layout()
@@ -342,7 +334,6 @@ class SettingsDialog(QDialog):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
-        self.allow_ai_fallback_check.setChecked(bool(getattr(config, "allow_ai_fallback", False)))
         self.username_edit.setText(config.instagram_username)
 
     def _save_settings(self):
@@ -358,7 +349,6 @@ class SettingsDialog(QDialog):
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
-        config.allow_ai_fallback = self.allow_ai_fallback_check.isChecked()
         config.instagram_username = self.username_edit.text().strip()
 
         config.save()

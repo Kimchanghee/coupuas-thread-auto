@@ -1,12 +1,12 @@
 #ifndef MyAppVersion
-#define MyAppVersion "0.0.0"
+#define MyAppVersion "2.3.18"
 #endif
 
 [Setup]
 AppId={{1E191169-A1B1-4E4F-8AB9-B2D048A76E8C}
 AppName=쇼츠스레드메이커
 AppVersion={#MyAppVersion}
-AppPublisher=Paro Partners
+AppPublisher=와이엠
 DefaultDirName={autopf}\CoupangThreadAuto
 DefaultGroupName=쇼츠스레드메이커
 DisableProgramGroupPage=yes

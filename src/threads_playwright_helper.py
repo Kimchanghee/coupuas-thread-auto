@@ -47,7 +47,7 @@ class ThreadsPlaywrightHelper:
 
     # ========== 로그인 ==========
 
-    def check_login_status(self) -> bool:
+    def _check_login_status_legacy(self) -> bool:
         """로그인 상태 확인 (명시적 인증 신호 기반)."""
         try:
             # 방법 1: 로그인 입력창 존재 여부 (명확한 로그아웃 신호)
@@ -91,6 +91,75 @@ class ThreadsPlaywrightHelper:
 
         except Exception as e:
             print(f"  로그인 확인 중 오류: {e}")
+            return False
+
+    def _has_auth_cookie(self) -> bool:
+        """Return True when browser context has authenticated session cookies."""
+        try:
+            cookies = self.page.context.cookies()
+        except Exception:
+            return False
+
+        if not isinstance(cookies, list):
+            return False
+
+        auth_cookie_names = {"sessionid", "ds_user_id"}
+        for cookie in cookies:
+            if not isinstance(cookie, dict):
+                continue
+            name = str(cookie.get("name") or "").strip().lower()
+            domain = str(cookie.get("domain") or "").strip().lower()
+            if name in auth_cookie_names and (
+                "threads.net" in domain
+                or "threads.com" in domain
+                or "instagram.com" in domain
+            ):
+                return True
+        return False
+
+    def check_login_status(self) -> bool:
+        """Check login status with retries to reduce false negatives."""
+        try:
+            for attempt in range(5):
+                try:
+                    self.page.wait_for_load_state("domcontentloaded", timeout=3000)
+                except Exception:
+                    pass
+
+                if self._has_auth_cookie():
+                    print("  로그인 확인 (세션 쿠키 감지)")
+                    return True
+
+                url = str(self.page.url or "").lower()
+                login_input = self.page.locator(
+                    'input[name="username"], input[type="password"], input[autocomplete*="username"]'
+                ).count()
+                if login_input > 0 and ("login" in url or "/accounts/" in url):
+                    print("  미로그인 상태 (로그인 입력창 감지)")
+                    return False
+
+                if self.page.locator("article").count() > 0:
+                    print("  로그인 확인 (피드 article 감지)")
+                    return True
+                if self.page.locator("nav").count() > 0:
+                    print("  로그인 확인 (네비게이션 감지)")
+                    return True
+                if self.page.locator('a[href*="/compose"], button[aria-label*="New"], a[aria-label*="Profile"]').count() > 0:
+                    print("  로그인 확인 (작성/프로필 UI 감지)")
+                    return True
+
+                if attempt < 4:
+                    time.sleep(1.2)
+
+            if self._has_auth_cookie():
+                print("  로그인 확인 (재시도 후 쿠키 감지)")
+                return True
+
+            print("  로그인 상태 불확실 -> 미로그인으로 처리")
+            return False
+
+        except Exception as e:
+            print(f"  로그인 상태 확인 중 오류: {e}")
             return False
 
     def direct_login(self, username: str, password: str) -> bool:

@@ -12,9 +12,9 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
 
 setup(
     name="ceo-thread-auto",
-    version="2.3.10",
+    version="2.3.18",
     description="Thread auto uploader",
-    author="Paro Partners",
+    author="와이엠",
     python_requires=">=3.9",
     packages=find_packages(include=["src", "src.*"]),
     include_package_data=True,

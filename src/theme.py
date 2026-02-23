@@ -580,15 +580,17 @@ def global_stylesheet():
         QPushButton {{
             background: {g.ACCENT_BTN};
             color: #FFFFFF;
-            border: none;
+            border: 1px solid rgba(59, 123, 255, 0.55);
             border-radius: {r.MD};
             /* This app uses many fixed geometries; keep padding modest to avoid clipped text. */
-            padding: 6px 14px;
-            font-weight: 600;
+            padding: 7px 14px;
+            min-height: 30px;
+            font-weight: 700;
             font-size: 12pt;
         }}
         QPushButton:hover {{
             background: {g.ACCENT_BTN_HOVER};
+            border-color: rgba(59, 123, 255, 0.85);
         }}
         QPushButton:pressed {{
             background: {g.ACCENT_BTN_PRESSED};
@@ -600,16 +602,18 @@ def global_stylesheet():
 
         /* Ghost / Secondary */
         QPushButton[class="ghost"] {{
-            background-color: transparent;
-            color: {c.TEXT_SECONDARY};
-            border: 1px solid {c.BORDER};
-            padding: 6px 12px;
-            font-size: 9pt;
-        }}
-        QPushButton[class="ghost"]:hover {{
             background-color: {c.BG_ELEVATED};
             color: {c.TEXT_PRIMARY};
-            border-color: {c.BORDER_LIGHT};
+            border: 1px solid {c.BORDER_LIGHT};
+            border-radius: {r.MD};
+            padding: 7px 12px;
+            font-size: 9pt;
+            font-weight: 700;
+        }}
+        QPushButton[class="ghost"]:hover {{
+            background-color: {c.BG_HOVER};
+            color: #FFFFFF;
+            border-color: {c.ACCENT};
         }}
 
         /* Outline variants */

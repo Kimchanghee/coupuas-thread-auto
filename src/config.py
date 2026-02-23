@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class Config:
-    _SECRET_KEYS = ("gemini_api_key", "threads_api_key", "instagram_password")
+    _SECRET_KEYS = ("gemini_api_key", "gemini_api_keys", "threads_api_key", "instagram_password")
+    _MAX_GEMINI_KEYS = 10
 
     def __init__(self):
         self._lock = threading.RLock()
@@ -47,17 +48,27 @@ class Config:
 
             self._load_from_dict(data)
             self._load_secrets()
+            self._sync_gemini_key_state()
 
             # Backward-compat migration for old plaintext values.
             migrated = False
             legacy_plaintext_present = False
             for key in self._SECRET_KEYS:
+                if key == "gemini_api_keys":
+                    legacy_values = self._normalize_gemini_keys(data.get(key))
+                    if legacy_values:
+                        legacy_plaintext_present = True
+                    if not self.gemini_api_keys and legacy_values:
+                        self.gemini_api_keys = legacy_values
+                        migrated = True
+                    continue
                 legacy_value = str(data.get(key, "") or "").strip()
                 if legacy_value:
                     legacy_plaintext_present = True
                 if not getattr(self, key, "") and legacy_value:
                     setattr(self, key, legacy_value)
                     migrated = True
+            self._sync_gemini_key_state()
             if migrated or legacy_plaintext_present:
                 self.save()
             elif not self.config_file.exists():
@@ -68,6 +79,7 @@ class Config:
         self.instagram_username = str(data.get("instagram_username", "") or "")
         # Password is loaded from secure secrets storage and migrated in load().
         self.instagram_password = ""
+        self.gemini_api_keys = self._normalize_gemini_keys(data.get("gemini_api_keys"))
         self.media_download_dir = str(data.get("media_download_dir", "media") or "media")
         self.prefer_video = bool(data.get("prefer_video", True))
         self.allow_ai_fallback = bool(data.get("allow_ai_fallback", False))
@@ -76,6 +88,7 @@ class Config:
 
     def _set_defaults(self):
         self.gemini_api_key = ""
+        self.gemini_api_keys = []
         self.upload_interval = 60
         self.instagram_username = ""
         self.instagram_password = ""
@@ -96,14 +109,45 @@ class Config:
                 return
             for key in self._SECRET_KEYS:
                 raw_value = payload.get(key)
+                if key == "gemini_api_keys":
+                    if isinstance(raw_value, list):
+                        plain_keys = []
+                        for item in raw_value:
+                            if not isinstance(item, str):
+                                continue
+                            plain = unprotect_secret(item).strip()
+                            if plain:
+                                plain_keys.append(plain)
+                        self.gemini_api_keys = self._normalize_gemini_keys(plain_keys)
+                    elif isinstance(raw_value, str):
+                        plain = unprotect_secret(raw_value).strip()
+                        self.gemini_api_keys = self._normalize_gemini_keys([plain])
+                    continue
                 if isinstance(raw_value, str):
                     setattr(self, key, unprotect_secret(raw_value))
         except Exception:
             logger.exception("보안 설정 파일을 불러오지 못했습니다.")
+        self._sync_gemini_key_state()
 
     def _save_secrets(self):
         payload = {}
         for key in self._SECRET_KEYS:
+            if key == "gemini_api_keys":
+                values = self._normalize_gemini_keys(getattr(self, key, []))
+                if not values:
+                    continue
+                protected_values = []
+                for value in values:
+                    protected = protect_secret(value, "shorts_thread_maker")
+                    if protected is None:
+                        logger.warning("보안 저장소를 사용할 수 없어 비밀값 '%s' 저장을 건너뜁니다.", key)
+                        protected_values = []
+                        break
+                    protected_values.append(protected)
+                if protected_values:
+                    payload[key] = protected_values
+                continue
+
             value = str(getattr(self, key, "") or "").strip()
             if not value:
                 continue
@@ -141,6 +185,7 @@ class Config:
     def save(self):
         """Save non-sensitive config and encrypted secrets."""
         with self._lock:
+            self._sync_gemini_key_state()
             data = {
                 "upload_interval": self.upload_interval,
                 "instagram_username": self.instagram_username,
@@ -172,6 +217,46 @@ class Config:
                     except Exception:
                         pass
             self._save_secrets()
+
+    @classmethod
+    def _normalize_gemini_keys(cls, values):
+        if isinstance(values, str):
+            source = [values]
+        elif isinstance(values, (list, tuple)):
+            source = list(values)
+        else:
+            source = []
+
+        normalized = []
+        seen = set()
+        for value in source:
+            key = str(value or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            normalized.append(key)
+            if len(normalized) >= cls._MAX_GEMINI_KEYS:
+                break
+        return normalized
+
+    def _sync_gemini_key_state(self):
+        keys = self._normalize_gemini_keys(getattr(self, "gemini_api_keys", []))
+        primary = str(getattr(self, "gemini_api_key", "") or "").strip()
+        if primary and primary not in keys:
+            keys.insert(0, primary)
+        keys = self._normalize_gemini_keys(keys)
+        self.gemini_api_keys = keys
+        self.gemini_api_key = keys[0] if keys else ""
+
+    def get_gemini_api_keys(self):
+        with self._lock:
+            self._sync_gemini_key_state()
+            return list(self.gemini_api_keys)
+
+    def set_gemini_api_keys(self, keys):
+        with self._lock:
+            self.gemini_api_keys = self._normalize_gemini_keys(keys)
+            self.gemini_api_key = self.gemini_api_keys[0] if self.gemini_api_keys else ""
 
 
 config = Config()

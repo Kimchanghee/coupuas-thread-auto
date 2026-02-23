@@ -63,8 +63,9 @@ from PyQt6.QtGui import (
 
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
+from src.app_icon import apply_app_icon_to_application
 
-VERSION = "v2.3.17"
+VERSION = "v2.3.18"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -134,9 +135,7 @@ def _resolve_runtime_path(relative_path: Path) -> Path:
 def _apply_app_icon(app: QApplication) -> None:
     """Apply application icon when available."""
     try:
-        icon_path = _resolve_runtime_path(APP_ICON_REL_PATH)
-        if icon_path.exists():
-            app.setWindowIcon(QIcon(str(icon_path)))
+        apply_app_icon_to_application(app)
     except Exception:
         pass
 
@@ -340,8 +339,21 @@ def main():
     def on_login_success(result):
         logger.info("로그인 성공 콜백 수신")
         login_win.hide()
-        app._main_window = _create_main_window(login_win, result)
-        logger.info("메인 윈도우 생성 및 표시 완료")
+        from src.login_loading_dialog import LoginLoadingDialog
+
+        loading_dialog = LoginLoadingDialog(parent=login_win)
+        app._login_loading_dialog = loading_dialog
+
+        def _open_main_window():
+            try:
+                app._main_window = _create_main_window(login_win, result)
+                logger.info("메인 윈도우 생성 및 표시 완료")
+            finally:
+                loading_dialog.close()
+                app._login_loading_dialog = None
+
+        loading_dialog.show()
+        loading_dialog.start(on_finished=_open_main_window)
     login_win.login_success.connect(on_login_success)
     login_win.show()
     splash.finish(login_win)

@@ -20,6 +20,7 @@ from PyQt6.QtCore import QRectF
 from src.theme import (Colors, Typography, Radius, Gradients,
                        input_style, accent_btn_style, window_control_btn_style,
                        muted_text_style)
+from src.app_icon import apply_window_icon
 from src import auth_client
 from src.ui_messages import ask_yes_no, show_info, show_warning
 
@@ -78,6 +79,7 @@ class LoginWindow(QMainWindow):
         self.setWindowTitle("쇼츠스레드메이커 - 로그인")
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        apply_window_icon(self)
 
         central = QWidget()
         self.setCentralWidget(central)
