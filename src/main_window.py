@@ -215,6 +215,8 @@ class MainWindow(QMainWindow):
         self._link_url_row_map = {}  # url -> table row index
         self._active_pipeline = None
         self._session_expiry_notified = False
+        self._redirecting_to_login = False
+        self._force_close_for_relogin = False
         logger.info("메인 윈도우 초기화 완료")
 
         self.signals = Signals()
@@ -2387,6 +2389,7 @@ class MainWindow(QMainWindow):
                 if not self._session_expiry_notified:
                     show_warning(self, "세션 만료", "로그인 세션이 만료되었거나 로그아웃되었습니다. 다시 로그인해주세요.")
                     self._session_expiry_notified = True
+                    self._redirect_to_login_window("세션이 만료되었습니다. 다시 로그인해주세요.")
                 return
 
             task = "uploading" if self.is_running else "idle"
@@ -2417,6 +2420,44 @@ class MainWindow(QMainWindow):
             )
             self._server_label.setText("서버 연결: 오류")
             self.status_label.setText("연결 오류")
+
+    def _redirect_to_login_window(self, status_message: str = ""):
+        """세션 만료 시 로그인 창으로 복귀하고 현재 메인 창을 정리한다."""
+        if self._redirecting_to_login or self._closed:
+            return
+        self._redirecting_to_login = True
+        logger.warning("세션 만료로 로그인 창 복귀를 시작합니다.")
+
+        try:
+            if hasattr(self, "_heartbeat_timer") and self._heartbeat_timer is not None:
+                self._heartbeat_timer.stop()
+        except Exception:
+            logger.exception("세션 만료 복귀 중 하트비트 타이머 중지 실패")
+
+        try:
+            from src import auth_client
+            auth_client.logout()
+        except Exception:
+            logger.debug("세션 만료 복귀 중 로그아웃 API 호출에 실패했습니다.", exc_info=True)
+
+        login_win = getattr(self, "_login_ref", None)
+        if login_win is not None:
+            try:
+                login_win.login_pw.clear()
+                if status_message:
+                    login_win.login_status.setText(status_message)
+                login_win.show()
+                login_win.raise_()
+                login_win.activateWindow()
+            except Exception:
+                logger.exception("세션 만료 복귀 중 로그인 창 표시에 실패했습니다.")
+
+        app = QApplication.instance()
+        if app is not None and getattr(app, "_main_window", None) is self:
+            app._main_window = None
+
+        self._force_close_for_relogin = True
+        self.close()
 
     def _do_logout(self):
         """로그아웃 처리 후 앱 종료."""
@@ -2535,7 +2576,9 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """윈도우 종료 시 로그아웃 처리."""
         logger.info("종료 이벤트 호출; is_running=%s", self.is_running)
-        if self.is_running:
+        forced_relogin = bool(getattr(self, "_force_close_for_relogin", False))
+
+        if self.is_running and not forced_relogin:
             if not ask_yes_no(
                 self,
                 "종료 확인",
@@ -2543,6 +2586,8 @@ class MainWindow(QMainWindow):
             ):
                 event.ignore()
                 return
+            self.stop_upload()
+        elif self.is_running and forced_relogin:
             self.stop_upload()
         self._closed = True
         self._browser_cancel.set()
@@ -2552,10 +2597,11 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("하트비트 타이머 중지 실패")
 
-        try:
-            from src import auth_client
-            auth_client.logout()
-        except Exception:
-            pass
+        if not forced_relogin:
+            try:
+                from src import auth_client
+                auth_client.logout()
+            except Exception:
+                pass
         event.accept()
 
