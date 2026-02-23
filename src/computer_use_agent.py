@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import logging
 import os
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -30,6 +32,7 @@ from src.secure_storage import protect_secret, unprotect_secret
 
 SCREEN_WIDTH = 1440
 SCREEN_HEIGHT = 900
+logger = logging.getLogger(__name__)
 
 
 def _denormalize_x(x: int, screen_width: int) -> int:
@@ -78,6 +81,7 @@ class ComputerUseAgent:
         "CONTROL+X",
         "CONTROL+ENTER",
     }
+    PLAYWRIGHT_INSTALL_TIMEOUT_SEC = 300
 
     def __init__(self, api_key: Optional[str] = None, headless: bool = False, profile_dir: str = ".threads_profile"):
         """
@@ -226,18 +230,95 @@ class ComputerUseAgent:
         return True
 
     # ------------------------------------------------------------------ setup
+    def _launch_browser(self, channel: Optional[str] = None):
+        launch_kwargs: Dict[str, Any] = {
+            "headless": self.headless,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+            ],
+        }
+        if channel:
+            launch_kwargs["channel"] = channel
+        return self.playwright.chromium.launch(**launch_kwargs)
+
+    @staticmethod
+    def _is_missing_browser_error(exc: Exception) -> bool:
+        text = str(exc or "").lower()
+        markers = (
+            "executable doesn't exist",
+            "browser executable",
+            "ms-playwright",
+            "playwright install",
+            "failed to launch",
+        )
+        return any(marker in text for marker in markers)
+
+    @classmethod
+    def _install_playwright_chromium(cls) -> bool:
+        if getattr(sys, "frozen", False):
+            return False
+
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=cls.PLAYWRIGHT_INSTALL_TIMEOUT_SEC,
+                check=True,
+            )
+            stdout_text = str(completed.stdout or "").strip()
+            if stdout_text:
+                logger.info("Playwright install stdout: %s", stdout_text[:300])
+            return True
+        except Exception as exc:
+            logger.warning("Automatic Playwright install failed: %s", exc)
+            return False
+
     def start_browser(self):
         if self.context:
             return
 
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-            ],
-        )
+        launch_errors: List[Exception] = []
+        browser = None
+
+        for channel in ("chrome", None):
+            try:
+                browser = self._launch_browser(channel=channel)
+                break
+            except Exception as exc:
+                launch_errors.append(exc)
+                logger.warning(
+                    "Browser launch failed (channel=%s): %s",
+                    channel or "chromium",
+                    exc,
+                )
+
+        if browser is None and launch_errors and self._is_missing_browser_error(launch_errors[-1]):
+            if self._install_playwright_chromium():
+                try:
+                    browser = self._launch_browser(channel=None)
+                    logger.info("Browser launch recovered after Playwright Chromium install.")
+                except Exception as exc:
+                    launch_errors.append(exc)
+
+        if browser is None:
+            try:
+                self.playwright.stop()
+            except Exception:
+                pass
+            self.playwright = None
+
+            last_error = launch_errors[-1] if launch_errors else RuntimeError("unknown browser launch failure")
+            hint = (
+                "Install Google Chrome or run `python -m playwright install chromium`."
+                if self._is_missing_browser_error(last_error)
+                else "Check browser security policy and local runtime environment."
+            )
+            raise RuntimeError(f"Failed to start browser. {hint} Error: {last_error}") from last_error
+
+        self.browser = browser
 
         context_kwargs: Dict[str, Any] = {
             "viewport": {"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},

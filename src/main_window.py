@@ -1506,6 +1506,8 @@ class MainWindow(QMainWindow):
 
     def _get_profile_dir(self):
         username = self.username_edit.text().strip()
+        if not username:
+            username = str(getattr(config, "instagram_username", "") or "").strip()
         if username:
             profile_name = self._sanitize_profile_name(username)
             return f".threads_profile_{profile_name}"
@@ -1680,12 +1682,9 @@ class MainWindow(QMainWindow):
 
     def _open_threads_login(self):
         username = self.username_edit.text().strip()
-        if not username:
-            show_warning(self, "알림", "먼저 계정 이름을 입력하세요.")
-            return
-
-        config.instagram_username = username
-        config.save()
+        if username:
+            config.instagram_username = username
+            config.save()
 
         self.threads_login_btn.setEnabled(False)
         self.threads_login_btn.setText("여는 중...")
@@ -1694,6 +1693,11 @@ class MainWindow(QMainWindow):
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
         profile_dir = self._get_profile_dir()
+        logger.info(
+            "Threads login browser launch requested: profile=%s username_provided=%s",
+            profile_dir,
+            bool(username),
+        )
 
         def open_browser():
             try:
