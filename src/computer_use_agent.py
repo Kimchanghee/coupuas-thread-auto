@@ -53,6 +53,8 @@ class ComputerUseAgent:
     ALLOWED_NAVIGATION_HOSTS = {
         "threads.net",
         "www.threads.net",
+        "threads.com",
+        "www.threads.com",
         "instagram.com",
         "www.instagram.com",
         "facebook.com",

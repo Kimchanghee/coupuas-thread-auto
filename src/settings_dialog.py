@@ -23,6 +23,7 @@ from src.theme import (
 )
 from src.ui_messages import show_info
 from src.events import LoginStatusEvent
+from src.threads_navigation import goto_threads_with_fallback, friendly_threads_navigation_error
 
 
 # ─── Section Card ────────────────────────────────────────────
@@ -406,7 +407,12 @@ class SettingsDialog(QDialog):
                     profile_dir=profile_dir
                 )
                 agent.start_browser()
-                agent.page.goto("https://www.threads.net/login", wait_until="domcontentloaded", timeout=30000)
+                goto_threads_with_fallback(
+                    agent.page,
+                    path="/login",
+                    timeout=30000,
+                    retries_per_url=1,
+                )
 
                 import time
                 for _ in range(300):
@@ -425,7 +431,7 @@ class SettingsDialog(QDialog):
                     pass
 
             except Exception as e:
-                print(f"브라우저 오류: {e}")
+                print(f"브라우저 오류: {friendly_threads_navigation_error(str(e))}")
 
         thread = threading.Thread(target=open_browser, daemon=True)
         thread.start()
@@ -458,7 +464,12 @@ class SettingsDialog(QDialog):
                 agent.start_browser()
 
                 try:
-                    agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
+                    goto_threads_with_fallback(
+                        agent.page,
+                        path="/",
+                        timeout=15000,
+                        retries_per_url=1,
+                    )
                     import time
                     time.sleep(2)
 
@@ -474,7 +485,7 @@ class SettingsDialog(QDialog):
                         pass
 
             except Exception as e:
-                print(f"로그인 확인 오류: {e}")
+                print(f"로그인 확인 오류: {friendly_threads_navigation_error(str(e))}")
                 return False, None
 
         def run_check():

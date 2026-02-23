@@ -12,6 +12,7 @@ from typing import Optional, List
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
+from src.threads_navigation import goto_threads_with_fallback
 
 
 class ThreadsPlaywrightHelper:
@@ -218,7 +219,12 @@ class ThreadsPlaywrightHelper:
             # 방법 2: 설정 > 계정 페이지에서 확인
             print("  설정 페이지에서 사용자명 확인...")
             try:
-                self.page.goto("https://www.threads.net/settings/account", wait_until="domcontentloaded", timeout=10000)
+                goto_threads_with_fallback(
+                    self.page,
+                    path="/settings/account",
+                    timeout=10000,
+                    retries_per_url=1,
+                )
                 time.sleep(2)
 
                 # 페이지 텍스트에서 @ 로 시작하는 사용자명 찾기
@@ -283,7 +289,12 @@ class ThreadsPlaywrightHelper:
             print("  로그아웃 시도...")
 
             # 설정 페이지로 이동
-            self.page.goto("https://www.threads.net/settings", wait_until="domcontentloaded", timeout=15000)
+            goto_threads_with_fallback(
+                self.page,
+                path="/settings",
+                timeout=15000,
+                retries_per_url=1,
+            )
             time.sleep(2)
 
             # 로그아웃 버튼 찾기
@@ -328,7 +339,12 @@ class ThreadsPlaywrightHelper:
 
             # 프로필 메뉴에서 로그아웃 시도
             print("  프로필 메뉴에서 로그아웃 시도...")
-            self.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
+            goto_threads_with_fallback(
+                self.page,
+                path="/",
+                timeout=15000,
+                retries_per_url=1,
+            )
             time.sleep(2)
 
             # 프로필 아이콘 클릭
@@ -393,7 +409,12 @@ class ThreadsPlaywrightHelper:
                 if self.logout():
                     print("  로그아웃 성공 - 설정된 계정으로 로그인 시도")
                     # 로그인 페이지로 이동
-                    self.page.goto("https://www.threads.net/login", wait_until="domcontentloaded", timeout=15000)
+                    goto_threads_with_fallback(
+                        self.page,
+                        path="/login",
+                        timeout=15000,
+                        retries_per_url=1,
+                    )
                     time.sleep(2)
                 else:
                     print("  자동 로그아웃 실패 - 수동으로 로그아웃 후 다시 시도해주세요")

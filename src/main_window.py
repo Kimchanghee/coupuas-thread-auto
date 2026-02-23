@@ -31,6 +31,11 @@ from src.theme import (Colors, Typography, Radius, Gradients,
                        hint_text_style, section_title_style)
 from src.ui_messages import ask_yes_no, show_error, show_info, show_warning
 from src.events import LoginStatusEvent
+from src.threads_navigation import (
+    goto_threads_with_fallback,
+    friendly_threads_navigation_error,
+    is_browser_launch_error,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1714,8 +1719,14 @@ class MainWindow(QMainWindow):
                     profile_dir=profile_dir
                 )
                 agent.start_browser()
-                agent.page.goto("https://www.threads.net/login", wait_until="domcontentloaded", timeout=30000)
-                self.signals.threads_login_launch.emit(True, "")
+                opened_url = goto_threads_with_fallback(
+                    agent.page,
+                    path="/login",
+                    timeout=30000,
+                    retries_per_url=1,
+                    logger=logger,
+                )
+                self.signals.threads_login_launch.emit(True, opened_url)
                 launch_notified = True
 
                 import time
@@ -1756,18 +1767,29 @@ class MainWindow(QMainWindow):
 
         if success:
             self._update_login_status("pending", "브라우저가 열렸습니다. 로그인 후 닫아주세요.")
-            self.signals.log.emit("Threads 로그인 브라우저가 열렸습니다.")
+            opened_url = str(detail or "").strip()
+            if opened_url:
+                self.signals.log.emit(f"Threads 로그인 브라우저가 열렸습니다: {opened_url}")
+            else:
+                self.signals.log.emit("Threads 로그인 브라우저가 열렸습니다.")
             return
 
         reason = str(detail or "").strip() or "원인을 확인할 수 없습니다."
+        logger.warning("Threads 로그인 브라우저 실행 실패 원본: %s", reason)
         self._update_login_status("error", "브라우저 실행 실패")
-        self.signals.log.emit(f"Threads 로그인 브라우저 실행 실패: {reason}")
+        if is_browser_launch_error(reason):
+            user_message = (
+                "브라우저 실행에 실패했습니다.\n"
+                "Google Chrome 또는 Microsoft Edge 설치 상태를 확인한 뒤 다시 시도해주세요."
+            )
+        else:
+            user_message = friendly_threads_navigation_error(reason)
+        self.signals.log.emit(f"Threads 로그인 브라우저 실행 실패: {user_message}")
         show_warning(
             self,
             "로그인 브라우저 오류",
             "Threads 로그인 브라우저를 열지 못했습니다.\n"
-            "Google Chrome이 설치되어 있는지 확인한 뒤 다시 시도해주세요.\n\n"
-            f"원인: {reason}",
+            f"{user_message}",
         )
 
     def _check_login_status(self):
@@ -1789,7 +1811,13 @@ class MainWindow(QMainWindow):
                 agent.start_browser()
 
                 try:
-                    agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
+                    goto_threads_with_fallback(
+                        agent.page,
+                        path="/",
+                        timeout=15000,
+                        retries_per_url=1,
+                        logger=logger,
+                    )
                     import time
                     time.sleep(2)
 
@@ -2058,7 +2086,13 @@ class MainWindow(QMainWindow):
             agent.start_browser()
 
             try:
-                agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
+                goto_threads_with_fallback(
+                    agent.page,
+                    path="/",
+                    timeout=15000,
+                    retries_per_url=1,
+                    logger=logger,
+                )
                 time.sleep(3)
             except Exception:
                 logger.exception("Threads 초기 페이지 이동 실패")
@@ -2168,7 +2202,13 @@ class MainWindow(QMainWindow):
                 reservation_supported = False
 
                 try:
-                    agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
+                    goto_threads_with_fallback(
+                        agent.page,
+                        path="/",
+                        timeout=15000,
+                        retries_per_url=1,
+                        logger=logger,
+                    )
                     time.sleep(2)
 
                     posts_data = [
