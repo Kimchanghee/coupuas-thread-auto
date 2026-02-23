@@ -406,8 +406,58 @@ def _localize_message(message: str) -> str:
 
     if "too many login attempts" in normalized_lower or "too many requests" in normalized_lower:
         return "요청이 많습니다. 잠시 후 다시 시도해주세요."
+    if "httpsconnectionpool" in normalized_lower or "httpconnectionpool" in normalized_lower:
+        if "read timed out" in normalized_lower or "timed out" in normalized_lower:
+            return "서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요."
+        return "인증 서버 연결에 실패했습니다. 네트워크 또는 방화벽 설정을 확인해주세요."
+    if "name or service not known" in normalized_lower or "getaddrinfo failed" in normalized_lower:
+        return "인증 서버 주소를 확인할 수 없습니다. DNS 또는 네트워크 상태를 확인해주세요."
+    if "max retries exceeded" in normalized_lower:
+        return "인증 서버에 여러 번 연결을 시도했지만 실패했습니다. 잠시 후 다시 시도해주세요."
+    if "certificate verify failed" in normalized_lower or "ssl" in normalized_lower:
+        return "보안 연결(SSL/TLS) 검증에 실패했습니다. 네트워크 보안 설정을 확인해주세요."
 
     return text
+
+
+def _extract_host_from_exception(exc: BaseException) -> str:
+    text = str(exc or "")
+    match = re.search(r"host='([^']+)'", text)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def _request_error_message(exc: BaseException, *, default_message: str) -> str:
+    host = _extract_host_from_exception(exc)
+    host_suffix = f" ({host})" if host else ""
+
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "서버 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요."
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return f"인증 서버 연결에 실패했습니다{host_suffix}. 네트워크 또는 방화벽 설정을 확인해주세요."
+    if isinstance(exc, requests.exceptions.SSLError):
+        return "보안 연결(SSL/TLS)에 실패했습니다. 네트워크 보안 설정을 확인해주세요."
+    if isinstance(exc, requests.exceptions.RequestException):
+        return _localize_message(str(exc)) or default_message
+    return default_message
+
+
+def _request_with_retry(method: str, url: str, *, retries: int = 1, retry_wait: float = 0.35, **kwargs):
+    last_exc: Optional[BaseException] = None
+    for attempt in range(retries + 1):
+        try:
+            if method == "GET":
+                return _session.get(url, **kwargs)
+            return _session.post(url, **kwargs)
+        except requests.exceptions.ConnectionError as exc:
+            last_exc = exc
+            if attempt >= retries:
+                break
+            time.sleep(retry_wait * (attempt + 1))
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("요청 재시도 처리 중 알 수 없는 오류가 발생했습니다.")
 
 
 def _extract_validation_message(resp: requests.Response, default_message: str) -> str:
@@ -739,10 +789,12 @@ def check_username(username: str) -> Dict[str, Any]:
     if not username:
         return {"available": False, "message": "아이디를 입력해주세요."}
     try:
-        resp = _session.get(
+        resp = _request_with_retry(
+            "GET",
             f"{API_SERVER_URL}/user/check-username/{username}",
             params={"program_type": PROGRAM_TYPE},
             timeout=5,
+            retries=1,
         )
         payload = _safe_json(resp)
         if resp.status_code == 200:
@@ -752,10 +804,18 @@ def check_username(username: str) -> Dict[str, Any]:
                 return payload
             return {"available": False, "message": "아이디 확인 응답이 비었습니다."}
         return {"available": False, "message": f"서버 오류 ({resp.status_code})"}
-    except requests.exceptions.ConnectionError:
-        return {"available": False, "message": "서버 연결 실패"}
-    except Exception as e:
-        return {"available": False, "message": f"오류: {str(e)}"}
+    except requests.exceptions.RequestException as e:
+        logger.warning("아이디 중복 확인 요청 실패: %s", e)
+        return {
+            "available": False,
+            "message": _request_error_message(
+                e,
+                default_message="아이디 확인 중 통신 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            ),
+        }
+    except Exception:
+        logger.exception("아이디 중복 확인 처리 중 예기치 못한 오류가 발생했습니다.")
+        return {"available": False, "message": "아이디 확인 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
 
 def register(
@@ -804,10 +864,12 @@ def register(
     }
 
     try:
-        resp = _session.post(
+        resp = _request_with_retry(
+            "POST",
             f"{API_SERVER_URL}/user/register/request",
             json=body,
             timeout=30,
+            retries=1,
         )
         payload = _safe_json(resp)
 
@@ -854,11 +916,18 @@ def register(
                 ),
             }
         return {"success": False, "message": f"서버 오류 ({resp.status_code})"}
-    except requests.exceptions.ConnectionError:
-        return {"success": False, "message": "서버 연결에 실패했습니다."}
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
+        logger.warning("회원가입 요청 실패: %s", e)
+        return {
+            "success": False,
+            "message": _request_error_message(
+                e,
+                default_message="회원가입 중 통신 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            ),
+        }
+    except Exception:
         logger.exception("회원가입 처리 중 오류가 발생했습니다.")
-        return {"success": False, "message": f"오류 발생: {str(e)}"}
+        return {"success": False, "message": "회원가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
 
 def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
@@ -884,10 +953,12 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     }
 
     try:
-        resp = _session.post(
+        resp = _request_with_retry(
+            "POST",
             f"{API_SERVER_URL}/user/login/god",
             json=body,
             timeout=15,
+            retries=1,
         )
         if resp.status_code == 200:
             data = _safe_json(resp)
@@ -929,11 +1000,18 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                 ),
             }
         return {"status": False, "message": f"서버 오류 ({resp.status_code})"}
-    except requests.exceptions.ConnectionError:
-        return {"status": False, "message": "서버 연결에 실패했습니다."}
-    except Exception as e:
+    except requests.exceptions.RequestException as e:
+        logger.warning("로그인 요청 실패: %s", e)
+        return {
+            "status": False,
+            "message": _request_error_message(
+                e,
+                default_message="로그인 중 통신 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            ),
+        }
+    except Exception:
         logger.exception("로그인 처리 중 오류가 발생했습니다.")
-        return {"status": False, "message": f"오류: {str(e)}"}
+        return {"status": False, "message": "로그인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
 
 def logout() -> bool:

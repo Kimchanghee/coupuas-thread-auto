@@ -1,5 +1,7 @@
 import hashlib
 
+import requests
+
 from src import auth_client
 
 
@@ -29,6 +31,32 @@ class _FakeSession:
         )
         return self.response
 
+
+class _SequenceSession:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    def _next(self):
+        if not self.outcomes:
+            raise RuntimeError("outcomes is empty")
+        value = self.outcomes.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def post(self, url, json=None, timeout=None, headers=None):
+        self.calls.append(
+            {
+                "method": "POST",
+                "url": url,
+                "json": json,
+                "timeout": timeout,
+                "headers": headers or {},
+            }
+        )
+        return self._next()
+
     def get(self, url, params=None, timeout=None):
         self.calls.append(
             {
@@ -38,8 +66,7 @@ class _FakeSession:
                 "timeout": timeout,
             }
         )
-        return self.response
-
+        return self._next()
 
 def _reset_auth_state():
     auth_client._auth_state.update(
@@ -410,3 +437,40 @@ def test_friendly_login_message_localizes_unprotected_api_host_lock():
     )
 
     assert "API 호스트 잠금" in result
+
+
+def test_login_network_error_message_is_localized(monkeypatch):
+    _reset_auth_state()
+    session = _SequenceSession(
+        [
+            requests.exceptions.ReadTimeout(
+                "HTTPSConnectionPool(host='ssmaker-auth-api-m2hewckpba-uc.a.run.app', port=443): Read timed out."
+            )
+        ]
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("sampleuser", "SamplePass123")
+
+    assert result["status"] is False
+    assert "HTTPSConnectionPool" not in result["message"]
+    assert "지연" in result["message"] or "통신" in result["message"]
+
+
+def test_check_username_retries_once_on_connection_error(monkeypatch):
+    _reset_auth_state()
+    session = _SequenceSession(
+        [
+            requests.exceptions.ConnectionError(
+                "HTTPSConnectionPool(host='ssmaker-auth-api-m2hewckpba-uc.a.run.app', port=443): Max retries exceeded"
+            ),
+            _FakeResponse(200, {"available": True, "message": "사용 가능한 아이디입니다."}),
+        ]
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.check_username("sampleuser")
+
+    assert result["available"] is True
+    assert len(session.calls) == 2
