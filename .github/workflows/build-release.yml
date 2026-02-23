@@ -96,6 +96,8 @@ jobs:
       - name: Build installer
         env:
           COUPUAS_APP_VERSION: ${{ steps.get_version.outputs.VERSION }}
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: 1
         run: |
           python build_installer.py
 
