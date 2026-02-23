@@ -197,7 +197,7 @@ def test_register_rejects_short_password(monkeypatch):
     )
 
     assert result["success"] is False
-    assert "8자" in result["message"]
+    assert str(auth_client.MIN_REGISTER_PASSWORD_LENGTH) in result["message"]
     assert len(session.calls) == 0
 
 
@@ -211,8 +211,21 @@ def test_login_rejects_short_password(monkeypatch):
     result = auth_client.login("shortuser", "1")
 
     assert result["status"] is False
-    assert "8자" in result["message"]
+    assert str(auth_client.MIN_LOGIN_PASSWORD_LENGTH) in result["message"]
     assert len(session.calls) == 0
+
+
+def test_login_accepts_legacy_6_digit_password(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(200, {"status": "EU001", "message": "EU001"})
+    session = _FakeSession(response)
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("legacyuser", "123456")
+
+    assert result["status"] == "EU001"
+    assert len(session.calls) == 1
 
 
 def test_register_429_normalizes_rate_limit_message(monkeypatch):
@@ -335,3 +348,44 @@ def test_remember_username_empty_clears_saved_value(monkeypatch):
     auth_client.remember_username("")
 
     assert state["cleared"] is True
+
+
+def test_get_saved_credentials_normalizes_username(monkeypatch):
+    state = {}
+    monkeypatch.setattr(auth_client, "_load_cred", lambda: {"username": "Test_User"})
+
+    def _fake_save(payload):
+        state["saved"] = payload
+
+    monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
+
+    result = auth_client.get_saved_credentials()
+
+    assert result == {"username": "test_user"}
+    assert state["saved"] == {"username": "test_user"}
+
+
+def test_get_saved_credentials_rejects_invalid_username(monkeypatch):
+    state = {"cleared": False}
+    monkeypatch.setattr(auth_client, "_load_cred", lambda: {"username": "dpapi:corrupted-token"})
+
+    def _fake_clear():
+        state["cleared"] = True
+
+    monkeypatch.setattr(auth_client, "_clear_cred", _fake_clear)
+
+    result = auth_client.get_saved_credentials()
+
+    assert result is None
+    assert state["cleared"] is True
+
+
+def test_friendly_login_message_localizes_unprotected_api_host_lock():
+    result = auth_client.friendly_login_message(
+        {
+            "status": False,
+            "message": "Detected unprotected API host lock file in production mode.",
+        }
+    )
+
+    assert "API 호스트 잠금" in result

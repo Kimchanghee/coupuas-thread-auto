@@ -73,6 +73,7 @@ class Signals(QObject):
     link_status = pyqtSignal(str, str, str)  # url, status, product_name
     queue_progress = pyqtSignal(str)
     reset_steps = pyqtSignal()
+    threads_login_launch = pyqtSignal(bool, str)  # success, detail
 
 
 # ─── Badge ──────────────────────────────────────────────────
@@ -214,7 +215,7 @@ class MainWindow(QMainWindow):
         self._link_url_row_map = {}  # url -> table row index
         self._active_pipeline = None
         self._session_expiry_notified = False
-        logger.info("MainWindow initialized")
+        logger.info("메인 윈도우 초기화 완료")
 
         self.signals = Signals()
         self.signals.log.connect(self._append_log)
@@ -227,6 +228,7 @@ class MainWindow(QMainWindow):
         self.signals.link_status.connect(self._update_link_table_status)
         self.signals.queue_progress.connect(self._set_queue_progress)
         self.signals.reset_steps.connect(self._reset_steps)
+        self.signals.threads_login_launch.connect(self._on_threads_login_launch_result)
 
         self._current_page = 0
         # Apply global stylesheet before building widgets so sizeHint/metrics are correct
@@ -251,7 +253,7 @@ class MainWindow(QMainWindow):
         # Load settings into widgets
         self._load_settings()
 
-        logger.info("MainWindow UI setup complete")
+        logger.info("메인 윈도우 UI 구성 완료")
 
     @property
     def is_running(self):
@@ -1229,7 +1231,7 @@ class MainWindow(QMainWindow):
         )
 
         # Status label
-        self.status_label = QLabel("Ready", bar)
+        self.status_label = QLabel("준비", bar)
         self.status_label.setGeometry(34, 6, 600, 20)
         self.status_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
@@ -1377,24 +1379,24 @@ class MainWindow(QMainWindow):
         if not clean_msg:
             return
 
-        logger.info("UI_LOG %s", clean_msg)
+        logger.info("UI 로그 %s", clean_msg)
 
         safe_msg = html.escape(clean_msg)
         lower_msg = clean_msg.lower()
         color = Colors.TEXT_SECONDARY
-        tag = "INFO"
+        tag = "정보"
         tag_color = Colors.INFO
-        if any(kw in lower_msg for kw in ("error", "fail", "exception", "cancel")):
+        if any(kw in lower_msg for kw in ("error", "fail", "exception", "cancel", "오류", "실패", "취소", "중단")):
             color = Colors.ERROR
-            tag = "ERROR"
+            tag = "오류"
             tag_color = Colors.ERROR
-        elif any(kw in lower_msg for kw in ("success", "done", "complete")):
+        elif any(kw in lower_msg for kw in ("success", "done", "complete", "성공", "완료")):
             color = Colors.SUCCESS
-            tag = "SUCCESS"
+            tag = "성공"
             tag_color = Colors.SUCCESS
-        elif any(kw in lower_msg for kw in ("warn", "wait", "running", "start")):
+        elif any(kw in lower_msg for kw in ("warn", "wait", "running", "start", "경고", "대기", "시작", "진행")):
             color = Colors.WARNING
-            tag = "WARN"
+            tag = "경고"
             tag_color = Colors.WARNING
 
         self.log_text.append(
@@ -1404,13 +1406,13 @@ class MainWindow(QMainWindow):
         )
 
     def _set_status(self, message):
-        logger.info("Status updated: %s", message)
+        logger.info("상태 갱신: %s", message)
         self.status_label.setText(message)
 
         lower_message = str(message).lower()
         if any(kw in lower_message for kw in ("error", "fail", "cancel", "오류", "취소", "실패", "중단")):
             self.status_badge.update_style(Colors.ERROR, str(message)[:14])
-        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success", "완료", "대기")):
+        elif any(kw in lower_message for kw in ("done", "ready", "complete", "success", "완료", "대기", "연결")):
             self.status_badge.update_style(Colors.SUCCESS, str(message)[:14])
         else:
             self.status_badge.update_style(Colors.WARNING, str(message)[:14])
@@ -1436,13 +1438,13 @@ class MainWindow(QMainWindow):
         pass
 
     def _on_finished(self, results):
-        logger.info("Upload finished: %s", results)
+        logger.info("업로드 완료: %s", results)
         self._active_pipeline = None
         self.is_running = False
         self.start_btn.setEnabled(True)
         self.add_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
-        self.status_badge.update_style(Colors.SUCCESS, "Ready")
+        self.status_badge.update_style(Colors.SUCCESS, "준비")
         self._sidebar_status_label.setText("완료")
         self._reset_steps()
 
@@ -1546,12 +1548,12 @@ class MainWindow(QMainWindow):
         config.save()
 
         if self.is_running:
-            logger.info("settings saved during active run; pipeline reinit deferred")
+            logger.info("실행 중 설정 저장됨; 파이프라인 재초기화는 보류합니다")
         else:
             self.pipeline = CoupangPartnersPipeline(config.gemini_api_key)
 
         show_info(self, "저장 완료", "설정이 저장되었습니다.")
-        logger.info("settings saved")
+        logger.info("설정 저장 완료")
 
     def _update_account_display(self):
         """Update header and settings page with auth data."""
@@ -1673,7 +1675,7 @@ class MainWindow(QMainWindow):
 
     def open_settings(self):
         """Switch to settings page (page 2) instead of opening dialog."""
-        logger.info("open_settings invoked")
+        logger.info("설정 화면 열기 호출")
         self._switch_page(2)
 
     # ────────────────────────────────────────────────────────
@@ -1694,12 +1696,13 @@ class MainWindow(QMainWindow):
         cancel_event = self._browser_cancel
         profile_dir = self._get_profile_dir()
         logger.info(
-            "Threads login browser launch requested: profile=%s username_provided=%s",
+            "Threads 로그인 브라우저 실행 요청: profile=%s username_provided=%s",
             profile_dir,
             bool(username),
         )
 
         def open_browser():
+            launch_notified = False
             try:
                 from src.computer_use_agent import ComputerUseAgent
 
@@ -1710,6 +1713,8 @@ class MainWindow(QMainWindow):
                 )
                 agent.start_browser()
                 agent.page.goto("https://www.threads.net/login", wait_until="domcontentloaded", timeout=30000)
+                self.signals.threads_login_launch.emit(True, "")
+                launch_notified = True
 
                 import time
                 for _ in range(300):
@@ -1728,19 +1733,40 @@ class MainWindow(QMainWindow):
                     pass
 
             except Exception as e:
-                logger.exception("browser error during Threads login flow")
+                logger.exception("Threads 로그인 브라우저 흐름에서 오류 발생")
+                if not launch_notified:
+                    self.signals.threads_login_launch.emit(False, str(e))
 
         thread = threading.Thread(target=open_browser, daemon=True)
         thread.start()
-
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(3000, self._restore_login_btn)
 
     def _restore_login_btn(self):
         if self._closed:
             return
         self.threads_login_btn.setEnabled(True)
         self.threads_login_btn.setText("Threads 로그인")
+
+    def _on_threads_login_launch_result(self, success: bool, detail: str):
+        if self._closed:
+            return
+
+        self._restore_login_btn()
+
+        if success:
+            self._update_login_status("pending", "브라우저가 열렸습니다. 로그인 후 닫아주세요.")
+            self.signals.log.emit("Threads 로그인 브라우저가 열렸습니다.")
+            return
+
+        reason = str(detail or "").strip() or "원인을 확인할 수 없습니다."
+        self._update_login_status("error", "브라우저 실행 실패")
+        self.signals.log.emit(f"Threads 로그인 브라우저 실행 실패: {reason}")
+        show_warning(
+            self,
+            "로그인 브라우저 오류",
+            "Threads 로그인 브라우저를 열지 못했습니다.\n"
+            "Google Chrome이 설치되어 있는지 확인한 뒤 다시 시도해주세요.\n\n"
+            f"원인: {reason}",
+        )
 
     def _check_login_status(self):
         self.check_login_btn.setEnabled(False)
@@ -1777,7 +1803,7 @@ class MainWindow(QMainWindow):
                         pass
 
             except Exception as e:
-                logger.exception("login status check failed")
+                logger.exception("로그인 상태 확인 실패")
                 return False, None
 
         def run_check():
@@ -1838,28 +1864,28 @@ class MainWindow(QMainWindow):
         return False
 
     def start_upload(self):
-        logger.info("start_upload invoked")
+        logger.info("업로드 시작 호출")
         content = self.links_text.toPlainText().strip()
         if not content:
-            logger.warning("start_upload blocked: empty content")
+            logger.warning("업로드 시작 차단: 내용이 비어 있습니다")
             show_warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
             return
 
         api_key = config.gemini_api_key
         if not api_key or len(api_key.strip()) < 10:
-            logger.warning("start_upload blocked: invalid API key")
+            logger.warning("업로드 시작 차단: API 키가 유효하지 않습니다")
             show_error(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
             return
 
         link_data = self._extract_links(content)
         if not link_data:
-            logger.warning("start_upload blocked: no valid links found")
+            logger.warning("업로드 시작 차단: 유효한 링크가 없습니다")
             show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
             return
 
         config.load()
         interval = max(config.upload_interval, 30)
-        logger.info("start_upload prepared: links=%d interval=%d", len(link_data), interval)
+        logger.info("업로드 준비 완료: links=%d interval=%d", len(link_data), interval)
 
         try:
             from src import auth_client
@@ -1870,11 +1896,11 @@ class MainWindow(QMainWindow):
                     if isinstance(work_check, dict)
                     else "작업량 확인에 실패했습니다."
                 )
-                logger.warning("start_upload blocked: work unavailable message=%s", quota_message)
+                logger.warning("업로드 시작 차단: 작업 가능 수량 없음 message=%s", quota_message)
                 show_warning(self, "작업 제한", quota_message)
                 return
         except Exception:
-            logger.exception("start_upload blocked: quota pre-check failed")
+            logger.exception("업로드 시작 차단: 작업량 사전 점검 실패")
             show_warning(self, "작업 제한", "작업량 확인에 실패했습니다. 잠시 후 다시 시도해주세요.")
             return
 
@@ -1885,7 +1911,7 @@ class MainWindow(QMainWindow):
             f"업로드 간격: {_format_interval(interval)}\n\n"
             "(실행 중에 링크를 추가할 수 있습니다)",
         ):
-            logger.info("start_upload cancelled by user")
+            logger.info("업로드 시작이 사용자에 의해 취소되었습니다")
             return
 
         self.is_running = True
@@ -1939,19 +1965,19 @@ class MainWindow(QMainWindow):
             daemon=True,
         )
         thread.start()
-        logger.info("upload worker thread started")
+        logger.info("업로드 작업 스레드 시작")
 
     def add_links_to_queue(self):
-        logger.info("add_links_to_queue invoked")
+        logger.info("링크 큐 추가 호출")
         content = self.links_text.toPlainText().strip()
         if not content:
-            logger.warning("add_links_to_queue blocked: empty content")
+            logger.warning("링크 큐 추가 차단: 내용이 비어 있습니다")
             show_warning(self, "알림", "추가할 링크를 입력하세요.")
             return
 
         link_data = self._extract_links(content)
         if not link_data:
-            logger.warning("add_links_to_queue blocked: no valid links found")
+            logger.warning("링크 큐 추가 차단: 유효한 링크가 없습니다")
             show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
             return
 
@@ -1984,16 +2010,16 @@ class MainWindow(QMainWindow):
                     self._link_url_row_map[url] = row
 
         if added > 0:
-            logger.info("add_links_to_queue: added=%d queue=%d", added, self.link_queue.qsize())
+            logger.info("링크 큐 추가 결과: added=%d queue=%d", added, self.link_queue.qsize())
             self.signals.log.emit(f"{added}개 새 링크 추가됨 (대기열: {self.link_queue.qsize()})")
             clean_links = "\n".join([item[0] for item in link_data])
             self.links_text.setPlainText(clean_links)
         else:
-            logger.info("add_links_to_queue: no new links added")
+            logger.info("링크 큐 추가 결과: 새 링크가 없습니다")
             show_info(self, "알림", "모든 링크가 이미 대기열에 있거나 처리되었습니다.")
 
     def _run_upload_queue(self, interval, worker_config, pipeline_ref):
-        logger.info("upload queue worker started: interval=%s", interval)
+        logger.info("업로드 큐 작업자 시작: interval=%s", interval)
         from src.computer_use_agent import ComputerUseAgent
         from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
@@ -2015,13 +2041,13 @@ class MainWindow(QMainWindow):
 
         agent = None
         try:
-            log(f"Upload started (queue: {self.link_queue.qsize()})")
-            self.signals.status.emit("Processing")
+            log(f"업로드 시작 (대기열: {self.link_queue.qsize()})")
+            self.signals.status.emit("처리중")
 
             api_key = str((worker_config or {}).get("api_key") or "")
             profile_dir = str((worker_config or {}).get("profile_dir") or ".threads_profile")
 
-            log("Starting browser...")
+            log("브라우저 시작 중...")
             agent = ComputerUseAgent(
                 api_key=api_key,
                 headless=False,
@@ -2033,27 +2059,27 @@ class MainWindow(QMainWindow):
                 agent.page.goto("https://www.threads.net", wait_until="domcontentloaded", timeout=15000)
                 time.sleep(3)
             except Exception:
-                logger.exception("Initial navigation to Threads failed")
+                logger.exception("Threads 초기 페이지 이동 실패")
 
             helper = ThreadsPlaywrightHelper(agent.page)
 
             if not helper.check_login_status():
-                log("Login required. Please sign in within 60 seconds.")
+                log("로그인이 필요합니다. 60초 안에 로그인해주세요.")
                 for wait_sec in range(20):
                     time.sleep(3)
                     remaining = 60 - (wait_sec * 3)
                     if wait_sec % 3 == 0:
-                        log(f"Waiting for login... {remaining}s remaining")
+                        log(f"로그인 대기 중... {remaining}초 남음")
                     if helper.check_login_status():
-                        log("Login confirmed")
+                        log("로그인 확인됨")
                         break
                 else:
-                    log("Login timeout after 60 seconds. Upload cancelled.")
+                    log("60초 내 로그인되지 않아 업로드를 취소합니다.")
                     results["cancelled"] = True
                     self.signals.finished.emit(results)
                     return
 
-            log("Threads login status verified")
+            log("Threads 로그인 상태 확인 완료")
 
             processed_count = 0
             empty_count = 0
@@ -2065,9 +2091,9 @@ class MainWindow(QMainWindow):
                 except queue.Empty:
                     empty_count += 1
                     if empty_count >= 6:
-                        log("Queue empty. Worker stopped.")
+                        log("대기열이 비어 작업자를 종료합니다.")
                         break
-                    log("Waiting for new links...")
+                    log("새 링크를 기다리는 중...")
                     continue
 
                 if self._stop_event.is_set():
@@ -2083,12 +2109,12 @@ class MainWindow(QMainWindow):
                             if isinstance(work_check, dict)
                             else "작업량 확인에 실패했습니다."
                         )
-                        log(f"Work quota check failed: {quota_message}")
+                        log(f"작업량 확인 실패: {quota_message}")
                         results["cancelled"] = True
                         break
                 except Exception:
-                    logger.exception("work quota check failed in upload loop")
-                    log("Work quota check failed. Upload stopped.")
+                    logger.exception("업로드 루프에서 작업량 확인 실패")
+                    log("작업량 확인 실패로 업로드를 중단합니다.")
                     results["cancelled"] = True
                     break
 
@@ -2096,7 +2122,7 @@ class MainWindow(QMainWindow):
                 url, keyword = item if isinstance(item, tuple) else (item, None)
                 results["total"] += 1
 
-                log(f"Processing item {processed_count} (queue: {self.link_queue.qsize()})")
+                log(f"{processed_count}번째 항목 처리 중 (대기열: {self.link_queue.qsize()})")
 
                 # Update progress
                 self.signals.queue_progress.emit(f"전체: {processed_count} / {total_links}")
@@ -2105,7 +2131,7 @@ class MainWindow(QMainWindow):
                 self.signals.step_update.emit(0, "active")
                 self.signals.link_status.emit(url, "진행중", "")
 
-                log("Parsing product data...")
+                log("상품 정보 분석 중...")
 
                 try:
                     # Step 1: Content generation (parse + AI)
@@ -2115,7 +2141,7 @@ class MainWindow(QMainWindow):
                     post_data = pipeline_ref.process_link(url, user_keywords=keyword)
                     if not post_data:
                         results["parse_failed"] += 1
-                        log("Parse failed. Skipping this item.")
+                        log("분석 실패로 이 항목을 건너뜁니다.")
                         self.signals.step_update.emit(1, "error")
                         self.signals.link_status.emit(url, "실패", "분석 실패")
                         self.signals.reset_steps.emit()
@@ -2123,11 +2149,11 @@ class MainWindow(QMainWindow):
 
                     results["processed"] += 1
                     product_name = post_data.get("product_title", "")[:30]
-                    log(f"Parse completed: {product_name}")
+                    log(f"분석 완료: {product_name}")
                     self.signals.step_update.emit(1, "done")
                 except Exception as exc:
                     results["parse_failed"] += 1
-                    log(f"Parse error: {str(exc)[:80]}")
+                    log(f"분석 오류: {str(exc)[:80]}")
                     self.signals.step_update.emit(1, "error")
                     self.signals.link_status.emit(url, "실패", "오류")
                     self.signals.reset_steps.emit()
@@ -2135,7 +2161,7 @@ class MainWindow(QMainWindow):
 
                 # Step 2: Upload to Threads
                 self.signals.step_update.emit(2, "active")
-                log("Uploading thread post...")
+                log("Threads 게시글 업로드 중...")
                 reserved_work_id = None
                 reservation_supported = False
 
@@ -2159,7 +2185,7 @@ class MainWindow(QMainWindow):
                         from src import auth_client
                         reserve_result = auth_client.reserve_work()
                         if isinstance(reserve_result, dict) and reserve_result.get("unsupported"):
-                            log("Work reservation endpoint unavailable. Using legacy billing sync.")
+                            log("작업 예약 API를 지원하지 않아 기존 과금 동기화를 사용합니다.")
                             reservation_supported = False
                             reserved_work_id = None
                         elif not self._is_work_allowed(reserve_result):
@@ -2168,7 +2194,7 @@ class MainWindow(QMainWindow):
                                 if isinstance(reserve_result, dict)
                                 else "작업량 확인에 실패했습니다."
                             )
-                            log(f"Work reservation failed: {quota_message}")
+                            log(f"작업 예약 실패: {quota_message}")
                             results["cancelled"] = True
                             break
                         else:
@@ -2184,12 +2210,12 @@ class MainWindow(QMainWindow):
                                 else ""
                             )
                             if not reserved_work_id:
-                                log("Work reservation id missing. Upload stopped for safety.")
+                                log("작업 예약 ID가 없어 안전상 업로드를 중단합니다.")
                                 results["cancelled"] = True
                                 break
                     except Exception:
-                        logger.exception("work reservation failed in upload loop")
-                        log("Work reservation failed. Upload stopped.")
+                        logger.exception("업로드 루프에서 작업량 예약 실패")
+                        log("작업 예약 실패로 업로드를 중단합니다.")
                         results["cancelled"] = True
                         break
 
@@ -2205,28 +2231,28 @@ class MainWindow(QMainWindow):
                                 use_result = auth_client.use_work()
                             if not isinstance(use_result, dict) or not bool(use_result.get("success")):
                                 billing_msg = (
-                                    use_result.get("message", "unknown")
+                                    use_result.get("message", "알 수 없음")
                                     if isinstance(use_result, dict)
-                                    else "unknown"
+                                    else "알 수 없음"
                                 )
                                 recorded_success = False
                                 stop_for_billing_sync = True
                                 results["failed"] += 1
-                                log(f"Work usage sync failed: {billing_msg}. Upload stopped for safety.")
+                                log(f"작업량 동기화 실패: {billing_msg}. 안전상 업로드를 중단합니다.")
                                 self.signals.step_update.emit(3, "error")
                                 self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
                             else:
                                 results["uploaded"] += 1
-                                log(f"Upload success: {product_name}")
+                                log(f"업로드 성공: {product_name}")
                                 self.signals.step_update.emit(2, "done")
                                 self.signals.step_update.emit(3, "done")
                                 self.signals.link_status.emit(url, "완료", product_name)
                         except Exception:
-                            logger.exception("failed to sync work usage after successful upload")
+                            logger.exception("업로드 성공 후 작업량 동기화 실패")
                             recorded_success = False
                             stop_for_billing_sync = True
                             results["failed"] += 1
-                            log("Work usage sync failed. Upload stopped for safety.")
+                            log("작업량 동기화 실패로 안전상 업로드를 중단합니다.")
                             self.signals.step_update.emit(3, "error")
                             self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
                     else:
@@ -2235,9 +2261,9 @@ class MainWindow(QMainWindow):
                                 from src import auth_client
                                 auth_client.release_reserved_work(reserved_work_id)
                             except Exception:
-                                logger.exception("failed to release reserved work after upload failure")
+                                logger.exception("업로드 실패 후 예약 작업량 해제 실패")
                         results["failed"] += 1
-                        log(f"Upload failed: {product_name}")
+                        log(f"업로드 실패: {product_name}")
                         self.signals.step_update.emit(2, "error")
                         self.signals.link_status.emit(url, "실패", product_name)
 
@@ -2257,9 +2283,9 @@ class MainWindow(QMainWindow):
                             from src import auth_client
                             auth_client.release_reserved_work(reserved_work_id)
                         except Exception:
-                            logger.exception("failed to release reserved work on upload exception")
+                            logger.exception("업로드 예외 처리 중 예약 작업량 해제 실패")
                     results["failed"] += 1
-                    log(f"Upload error: {str(exc)[:80]}")
+                    log(f"업로드 오류: {str(exc)[:80]}")
                     self.signals.step_update.emit(2, "error")
                     self.signals.link_status.emit(url, "실패", product_name)
 
@@ -2267,22 +2293,22 @@ class MainWindow(QMainWindow):
                 self.signals.reset_steps.emit()
 
                 if not self._stop_event.is_set():
-                    log(f"Waiting {_format_interval(interval)} until next item")
+                    log(f"다음 항목까지 {_format_interval(interval)} 대기")
                     for sec in range(interval):
                         if self._stop_event.is_set():
                             results["cancelled"] = True
                             break
                         remaining = interval - sec
                         if remaining % 60 == 0 and remaining > 0:
-                            log(f"Waiting... {_format_interval(remaining)} left")
+                            log(f"대기 중... {_format_interval(remaining)} 남음")
                         time.sleep(1)
 
             log("=" * 40)
             log(
-                "Finished - "
-                f"Uploaded: {results['uploaded']} / "
-                f"Failed: {results['failed']} / "
-                f"Parse failed: {results['parse_failed']}"
+                "작업 종료 - "
+                f"성공: {results['uploaded']} / "
+                f"실패: {results['failed']} / "
+                f"분석 실패: {results['parse_failed']}"
             )
 
             # 서버에 배치 완료 로그 전송
@@ -2301,16 +2327,16 @@ class MainWindow(QMainWindow):
                 pass
 
             if results["cancelled"]:
-                self.signals.status.emit("Cancelled")
+                self.signals.status.emit("취소됨")
             else:
-                self.signals.status.emit("Completed")
+                self.signals.status.emit("완료")
 
             self.signals.finished.emit(results)
 
         except Exception as exc:
-            logger.exception("Fatal error in _run_upload_queue")
-            log(f"Fatal error: {exc}")
-            self.signals.status.emit("Error")
+            logger.exception("_run_upload_queue에서 치명적 오류 발생")
+            log(f"치명적 오류: {exc}")
+            self.signals.status.emit("오류")
             self.signals.finished.emit(results)
             try:
                 from src import auth_client
@@ -2323,14 +2349,14 @@ class MainWindow(QMainWindow):
                     agent.save_session()
                     agent.close()
                 except Exception:
-                    logger.exception("Failed to close browser cleanly")
+                    logger.exception("브라우저 정상 종료에 실패했습니다")
 
     def stop_upload(self):
-        logger.info("stop_upload invoked; is_running=%s", self.is_running)
+        logger.info("업로드 중지 호출; is_running=%s", self.is_running)
         if self.is_running:
-            self.signals.log.emit("Stop requested. The current item will finish first.")
-            self.signals.status.emit("Stopping...")
-            self.status_badge.update_style(Colors.WARNING, "Stopping")
+            self.signals.log.emit("중지 요청됨. 현재 항목 처리 후 중단합니다.")
+            self.signals.status.emit("중지중...")
+            self.status_badge.update_style(Colors.WARNING, "중지중")
             self._sidebar_status_label.setText("중지중...")
             self.is_running = False
             pipeline = self._active_pipeline or self.pipeline
@@ -2348,7 +2374,7 @@ class MainWindow(QMainWindow):
 
     def _send_heartbeat(self):
         """Send heartbeat and reflect server connectivity in the UI."""
-        logger.debug("heartbeat tick; is_running=%s", self.is_running)
+        logger.debug("하트비트 실행; is_running=%s", self.is_running)
         try:
             from src import auth_client
 
@@ -2356,7 +2382,7 @@ class MainWindow(QMainWindow):
                 self._online_dot.setStyleSheet(
                     f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;"
                 )
-                self.status_label.setText("Logged out")
+                self.status_label.setText("로그아웃")
                 self._server_label.setText("서버 연결: 로그아웃")
                 if not self._session_expiry_notified:
                     show_warning(self, "세션 만료", "로그인 세션이 만료되었거나 로그아웃되었습니다. 다시 로그인해주세요.")
@@ -2377,24 +2403,24 @@ class MainWindow(QMainWindow):
                 )
                 self._server_label.setText("서버 연결: 정상")
                 if not self.is_running:
-                    self.status_label.setText("Connected")
+                    self.status_label.setText("연결됨")
             else:
                 self._online_dot.setStyleSheet(
                     f"background-color: {Colors.ERROR}; border-radius: 4px;"
                 )
                 self._server_label.setText("서버 연결: 끊김")
-                self.status_label.setText("Connection lost")
+                self.status_label.setText("연결 끊김")
         except Exception:
-            logger.exception("heartbeat failed")
+            logger.exception("하트비트 전송 실패")
             self._online_dot.setStyleSheet(
                 f"background-color: {Colors.ERROR}; border-radius: 4px;"
             )
             self._server_label.setText("서버 연결: 오류")
-            self.status_label.setText("Connection error")
+            self.status_label.setText("연결 오류")
 
     def _do_logout(self):
         """로그아웃 처리 후 앱 종료."""
-        logger.info("logout requested")
+        logger.info("로그아웃 요청")
         if self.is_running:
             show_warning(self, "알림", "작업 중에는 로그아웃할 수 없습니다.\n먼저 작업을 중지해주세요.")
             return
@@ -2418,12 +2444,12 @@ class MainWindow(QMainWindow):
                 )
                 cleanup_agent.clear_saved_session()
             except Exception:
-                logger.exception("failed to clear saved browser session during logout")
+                logger.exception("로그아웃 중 저장된 브라우저 세션 삭제 실패")
             QApplication.quit()
 
     def check_for_updates(self):
         """업데이트 확인 (사용자 버튼 클릭)."""
-        logger.info("manual update check opened")
+        logger.info("수동 업데이트 확인 창 열림")
         from src.update_dialog import UpdateDialog
 
         dialog = UpdateDialog(self._app_version, self)
@@ -2431,7 +2457,7 @@ class MainWindow(QMainWindow):
 
     def _check_for_updates_silent(self):
         """백그라운드 자동 업데이트 체크 (알림만 표시)."""
-        logger.info("silent update check started")
+        logger.info("백그라운드 업데이트 확인 시작")
         try:
             from src.auto_updater import AutoUpdater
 
@@ -2440,10 +2466,10 @@ class MainWindow(QMainWindow):
 
             if update_info:
                 version_text = str(update_info.get("version", "") or "").strip()
-                logger.info("auto update found; starting immediate update flow (version=%s)", version_text)
+                logger.info("자동 업데이트 발견, 즉시 업데이트를 시작합니다 (version=%s)", version_text)
                 self._run_auto_update_flow(update_info)
         except Exception as e:
-            logger.exception("silent update check failed")
+            logger.exception("백그라운드 업데이트 확인 실패")
             # Silent check: keep UI quiet; details are already in logs.
             return
 
@@ -2460,24 +2486,24 @@ class MainWindow(QMainWindow):
                 updater = AutoUpdater(self._app_version)
                 update_file = updater.download_update(update_info)
                 if not update_file:
-                    logger.warning("auto update download failed")
+                    logger.warning("자동 업데이트 다운로드 실패")
                     return
 
                 expected_sha256 = str(update_info.get("expected_sha256", "") or "")
                 if updater.install_update(update_file, expected_sha256=expected_sha256):
-                    logger.info("auto update installer launched; quitting application")
+                    logger.info("자동 업데이트 설치 프로그램 실행됨, 애플리케이션을 종료합니다")
                     app = QApplication.instance()
                     if app is not None:
                         app.quit()
                 else:
-                    logger.warning("auto update install failed")
+                    logger.warning("자동 업데이트 설치 실패")
             except Exception:
-                logger.exception("auto update flow failed")
+                logger.exception("자동 업데이트 흐름 실패")
 
         threading.Thread(target=worker, daemon=True, name="auto-update-worker").start()
 
     def open_tutorial(self):
-        logger.info("open_tutorial invoked")
+        logger.info("튜토리얼 열기 호출")
         from src.tutorial import TutorialDialog
         dialog = TutorialDialog(self)
         dialog.exec()
@@ -2508,7 +2534,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """윈도우 종료 시 로그아웃 처리."""
-        logger.info("closeEvent invoked; is_running=%s", self.is_running)
+        logger.info("종료 이벤트 호출; is_running=%s", self.is_running)
         if self.is_running:
             if not ask_yes_no(
                 self,
@@ -2524,7 +2550,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "_heartbeat_timer") and self._heartbeat_timer is not None:
                 self._heartbeat_timer.stop()
         except Exception:
-            logger.exception("failed to stop heartbeat timer")
+            logger.exception("하트비트 타이머 중지 실패")
 
         try:
             from src import auth_client
@@ -2532,3 +2558,4 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         event.accept()
+

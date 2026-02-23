@@ -45,7 +45,7 @@ class LinkHistory:
             loaded.setdefault("stats", {"total": 0, "success": 0, "failed": 0})
             return loaded
         except Exception:
-            logger.exception("Failed to load link history")
+            logger.exception("링크 이력을 불러오지 못했습니다.")
             return self._default_payload()
 
     def _save(self) -> None:
@@ -65,7 +65,7 @@ class LinkHistory:
             os.replace(temp_path, self.history_file)
             secure_file_permissions(self.history_file)
         except Exception:
-            logger.exception("Failed to save link history")
+            logger.exception("링크 이력 저장에 실패했습니다.")
             if temp_path:
                 try:
                     Path(temp_path).unlink(missing_ok=True)

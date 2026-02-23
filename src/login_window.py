@@ -25,7 +25,8 @@ from src import auth_client
 from src.ui_messages import ask_yes_no, show_info, show_warning
 
 logger = logging.getLogger(__name__)
-MIN_PASSWORD_LENGTH = 8
+MIN_LOGIN_PASSWORD_LENGTH = getattr(auth_client, "MIN_LOGIN_PASSWORD_LENGTH", 6)
+MIN_REGISTER_PASSWORD_LENGTH = getattr(auth_client, "MIN_REGISTER_PASSWORD_LENGTH", 8)
 
 
 def _resolve_app_version() -> str:
@@ -438,8 +439,8 @@ class LoginWindow(QMainWindow):
         if not uid or not pw:
             self.login_status.setText("아이디와 비밀번호를 입력해주세요.")
             return
-        if len(pw) < MIN_PASSWORD_LENGTH:
-            self.login_status.setText(f"비밀번호는 최소 {MIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
+        if len(pw) < MIN_LOGIN_PASSWORD_LENGTH:
+            self.login_status.setText(f"비밀번호는 최소 {MIN_LOGIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
 
         self.btn_login.setEnabled(False)
@@ -459,7 +460,7 @@ class LoginWindow(QMainWindow):
         if status is True:
             self._failed_login_attempts = 0
             self._login_cooldown_until = 0.0
-            logger.info(f"Login success: user_id={result.get('id')}")
+            logger.info("로그인 성공: user_id=%s", result.get("id"))
 
             # Respect explicit opt-in for username persistence only.
             saved_username = self.login_id.text().strip().lower()
@@ -469,7 +470,7 @@ class LoginWindow(QMainWindow):
                 else:
                     auth_client.remember_username("")
             except Exception:
-                logger.exception("Failed to persist username preference")
+                logger.exception("아이디 저장 설정을 반영하지 못했습니다.")
 
             self.login_success.emit(result)
         elif status == "EU003":
@@ -551,8 +552,8 @@ class LoginWindow(QMainWindow):
         if not pw:
             self._show_msg("비밀번호를 입력해주세요.")
             return
-        if len(pw) < MIN_PASSWORD_LENGTH:
-            self._show_msg(f"비밀번호는 최소 {MIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
+        if len(pw) < MIN_REGISTER_PASSWORD_LENGTH:
+            self._show_msg(f"비밀번호는 최소 {MIN_REGISTER_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
         if pw != pw2:
             self._show_msg("비밀번호가 일치하지 않습니다.")
@@ -628,7 +629,7 @@ class LoginWorker(QThread):
             result = auth_client.login(self.username, password, self.force)
             self.finished_signal.emit(result)
         except Exception as exc:
-            logger.exception("LoginWorker failed")
+            logger.exception("로그인 워커 실행에 실패했습니다.")
             self.finished_signal.emit({"status": False, "message": f"로그인 처리 중 오류가 발생했습니다: {exc}"})
         finally:
             for i in range(len(self._password_bytes)):
@@ -657,7 +658,7 @@ class RegisterWorker(QThread):
             )
             self.finished_signal.emit(result)
         except Exception as exc:
-            logger.exception("RegisterWorker failed")
+            logger.exception("회원가입 워커 실행에 실패했습니다.")
             self.finished_signal.emit({"success": False, "message": f"회원가입 처리 중 오류가 발생했습니다: {exc}"})
         finally:
             for i in range(len(self._password_bytes)):

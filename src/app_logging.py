@@ -85,7 +85,7 @@ def _install_exception_hooks() -> None:
 
     def _excepthook(exc_type, exc_value, exc_tb):
         logger.exception(
-            "Unhandled exception",
+            "처리되지 않은 예외가 발생했습니다.",
             exc_info=(exc_type, exc_value, exc_tb),
         )
         if _PREV_EXCEPTHOOK is not None:
@@ -99,7 +99,7 @@ def _install_exception_hooks() -> None:
 
         def _threading_excepthook(args):
             logger.exception(
-                "Unhandled thread exception: thread=%s",
+                "처리되지 않은 스레드 예외: thread=%s",
                 getattr(args.thread, "name", "unknown"),
                 exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
             )
@@ -195,10 +195,10 @@ def setup_logging(
         _install_print_hook()
 
     runtime_logger = logging.getLogger("runtime.bootstrap")
-    runtime_logger.info("Logging initialized")
+    runtime_logger.info("로깅 초기화 완료")
     runtime_logger.info("Python=%s", sys.version.replace("\n", " "))
-    runtime_logger.info("Platform=%s", platform.platform())
-    runtime_logger.info("Log file=%s", log_file)
+    runtime_logger.info("플랫폼=%s", platform.platform())
+    runtime_logger.info("로그 파일=%s", log_file)
 
     _INITIALIZED = True
     return log_file

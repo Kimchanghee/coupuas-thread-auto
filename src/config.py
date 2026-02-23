@@ -42,7 +42,7 @@ class Config:
                         if isinstance(loaded, dict):
                             data = loaded
                 except (json.JSONDecodeError, OSError):
-                    logger.exception("Failed to load config file")
+                    logger.exception("설정 파일을 불러오지 못했습니다.")
                     data = {}
 
             self._load_from_dict(data)
@@ -99,7 +99,7 @@ class Config:
                 if isinstance(raw_value, str):
                     setattr(self, key, unprotect_secret(raw_value))
         except Exception:
-            logger.exception("Failed to load secrets file")
+            logger.exception("보안 설정 파일을 불러오지 못했습니다.")
 
     def _save_secrets(self):
         payload = {}
@@ -109,7 +109,7 @@ class Config:
                 continue
             protected = protect_secret(value, "shorts_thread_maker")
             if protected is None:
-                logger.warning("Skipping secret '%s' because secure storage is unavailable", key)
+                logger.warning("보안 저장소를 사용할 수 없어 비밀값 '%s' 저장을 건너뜁니다.", key)
                 continue
             payload[key] = protected
 
@@ -131,7 +131,7 @@ class Config:
             elif self.secrets_file.exists():
                 self.secrets_file.unlink()
         except Exception:
-            logger.exception("Failed to save secrets file")
+            logger.exception("보안 설정 파일 저장에 실패했습니다.")
             if "temp_path" in locals():
                 try:
                     Path(temp_path).unlink(missing_ok=True)
@@ -165,7 +165,7 @@ class Config:
                 os.replace(temp_path, self.config_file)
                 secure_file_permissions(self.config_file)
             except OSError:
-                logger.exception("Failed to save config file")
+                logger.exception("설정 파일 저장에 실패했습니다.")
                 if "temp_path" in locals():
                     try:
                         Path(temp_path).unlink(missing_ok=True)

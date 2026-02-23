@@ -64,14 +64,14 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.3.7"
+VERSION = "v2.3.8"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
 
 def _create_main_window(login_win, auth_result, main_window_cls=None):
     """Create/show MainWindow and attach auth/login references for session continuity."""
-    logger.info("Creating main window")
+    logger.info("메인 윈도우를 생성합니다.")
     if main_window_cls is None:
         from src.main_window import MainWindow
         main_window_cls = MainWindow
@@ -82,7 +82,7 @@ def _create_main_window(login_win, auth_result, main_window_cls=None):
     if hasattr(main_win, '_update_account_display'):
         main_win._update_account_display()
     main_win.show()
-    logger.info("Main window visible")
+    logger.info("메인 윈도우 표시 완료")
     return main_win
 
 
@@ -270,8 +270,8 @@ class SplashScreen(QSplashScreen):
 
 def main():
     log_file = setup_logging(capture_print=False)
-    logger.info("Application startup")
-    logger.info("Log file path: %s", log_file)
+    logger.info("애플리케이션을 시작합니다.")
+    logger.info("로그 파일 경로: %s", log_file)
 
     # High-DPI: avoid OS bitmap scaling blur on Windows.
     if sys.platform == "win32":
@@ -333,15 +333,15 @@ def main():
     # Login window
     from src.login_window import LoginWindow
     login_win = LoginWindow()
-    logger.info("Login window displayed")
+    logger.info("로그인 창 표시 완료")
     app._login_window = login_win
     app._main_window = None
 
     def on_login_success(result):
-        logger.info("Login success callback received")
+        logger.info("로그인 성공 콜백 수신")
         login_win.hide()
         app._main_window = _create_main_window(login_win, result)
-        logger.info("Main window created and shown")
+        logger.info("메인 윈도우 생성 및 표시 완료")
     login_win.login_success.connect(on_login_success)
     login_win.show()
     splash.finish(login_win)

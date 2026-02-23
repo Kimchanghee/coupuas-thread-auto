@@ -230,7 +230,7 @@ class ComputerUseAgent:
         return True
 
     # ------------------------------------------------------------------ setup
-    def _launch_browser(self, channel: Optional[str] = None):
+    def _launch_browser(self, channel: Optional[str] = None, executable_path: Optional[str] = None):
         launch_kwargs: Dict[str, Any] = {
             "headless": self.headless,
             "args": [
@@ -240,8 +240,50 @@ class ComputerUseAgent:
         }
         if channel:
             launch_kwargs["channel"] = channel
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
         return self.playwright.chromium.launch(**launch_kwargs)
 
+    @staticmethod
+    def _candidate_browser_paths() -> List[str]:
+        env_candidates = [
+            os.getenv("THREAD_AUTO_BROWSER_PATH", "").strip(),
+            os.getenv("CHROME_PATH", "").strip(),
+        ]
+        default_candidates = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            str(Path.home() / "AppData" / "Local" / "Google" / "Chrome" / "Application" / "chrome.exe"),
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        ]
+
+        unique_paths: List[str] = []
+        seen: set[str] = set()
+        for raw in [*env_candidates, *default_candidates]:
+            if not raw:
+                continue
+            path = Path(raw).expanduser()
+            if not path.exists() or not path.is_file():
+                continue
+            resolved = str(path.resolve())
+            lowered = resolved.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            unique_paths.append(resolved)
+        return unique_paths
+
+    @classmethod
+    def _iter_browser_candidates(cls) -> List[Dict[str, Optional[str]]]:
+        candidates: List[Dict[str, Optional[str]]] = [
+            {"channel": "chrome", "executable_path": None, "label": "chrome"},
+            {"channel": "msedge", "executable_path": None, "label": "msedge"},
+        ]
+        for path in cls._candidate_browser_paths():
+            candidates.append({"channel": None, "executable_path": path, "label": path})
+        candidates.append({"channel": None, "executable_path": None, "label": "chromium"})
+        return candidates
     @staticmethod
     def _is_missing_browser_error(exc: Exception) -> bool:
         text = str(exc or "").lower()
@@ -269,10 +311,10 @@ class ComputerUseAgent:
             )
             stdout_text = str(completed.stdout or "").strip()
             if stdout_text:
-                logger.info("Playwright install stdout: %s", stdout_text[:300])
+                logger.info("Playwright ?ㅼ튂 異쒕젰: %s", stdout_text[:300])
             return True
         except Exception as exc:
-            logger.warning("Automatic Playwright install failed: %s", exc)
+            logger.warning("Playwright ?먮룞 ?ㅼ튂???ㅽ뙣?덉뒿?덈떎: %s", exc)
             return False
 
     def start_browser(self):
@@ -283,23 +325,24 @@ class ComputerUseAgent:
         launch_errors: List[Exception] = []
         browser = None
 
-        for channel in ("chrome", None):
+        for candidate in self._iter_browser_candidates():
+            channel = candidate.get("channel")
+            executable_path = candidate.get("executable_path")
+            label = str(candidate.get("label") or channel or "chromium")
             try:
-                browser = self._launch_browser(channel=channel)
+                browser = self._launch_browser(channel=channel, executable_path=executable_path)
+                logger.info("브라우저 실행 성공: %s", label)
                 break
             except Exception as exc:
                 launch_errors.append(exc)
-                logger.warning(
-                    "Browser launch failed (channel=%s): %s",
-                    channel or "chromium",
-                    exc,
-                )
+                logger.warning("브라우저 실행 실패 (%s): %s", label, exc)
 
-        if browser is None and launch_errors and self._is_missing_browser_error(launch_errors[-1]):
+        missing_browser_error = any(self._is_missing_browser_error(err) for err in launch_errors)
+        if browser is None and launch_errors and missing_browser_error:
             if self._install_playwright_chromium():
                 try:
-                    browser = self._launch_browser(channel=None)
-                    logger.info("Browser launch recovered after Playwright Chromium install.")
+                    browser = self._launch_browser(channel=None, executable_path=None)
+                    logger.info("Playwright Chromium 설치 후 브라우저 실행을 복구했습니다.")
                 except Exception as exc:
                     launch_errors.append(exc)
 
@@ -310,13 +353,14 @@ class ComputerUseAgent:
                 pass
             self.playwright = None
 
-            last_error = launch_errors[-1] if launch_errors else RuntimeError("unknown browser launch failure")
+            last_error = launch_errors[-1] if launch_errors else RuntimeError("알 수 없는 브라우저 실행 실패")
             hint = (
-                "Install Google Chrome or run `python -m playwright install chromium`."
-                if self._is_missing_browser_error(last_error)
-                else "Check browser security policy and local runtime environment."
+                "Google Chrome 설치 상태를 확인하고, 개발 환경이라면 "
+                "`python -m playwright install chromium` 명령을 실행해주세요."
+                if missing_browser_error
+                else "브라우저 보안 정책 또는 실행 권한을 확인해주세요."
             )
-            raise RuntimeError(f"Failed to start browser. {hint} Error: {last_error}") from last_error
+            raise RuntimeError(f"브라우저 시작에 실패했습니다. {hint} 원인: {last_error}") from last_error
 
         self.browser = browser
 
@@ -443,7 +487,7 @@ class ComputerUseAgent:
                     url = args.get("url")
                     if url:
                         if not self._is_allowed_navigation_url(str(url)):
-                            raise ValueError(f"Blocked navigation target: {url}")
+                            raise ValueError(f"蹂댁븞 ?뺤콉?쇰줈 ?대룞??李⑤떒??URL?낅땲?? {url}")
                         page.goto(url, wait_until="domcontentloaded")
                 elif fname == "click_at":
                     x = _denormalize_x(args["x"], screen_width)
@@ -471,7 +515,7 @@ class ComputerUseAgent:
                     if keys:
                         normalized = self._normalize_keys(str(keys))
                         if normalized not in self.ALLOWED_SAFE_KEYS:
-                            raise ValueError(f"Blocked key combination: {keys}")
+                            raise ValueError(f"蹂댁븞 ?뺤콉?쇰줈 李⑤떒????議고빀?낅땲?? {keys}")
                         page.keyboard.press(keys)
                 elif fname == "scroll_document":
                     direction = args.get("direction", "down")

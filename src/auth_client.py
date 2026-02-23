@@ -53,7 +53,7 @@ API_SERVER_URL = (
 PROGRAM_TYPE = "stmaker"
 
 if not API_SERVER_URL:
-    logger.warning("API_SERVER_URL is not configured.")
+    logger.warning("API_SERVER_URL이 설정되지 않았습니다.")
 
 # Credential storage
 _CRED_DIR = Path.home() / ".shorts_thread_maker"
@@ -62,7 +62,11 @@ _API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
 _SENSITIVE_CRED_FIELDS = {"token"}
 _INVALID_LOCK_SENTINEL = "__invalid_api_host_lock__"
-_MIN_PASSWORD_LENGTH = 8
+_MIN_REGISTER_PASSWORD_LENGTH = 8
+_MIN_LOGIN_PASSWORD_LENGTH = 6
+MIN_REGISTER_PASSWORD_LENGTH = _MIN_REGISTER_PASSWORD_LENGTH
+MIN_LOGIN_PASSWORD_LENGTH = _MIN_LOGIN_PASSWORD_LENGTH
+_SAVED_USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{4,64}$")
 _WORK_RESERVATION_SUPPORTED: Optional[bool] = None
 _TOKEN_TTL_DEFAULT_SECONDS = 43200
 _TOKEN_TTL_MIN_SECONDS = 300
@@ -121,25 +125,25 @@ def _check_tls_certificate_pin(parsed) -> Optional[str]:
     try:
         actual_pin = _get_server_cert_sha256(host, parsed.port or 443)
     except Exception:
-        return "Failed to verify API TLS certificate pin."
+        return "API TLS 인증서 핀 검증에 실패했습니다."
     if actual_pin not in pins:
-        return "Blocked API TLS certificate pin mismatch."
+        return "보안 정책으로 API TLS 인증서 핀 불일치를 차단했습니다."
     return None
 
 
 def _check_api_url() -> Optional[str]:
     if not API_SERVER_URL:
-        return "Server URL is not configured. Set API_SERVER_URL in .env."
+        return "서버 URL이 설정되지 않았습니다. .env 파일의 API_SERVER_URL을 확인해주세요."
     if not API_SERVER_URL.startswith(("http://", "https://")):
-        return f"Invalid server URL: {API_SERVER_URL}"
+        return f"서버 URL 형식이 올바르지 않습니다: {API_SERVER_URL}"
 
     parsed = urlparse(API_SERVER_URL)
     if parsed.scheme == "http":
         host = (parsed.hostname or "").lower()
         if getattr(sys, "frozen", False):
-            return "HTTPS API URL is required in production builds."
+            return "배포 버전에서는 HTTPS API URL만 허용됩니다."
         if host not in {"localhost", "127.0.0.1", "::1"}:
-            return "Only HTTPS API URL is allowed for security."
+            return "보안 정책으로 HTTPS API URL만 허용됩니다."
     host_lock_error = _check_api_host_lock(parsed)
     if host_lock_error:
         return host_lock_error
@@ -157,14 +161,14 @@ def _ensure_cred_dir() -> None:
 def _protect_secret(value: str) -> Optional[str]:
     protected = protect_secret(value, "shorts_thread_maker")
     if isinstance(value, str) and value and protected is None:
-        logger.warning("Failed to protect credential secret")
+        logger.warning("자격 증명 비밀값 보호 처리에 실패했습니다.")
     return protected
 
 
 def _unprotect_secret(value: str) -> str:
     plain = unprotect_secret(value)
     if isinstance(value, str) and value.startswith("dpapi:") and not plain:
-        logger.exception("Failed to unprotect credential secret")
+        logger.exception("자격 증명 비밀값 복호화에 실패했습니다.")
     return plain
 
 
@@ -182,12 +186,12 @@ def _read_api_host_lock() -> str:
             return _INVALID_LOCK_SENTINEL
         # Frozen production binaries should never trust plaintext lock files.
         if getattr(sys, "frozen", False):
-            logger.warning("Detected unprotected API host lock file in production mode")
+            logger.warning("배포 버전에서 보호되지 않은 API 호스트 잠금 파일이 감지되었습니다.")
             return _INVALID_LOCK_SENTINEL
         # Legacy plaintext compatibility path (development mode only).
         return raw.lower()
     except Exception:
-        logger.warning("Failed to read API host lock file")
+        logger.warning("API 호스트 잠금 파일을 읽는 중 오류가 발생했습니다.")
         if getattr(sys, "frozen", False) and _API_HOST_LOCK_FILE.exists():
             return _INVALID_LOCK_SENTINEL
         return ""
@@ -197,7 +201,7 @@ def _write_api_host_lock(host: str) -> bool:
     _ensure_cred_dir()
     protected = _protect_secret(str(host or "").strip().lower())
     if not protected:
-        logger.warning("Failed to protect API host lock")
+        logger.warning("API 호스트 잠금 정보 보호 처리에 실패했습니다.")
         return False
     temp_path = None
     try:
@@ -216,7 +220,7 @@ def _write_api_host_lock(host: str) -> bool:
         secure_file_permissions(_API_HOST_LOCK_FILE)
         return True
     except Exception:
-        logger.warning("Failed to write API host lock file")
+        logger.warning("API 호스트 잠금 파일 저장에 실패했습니다.")
         if temp_path:
             try:
                 Path(temp_path).unlink(missing_ok=True)
@@ -233,14 +237,18 @@ def _check_api_host_lock(parsed) -> Optional[str]:
     _ensure_cred_dir()
     locked_host = _read_api_host_lock()
     if locked_host == _INVALID_LOCK_SENTINEL:
-        return "Blocked API host lock due to integrity validation failure."
+        default_host = (urlparse(_DEFAULT_API_SERVER_URL).hostname or "").lower()
+        if host and host == default_host and _write_api_host_lock(host):
+            logger.warning("API 호스트 잠금 파일이 손상되어 기본 호스트 기준으로 자동 복구했습니다.")
+            return None
+        return "무결성 검증에 실패한 API 호스트 잠금 파일을 차단했습니다."
 
     if locked_host and locked_host != host:
-        return "Blocked API host change due to security policy."
+        return "보안 정책으로 API 호스트 변경을 차단했습니다."
 
     if not locked_host:
         if not _write_api_host_lock(host):
-            return "Failed to persist API host lock."
+            return "API 호스트 잠금 정보 저장에 실패했습니다."
     return None
 
 
@@ -269,7 +277,7 @@ def _save_cred(data: dict) -> None:
         if field in serialized:
             protected = _protect_secret(serialized.get(field, ""))
             if protected is None:
-                logger.warning("Skipping sensitive credential field '%s' (secure storage unavailable)", field)
+                logger.warning("보안 저장소를 사용할 수 없어 민감 필드 '%s' 저장을 건너뜁니다.", field)
                 serialized.pop(field, None)
             else:
                 serialized[field] = protected
@@ -290,7 +298,7 @@ def _save_cred(data: dict) -> None:
             os.replace(temp_path, _CRED_FILE)
             secure_file_permissions(_CRED_FILE)
         except Exception as e:
-            logger.error("Failed to save credentials: %s", e)
+            logger.error("자격 증명 저장에 실패했습니다: %s", e)
             if "temp_path" in locals():
                 try:
                     Path(temp_path).unlink(missing_ok=True)
@@ -334,10 +342,36 @@ def _localize_message(message: str) -> str:
         return ""
 
     lower = text.lower()
+    direct_map = {
+        "blocked api host lock due to integrity validation failure.": "무결성 검증에 실패한 API 호스트 잠금 파일을 차단했습니다.",
+        "blocked api host change due to security policy.": "보안 정책으로 API 호스트 변경을 차단했습니다.",
+        "failed to persist api host lock.": "API 호스트 잠금 정보 저장에 실패했습니다.",
+        "failed to verify api tls certificate pin.": "API TLS 인증서 핀 검증에 실패했습니다.",
+        "blocked api tls certificate pin mismatch.": "보안 정책으로 API TLS 인증서 핀 불일치를 차단했습니다.",
+        "server url is not configured. set api_server_url in .env.": "서버 URL이 설정되지 않았습니다. .env 파일의 API_SERVER_URL을 확인해주세요.",
+        "https api url is required in production builds.": "배포 버전에서는 HTTPS API URL만 허용됩니다.",
+        "only https api url is allowed for security.": "보안 정책으로 HTTPS API URL만 허용됩니다.",
+    }
+    if lower in direct_map:
+        return direct_map[lower]
+    if "api host lock" in lower and "integrity validation failure" in lower:
+        return "무결성 검증에 실패한 API 호스트 잠금 파일을 차단했습니다."
+    if "unprotected api host lock" in lower and "production mode" in lower:
+        return "배포 버전에서 보호되지 않은 API 호스트 잠금 파일이 감지되었습니다."
+    if "api host change" in lower and "security policy" in lower:
+        return "보안 정책으로 API 호스트 변경을 차단했습니다."
+    if "failed to persist api host lock" in lower:
+        return "API 호스트 잠금 정보 저장에 실패했습니다."
+    if "tls certificate pin" in lower and "failed" in lower:
+        return "API TLS 인증서 핀 검증에 실패했습니다."
+    if "tls certificate pin" in lower and "mismatch" in lower:
+        return "보안 정책으로 API TLS 인증서 핀 불일치를 차단했습니다."
+    if lower.startswith("invalid server url:"):
+        return f"서버 URL 형식이 올바르지 않습니다: {text.split(':', 1)[-1].strip()}"
     if lower == "not logged in":
         return "로그인이 필요합니다."
     if lower == "field required":
-        return "필수 항목입니다."
+        return "필수 입력 항목입니다."
 
     min_len_match = re.search(r"at least\s+(\d+)\s+characters?", lower)
     if min_len_match:
@@ -407,6 +441,15 @@ def _extract_api_message(payload: Dict[str, Any], default_message: str = "") -> 
             return _localize_message(error_message.strip())
 
     return _localize_message(default_message)
+
+
+def _normalize_saved_username(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    if not _SAVED_USERNAME_PATTERN.fullmatch(text):
+        return ""
+    return text
 
 
 def _normalize_api_message(
@@ -712,8 +755,8 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
     if not password:
         return {"success": False, "message": "비밀번호를 입력해주세요."}
 
-    if len(password) < _MIN_PASSWORD_LENGTH:
-        return {"success": False, "message": f"비밀번호는 최소 {_MIN_PASSWORD_LENGTH}자 이상이어야 합니다."}
+    if len(password) < _MIN_REGISTER_PASSWORD_LENGTH:
+        return {"success": False, "message": f"비밀번호는 최소 {_MIN_REGISTER_PASSWORD_LENGTH}자 이상이어야 합니다."}
 
     contact_clean = re.sub(r"[^0-9]", "", str(contact or ""))
     if len(contact_clean) < 10:
@@ -784,7 +827,7 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
     except requests.exceptions.ConnectionError:
         return {"success": False, "message": "서버 연결에 실패했습니다."}
     except Exception as e:
-        logger.exception("Registration error")
+        logger.exception("회원가입 처리 중 오류가 발생했습니다.")
         return {"success": False, "message": f"오류 발생: {str(e)}"}
 
 
@@ -797,8 +840,8 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     password = str(password or "")
     if not username or not password:
         return {"status": False, "message": "아이디와 비밀번호를 입력해주세요."}
-    if len(password) < _MIN_PASSWORD_LENGTH:
-        return {"status": False, "message": f"비밀번호는 최소 {_MIN_PASSWORD_LENGTH}자 이상이어야 합니다."}
+    if len(password) < _MIN_LOGIN_PASSWORD_LENGTH:
+        return {"status": False, "message": f"비밀번호는 최소 {_MIN_LOGIN_PASSWORD_LENGTH}자 이상이어야 합니다."}
 
     backend_password = _normalize_password_for_backend(password)
 
@@ -859,7 +902,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     except requests.exceptions.ConnectionError:
         return {"status": False, "message": "서버 연결에 실패했습니다."}
     except Exception as e:
-        logger.exception("Login error")
+        logger.exception("로그인 처리 중 오류가 발생했습니다.")
         return {"status": False, "message": f"오류: {str(e)}"}
 
 
@@ -877,7 +920,7 @@ def logout() -> bool:
             )
             server_ok = resp.status_code == 200
         except Exception as e:
-            logger.warning("Logout API error (ignored): %s", e)
+            logger.warning("로그아웃 API 호출 중 오류가 발생했지만 무시합니다: %s", e)
             server_ok = False
 
     _clear_auth_state_memory()
@@ -990,7 +1033,7 @@ def reserve_work() -> Dict[str, Any]:
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
     if _WORK_RESERVATION_SUPPORTED is False:
-        return {"success": False, "unsupported": True, "message": "work reservation not supported"}
+        return {"success": False, "unsupported": True, "message": "작업 예약 기능이 지원되지 않습니다."}
 
     try:
         resp = _session.post(
@@ -1001,7 +1044,7 @@ def reserve_work() -> Dict[str, Any]:
         )
         if resp.status_code in {404, 405, 501}:
             _WORK_RESERVATION_SUPPORTED = False
-            return {"success": False, "unsupported": True, "message": "work reservation not supported"}
+            return {"success": False, "unsupported": True, "message": "작업 예약 기능이 지원되지 않습니다."}
         payload = _safe_json(resp)
         if resp.status_code == 200:
             _WORK_RESERVATION_SUPPORTED = True
@@ -1014,7 +1057,7 @@ def reserve_work() -> Dict[str, Any]:
 
 def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
     if not reservation_id:
-        return {"success": False, "message": "reservation id is required"}
+        return {"success": False, "message": "예약 ID가 필요합니다."}
 
     if _check_api_url():
         return {"success": False}
@@ -1041,7 +1084,7 @@ def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
 
 def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
     if not reservation_id:
-        return {"success": False, "message": "reservation id is required"}
+        return {"success": False, "message": "예약 ID가 필요합니다."}
 
     if _check_api_url():
         return {"success": False}
@@ -1094,16 +1137,36 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
             timeout=2.0,
         )
     except Exception as e:
-        logger.debug("Failed to send activity log: %s", e)
+        logger.debug("활동 로그 전송에 실패했습니다: %s", e)
 
 
 def get_saved_credentials() -> Optional[Dict[str, str]]:
     cred = _load_cred()
-    return cred if cred.get("username") else None
+    if not isinstance(cred, dict):
+        return None
+
+    raw_username = cred.get("username")
+    normalized_username = _normalize_saved_username(raw_username)
+    if normalized_username:
+        if normalized_username != raw_username:
+            sanitized = dict(cred)
+            sanitized["username"] = normalized_username
+            _save_cred(sanitized)
+        return {"username": normalized_username}
+
+    if raw_username:
+        logger.warning("저장된 아이디 형식이 올바르지 않아 자동 정리합니다.")
+        sanitized = dict(cred)
+        sanitized.pop("username", None)
+        if sanitized:
+            _save_cred(sanitized)
+        else:
+            _clear_cred()
+    return None
 
 
 def remember_username(username: str) -> None:
-    name = str(username or "").strip().lower()
+    name = _normalize_saved_username(username)
     if not name:
         _clear_cred()
         return
