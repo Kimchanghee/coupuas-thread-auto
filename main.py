@@ -64,7 +64,7 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 
-VERSION = "v2.3.10"
+VERSION = "v2.3.11"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -269,7 +269,7 @@ class SplashScreen(QSplashScreen):
 
 
 def main():
-    log_file = setup_logging(capture_print=False)
+    log_file = setup_logging(capture_print=True)
     logger.info("애플리케이션을 시작합니다.")
     logger.info("로그 파일 경로: %s", log_file)
 

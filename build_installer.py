@@ -32,8 +32,11 @@ def _resolve_app_version() -> str:
 
 def _find_iscc_path() -> str:
     env_path = str(os.getenv("ISCC_PATH", "")).strip()
+    local_programs = Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe"
     candidates = [
         env_path,
+        str(local_programs),
+        r"C:\InnoSetup\ISCC.exe",
         r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
         r"C:\Program Files\Inno Setup 6\ISCC.exe",
         shutil.which("ISCC") or "",

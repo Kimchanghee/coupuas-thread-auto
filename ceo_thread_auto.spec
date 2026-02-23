@@ -29,6 +29,7 @@ hidden_imports = [
     'src.coupang_uploader',
     'src.settings_dialog',
     'src.computer_use_agent',
+    'src.runtime_security',
     'src.events',
     'src.threads_playwright_helper',
 

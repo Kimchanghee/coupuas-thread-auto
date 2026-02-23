@@ -57,6 +57,7 @@ HIDDEN_IMPORTS = [
     "src.update_dialog",
     "src.login_window",
     "src.auth_client",
+    "src.runtime_security",
     "src.theme",
     "src.events",
     "src.tutorial",

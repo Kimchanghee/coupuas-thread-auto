@@ -306,12 +306,28 @@ def _save_cred(data: dict) -> None:
                     pass
 
 
-def _clear_cred() -> None:
+def _clear_cred() -> bool:
     try:
         if _CRED_FILE.exists():
             _CRED_FILE.unlink()
+        return True
     except Exception:
-        pass
+        logger.warning("자격 증명 파일 삭제에 실패했습니다.")
+        return False
+
+
+def _clear_saved_username_only() -> None:
+    """Best-effort fallback to remove only the saved username field."""
+    cred = _load_cred()
+    if not isinstance(cred, dict) or not cred:
+        return
+    if "username" not in cred:
+        return
+    cred.pop("username", None)
+    if cred:
+        _save_cred(cred)
+    else:
+        _clear_cred()
 
 
 def _safe_json(resp: requests.Response) -> Dict[str, Any]:
@@ -342,6 +358,8 @@ def _localize_message(message: str) -> str:
         return ""
 
     lower = text.lower()
+    normalized_lower = re.sub(r"\s+", " ", lower).strip()
+    normalized_key = normalized_lower.rstrip(".! ")
     direct_map = {
         "blocked api host lock due to integrity validation failure.": "무결성 검증에 실패한 API 호스트 잠금 파일을 차단했습니다.",
         "blocked api host change due to security policy.": "보안 정책으로 API 호스트 변경을 차단했습니다.",
@@ -352,39 +370,41 @@ def _localize_message(message: str) -> str:
         "https api url is required in production builds.": "배포 버전에서는 HTTPS API URL만 허용됩니다.",
         "only https api url is allowed for security.": "보안 정책으로 HTTPS API URL만 허용됩니다.",
     }
-    if lower in direct_map:
-        return direct_map[lower]
-    if "api host lock" in lower and "integrity validation failure" in lower:
+    if normalized_lower in direct_map:
+        return direct_map[normalized_lower]
+    if normalized_key in direct_map:
+        return direct_map[normalized_key]
+    if "api host lock" in normalized_lower and "integrity validation failure" in normalized_lower:
         return "무결성 검증에 실패한 API 호스트 잠금 파일을 차단했습니다."
-    if "unprotected api host lock" in lower and "production mode" in lower:
+    if "unprotected api host lock" in normalized_lower and "production mode" in normalized_lower:
         return "배포 버전에서 보호되지 않은 API 호스트 잠금 파일이 감지되었습니다."
-    if "api host change" in lower and "security policy" in lower:
+    if "api host change" in normalized_lower and "security policy" in normalized_lower:
         return "보안 정책으로 API 호스트 변경을 차단했습니다."
-    if "failed to persist api host lock" in lower:
+    if "failed to persist api host lock" in normalized_lower:
         return "API 호스트 잠금 정보 저장에 실패했습니다."
-    if "tls certificate pin" in lower and "failed" in lower:
+    if "tls certificate pin" in normalized_lower and "failed" in normalized_lower:
         return "API TLS 인증서 핀 검증에 실패했습니다."
-    if "tls certificate pin" in lower and "mismatch" in lower:
+    if "tls certificate pin" in normalized_lower and "mismatch" in normalized_lower:
         return "보안 정책으로 API TLS 인증서 핀 불일치를 차단했습니다."
-    if lower.startswith("invalid server url:"):
+    if normalized_lower.startswith("invalid server url:"):
         return f"서버 URL 형식이 올바르지 않습니다: {text.split(':', 1)[-1].strip()}"
-    if lower == "not logged in":
+    if normalized_key == "not logged in":
         return "로그인이 필요합니다."
-    if lower == "field required":
+    if normalized_key == "field required":
         return "필수 입력 항목입니다."
 
-    min_len_match = re.search(r"at least\s+(\d+)\s+characters?", lower)
+    min_len_match = re.search(r"at least\s+(\d+)\s+characters?", normalized_lower)
     if min_len_match:
         return f"최소 {min_len_match.group(1)}자 이상 입력해주세요."
 
-    max_len_match = re.search(r"at most\s+(\d+)\s+characters?", lower)
+    max_len_match = re.search(r"at most\s+(\d+)\s+characters?", normalized_lower)
     if max_len_match:
         return f"최대 {max_len_match.group(1)}자까지 입력 가능합니다."
 
-    if "valid email address" in lower:
+    if "valid email address" in normalized_lower:
         return "올바른 이메일 주소를 입력해주세요."
 
-    if "too many login attempts" in lower or "too many requests" in lower:
+    if "too many login attempts" in normalized_lower or "too many requests" in normalized_lower:
         return "요청이 많습니다. 잠시 후 다시 시도해주세요."
 
     return text
@@ -446,6 +466,8 @@ def _extract_api_message(payload: Dict[str, Any], default_message: str = "") -> 
 def _normalize_saved_username(value: Any) -> str:
     text = str(value or "").strip().lower()
     if not text:
+        return ""
+    if re.fullmatch(r"[a-f0-9]{64}", text):
         return ""
     if not _SAVED_USERNAME_PATTERN.fullmatch(text):
         return ""
@@ -736,7 +758,14 @@ def check_username(username: str) -> Dict[str, Any]:
         return {"available": False, "message": f"오류: {str(e)}"}
 
 
-def register(name: str, username: str, password: str, contact: str, email: str) -> Dict[str, Any]:
+def register(
+    name: str,
+    username: str,
+    password: str,
+    contact: str,
+    email: str,
+    ym_news_opt_in: bool = False,
+) -> Dict[str, Any]:
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
@@ -770,6 +799,7 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
         "password": backend_password,
         "contact": contact_clean,
         "email": email if email else None,
+        "ym_news_opt_in": bool(ym_news_opt_in),
         "program_type": PROGRAM_TYPE,
     }
 
@@ -786,12 +816,12 @@ def register(name: str, username: str, password: str, contact: str, email: str) 
             if not data:
                 return {"success": False, "message": "회원가입 응답이 비었습니다."}
             _merge_account_state(data)
-            if data.get("success") is False and not data.get("message"):
+            if data.get("success") is False:
                 data["message"] = _normalize_api_message(
                     payload=data,
                     status_code=resp.status_code,
                     context="register",
-                    default_message="회원가입에 실패했습니다.",
+                    default_message=str(data.get("message") or "회원가입에 실패했습니다."),
                 )
             if data.get("success"):
                 result_data = data.get("data", {})
@@ -873,12 +903,12 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                     _auth_state["work_count"] = data.get("work_count", 0)
                     _auth_state["work_used"] = data.get("work_used", 0)
                 _merge_account_state(data)
-            elif data.get("status") is False and not data.get("message"):
+            elif data.get("status") is False:
                 data["message"] = _normalize_api_message(
                     payload=data,
                     status_code=resp.status_code,
                     context="login",
-                    default_message="로그인에 실패했습니다.",
+                    default_message=str(data.get("message") or "로그인에 실패했습니다."),
                 )
             return data
 
@@ -1168,7 +1198,8 @@ def get_saved_credentials() -> Optional[Dict[str, str]]:
 def remember_username(username: str) -> None:
     name = _normalize_saved_username(username)
     if not name:
-        _clear_cred()
+        if not _clear_cred():
+            _clear_saved_username_only()
         return
     _save_cred({"username": name})
 

@@ -329,7 +329,7 @@ class AutoUpdater:
                     f.write(chunk)
                     downloaded += len(chunk)
                     if downloaded > self.MAX_UPDATE_SIZE_BYTES:
-                        raise ValueError("Update download exceeded maximum allowed size")
+                        raise ValueError("업데이트 다운로드가 허용된 최대 크기를 초과했습니다.")
                     if progress_callback and total_size > 0:
                         progress_callback((downloaded / total_size) * 100)
 
@@ -339,13 +339,13 @@ class AutoUpdater:
                     os.remove(temp_file)
                 except OSError:
                     pass
-                raise ValueError("Downloaded update checksum mismatch")
+                raise ValueError("다운로드된 업데이트 체크섬이 일치하지 않습니다.")
             if not self._verify_authenticode_signature(temp_file):
                 try:
                     os.remove(temp_file)
                 except OSError:
                     pass
-                raise ValueError("Downloaded update signature validation failed")
+                raise ValueError("다운로드된 업데이트 서명 검증에 실패했습니다.")
 
             return temp_file
 
@@ -355,27 +355,27 @@ class AutoUpdater:
                     os.remove(temp_file)
                 except OSError:
                     pass
-            print(f"Download error: {e}")
+            print(f"다운로드 오류: {e}")
             return None
 
     def install_update(self, update_file: str, expected_sha256: str = "") -> bool:
         try:
             if not self._verify_authenticode_signature(update_file):
-                print("Update signature validation failed.")
+                print("업데이트 서명 검증에 실패했습니다.")
                 return False
 
             expected_sha = str(expected_sha256 or self.last_expected_sha256 or "").strip().lower()
             if not expected_sha:
-                print("Expected update checksum is missing.")
+                print("예상 업데이트 체크섬 정보가 없습니다.")
                 return False
             actual_sha = self._compute_sha256(update_file)
             if actual_sha != expected_sha:
-                print("Update checksum validation failed.")
+                print("업데이트 체크섬 검증에 실패했습니다.")
                 return False
 
             current_exe = sys.executable
             if not getattr(sys, "frozen", False):
-                print("Auto-update is only supported in packaged executable mode.")
+                print("자동 업데이트는 패키징된 실행 파일 모드에서만 지원됩니다.")
                 return False
 
             backup_exe = current_exe + ".backup"
@@ -414,7 +414,7 @@ class AutoUpdater:
             return True
 
         except Exception as e:
-            print(f"Update installation error: {e}")
+            print(f"업데이트 설치 오류: {e}")
             return False
 
     def _create_update_script(self) -> str:
@@ -592,26 +592,26 @@ if __name__ == "__main__":
     from main import VERSION
 
     updater = AutoUpdater(VERSION)
-    print(f"Current version: {VERSION}")
-    print("Checking for updates...")
+    print(f"현재 버전: {VERSION}")
+    print("업데이트 확인 중...")
 
     update_info = updater.check_for_updates()
     if update_info:
-        print(f"\nNew version found: v{update_info['version']}")
-        print(f"Size: {update_info['size_mb']:.1f} MB")
-        print("\nChangelog:")
+        print(f"\n새 버전 발견: v{update_info['version']}")
+        print(f"크기: {update_info['size_mb']:.1f} MB")
+        print("\n변경 내역:")
         print(AutoUpdater.get_changelog_summary(update_info["changelog"]))
 
-        response = input("\nDownload now? (y/n): ").strip().lower()
+        response = input("\n지금 다운로드할까요? (y/n): ").strip().lower()
         if response == "y":
             def progress(percent):
-                print(f"\rProgress: {percent:.1f}%", end="")
+                print(f"\r진행률: {percent:.1f}%", end="")
 
             file_path = updater.download_update(update_info, progress)
             if file_path:
-                print(f"\n\nDownloaded: {file_path}")
-                print("Restart app to install the update.")
+                print(f"\n\n다운로드 완료: {file_path}")
+                print("업데이트 설치를 위해 앱을 다시 시작해주세요.")
             else:
-                print("\nDownload failed")
+                print("\n다운로드에 실패했습니다.")
     else:
-        print("\nAlready on latest version.")
+        print("\n이미 최신 버전입니다.")

@@ -284,6 +284,7 @@ class ComputerUseAgent:
             candidates.append({"channel": None, "executable_path": path, "label": path})
         candidates.append({"channel": None, "executable_path": None, "label": "chromium"})
         return candidates
+
     @staticmethod
     def _is_missing_browser_error(exc: Exception) -> bool:
         text = str(exc or "").lower()
@@ -311,10 +312,10 @@ class ComputerUseAgent:
             )
             stdout_text = str(completed.stdout or "").strip()
             if stdout_text:
-                logger.info("Playwright ?ㅼ튂 異쒕젰: %s", stdout_text[:300])
+                logger.info("Playwright 브라우저 설치 출력: %s", stdout_text[:300])
             return True
         except Exception as exc:
-            logger.warning("Playwright ?먮룞 ?ㅼ튂???ㅽ뙣?덉뒿?덈떎: %s", exc)
+            logger.warning("Playwright 자동 설치에 실패했습니다: %s", exc)
             return False
 
     def start_browser(self):
@@ -353,12 +354,12 @@ class ComputerUseAgent:
                 pass
             self.playwright = None
 
-            last_error = launch_errors[-1] if launch_errors else RuntimeError("알 수 없는 브라우저 실행 실패")
+            last_error = launch_errors[-1] if launch_errors else RuntimeError("브라우저 실행 실패")
             hint = (
-                "Google Chrome 설치 상태를 확인하고, 개발 환경이라면 "
-                "`python -m playwright install chromium` 명령을 실행해주세요."
+                "Google Chrome 설치 상태를 확인하고, 개발 환경이면 "
+                "`python -m playwright install chromium` 명령을 실행해 주세요."
                 if missing_browser_error
-                else "브라우저 보안 정책 또는 실행 권한을 확인해주세요."
+                else "브라우저 보안 정책 또는 실행 권한을 확인해 주세요."
             )
             raise RuntimeError(f"브라우저 시작에 실패했습니다. {hint} 원인: {last_error}") from last_error
 
@@ -466,7 +467,7 @@ class ComputerUseAgent:
             fname = fc.name
             args = fc.args or {}
             extra_fields: Dict[str, Any] = {}
-            print(f"  execute: {fname} ({self._safe_action_args(args)})")
+            print(f"  실행: {fname} ({self._safe_action_args(args)})")
 
             safety = args.get("safety_decision")
             if safety:
@@ -487,7 +488,7 @@ class ComputerUseAgent:
                     url = args.get("url")
                     if url:
                         if not self._is_allowed_navigation_url(str(url)):
-                            raise ValueError(f"蹂댁븞 ?뺤콉?쇰줈 ?대룞??李⑤떒??URL?낅땲?? {url}")
+                            raise ValueError(f"허용되지 않은 URL 이동 요청입니다: {url}")
                         page.goto(url, wait_until="domcontentloaded")
                 elif fname == "click_at":
                     x = _denormalize_x(args["x"], screen_width)
@@ -515,7 +516,7 @@ class ComputerUseAgent:
                     if keys:
                         normalized = self._normalize_keys(str(keys))
                         if normalized not in self.ALLOWED_SAFE_KEYS:
-                            raise ValueError(f"蹂댁븞 ?뺤콉?쇰줈 李⑤떒????議고빀?낅땲?? {keys}")
+                            raise ValueError(f"허용되지 않은 키 조합 요청입니다: {keys}")
                         page.keyboard.press(keys)
                 elif fname == "scroll_document":
                     direction = args.get("direction", "down")
@@ -556,7 +557,7 @@ class ComputerUseAgent:
                 time.sleep(0.5)
                 results.append(ExecutedAction(fname, extra_fields))
             except Exception as e:
-                print(f"  execution error ({fname}): {e}")
+                print(f"  실행 오류 ({fname}): {e}")
                 results.append(ExecutedAction(fname, {"error": str(e)}))
 
         return results
@@ -586,12 +587,12 @@ class ComputerUseAgent:
     # --------------------------------------------------------------- main loop
     def run_goal(self, goal: str, turn_limit: int = 8, skip_navigation: bool = False):
         if self.client is None:
-            print("Google API client is not configured.")
+            print("Google API 클라이언트가 설정되지 않았습니다.")
             return None
         if os.getenv("THREAD_AUTO_ALLOW_AI_SCREENSHOTS", "").strip() != "1":
             print(
-                "AI screenshot transfer is disabled. "
-                "Set THREAD_AUTO_ALLOW_AI_SCREENSHOTS=1 to enable."
+                "AI 스크린샷 전송이 비활성화되어 있습니다. "
+                "사용하려면 THREAD_AUTO_ALLOW_AI_SCREENSHOTS=1 로 설정하세요."
             )
             return None
 
@@ -629,7 +630,7 @@ class ComputerUseAgent:
         ]
 
         for turn in range(turn_limit):
-            print(f"\n--- Turn {turn + 1} ---")
+            print(f"\n--- {turn + 1}회차 ---")
             response = self.client.models.generate_content(
                 model="gemini-2.5-computer-use-preview-10-2025",
                 contents=contents,
@@ -637,7 +638,7 @@ class ComputerUseAgent:
             )
 
             if not response.candidates or len(response.candidates) == 0:
-                print("No API candidates returned")
+                print("API 응답 후보가 없습니다.")
                 return None
 
             candidate = response.candidates[0]
@@ -648,7 +649,7 @@ class ComputerUseAgent:
                 final_text = " ".join(
                     [p.text for p in candidate.content.parts if getattr(p, "text", None)]
                 )
-                print(f"Task complete: {final_text}")
+                print(f"작업 완료: {final_text}")
                 return final_text
 
             results = self._execute_function_calls(candidate, self.page, SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -661,13 +662,13 @@ class ComputerUseAgent:
                 )
             )
 
-        print("Turn limit reached")
+        print("턴 제한에 도달했습니다.")
         return None
 
 
 def main(argv: List[str]):
     if len(argv) < 2:
-        print('Usage: python -m src.computer_use_agent "<goal text>"')
+        print('사용법: python -m src.computer_use_agent "<목표 텍스트>"')
         sys.exit(1)
 
     goal = argv[1]
@@ -682,3 +683,4 @@ def main(argv: List[str]):
 
 if __name__ == "__main__":
     main(sys.argv)
+

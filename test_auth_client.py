@@ -150,6 +150,27 @@ def test_register_payload_hashes_password(monkeypatch):
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
     assert payload["password"] == hashlib.sha256("SamplePass123".encode("utf-8")).hexdigest()
+    assert payload["ym_news_opt_in"] is False
+
+
+def test_register_payload_supports_news_opt_in(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(422, {"success": False, "message": "invalid"})
+    session = _FakeSession(response)
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    auth_client.register(
+        name="Tester1",
+        username="sampleuser",
+        password="SamplePass123",
+        contact="01012345678",
+        email="sample@example.com",
+        ym_news_opt_in=True,
+    )
+
+    assert len(session.calls) == 1
+    payload = session.calls[0]["json"]
+    assert payload["ym_news_opt_in"] is True
 
 
 def test_register_200_failure_with_error_object_returns_message(monkeypatch):
