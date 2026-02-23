@@ -89,6 +89,33 @@ jobs:
           "$hash CoupangThreadAuto.exe" | Out-File -FilePath "dist\\CoupangThreadAuto.exe.sha256" -Encoding ascii
           Write-Host "SHA256: $hash"
 
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build installer
+        env:
+          COUPUAS_APP_VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          python build_installer.py
+
+      - name: Verify installer
+        run: |
+          if (Test-Path "dist\\CoupangThreadAutoSetup.exe") {
+            Write-Host "Installer build successful!"
+            $size = (Get-Item "dist\\CoupangThreadAutoSetup.exe").Length / 1MB
+            Write-Host "Installer size: $([math]::Round($size, 2)) MB"
+          } else {
+            Write-Error "Installer build failed - setup EXE not found"
+            exit 1
+          }
+
+      - name: Generate installer checksum
+        run: |
+          $hash = (Get-FileHash "dist\\CoupangThreadAutoSetup.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash CoupangThreadAutoSetup.exe" | Out-File -FilePath "dist\\CoupangThreadAutoSetup.exe.sha256" -Encoding ascii
+          Write-Host "Installer SHA256: $hash"
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -96,6 +123,8 @@ jobs:
           path: |
             dist/CoupangThreadAuto.exe
             dist/CoupangThreadAuto.exe.sha256
+            dist/CoupangThreadAutoSetup.exe
+            dist/CoupangThreadAutoSetup.exe.sha256
           retention-days: 30
 
   release:
@@ -122,5 +151,7 @@ jobs:
           files: |
             dist/CoupangThreadAuto.exe
             dist/CoupangThreadAuto.exe.sha256
+            dist/CoupangThreadAutoSetup.exe
+            dist/CoupangThreadAutoSetup.exe.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
