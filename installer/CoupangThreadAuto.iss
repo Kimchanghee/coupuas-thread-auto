@@ -1,5 +1,5 @@
 ﻿#ifndef MyAppVersion
-#define MyAppVersion "2.3.19"
+#define MyAppVersion "2.3.20"
 #endif
 
 [Setup]
@@ -26,7 +26,6 @@ UsePreviousTasks=yes
 DirExistsWarning=no
 CloseApplications=yes
 CloseApplicationsFilter=CoupangThreadAuto.exe
-ForceCloseApplications=yes
 RestartApplications=no
 
 [Languages]
