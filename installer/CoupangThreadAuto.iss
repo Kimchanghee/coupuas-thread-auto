@@ -1,5 +1,5 @@
 ﻿#ifndef MyAppVersion
-#define MyAppVersion "2.3.20"
+#define MyAppVersion "2.3.21"
 #endif
 
 [Setup]
@@ -33,7 +33,7 @@ Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "諛뷀깢?붾㈃ ?꾩씠肄?留뚮뱾湲?; GroupDescription: "異붽? ?묒뾽:"
+Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"
 
 [Files]
 Source: "..\dist\CoupangThreadAuto.exe"; DestDir: "{app}"; Flags: ignoreversion

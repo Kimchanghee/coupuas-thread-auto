@@ -16,5 +16,5 @@ Coupang Partners Thread Auto - 소스 패키지
 - services: 서비스 모듈 (coupang_parser, aggro_generator, image_search)
 """
 
-__version__ = "2.3.20"
+__version__ = "2.3.21"
 __author__ = "와이엠"
