@@ -65,7 +65,7 @@ from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 
-VERSION = "v2.3.21"
+VERSION = "v2.3.22"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 

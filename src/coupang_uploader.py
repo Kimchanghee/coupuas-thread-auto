@@ -444,6 +444,33 @@ class CoupangPartnersPipeline:
             self._image_search = ImageSearchService()
         return self._image_search
 
+    def _normalize_second_post_disclosure(self, post_data: Optional[Dict]) -> Optional[Dict]:
+        """Ensure required disclosure line is always at the top of second post."""
+        if not isinstance(post_data, dict):
+            return post_data
+
+        second_post = post_data.get("second_post")
+        if not isinstance(second_post, dict):
+            return post_data
+
+        disclosure = str(getattr(self.aggro_generator, "COUPANG_DISCLOSURE", "") or "").strip()
+        if not disclosure:
+            return post_data
+
+        raw_text = str(second_post.get("text", "") or "").strip()
+        if not raw_text:
+            second_post["text"] = disclosure
+            return post_data
+
+        lines = [line.strip() for line in raw_text.replace("\r\n", "\n").split("\n") if line.strip()]
+        remaining_lines = [line for line in lines if line != disclosure]
+
+        if remaining_lines:
+            second_post["text"] = f"{disclosure}\n\n" + "\n".join(remaining_lines)
+        else:
+            second_post["text"] = disclosure
+        return post_data
+
     def process_link(self, coupang_url: str, user_keywords: str = None) -> Optional[Dict]:
         """단일 쿠팡 링크 처리
 
@@ -505,6 +532,7 @@ class CoupangPartnersPipeline:
             product_info,
             api_key=self._resolve_google_api_key(),
         )
+        post_data = self._normalize_second_post_disclosure(post_data)
         print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")
 
         return post_data

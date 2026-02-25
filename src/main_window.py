@@ -2449,6 +2449,18 @@ class MainWindow(QMainWindow):
             config.instagram_username = username
             config.save()
 
+        if getattr(self, "_threads_login_browser_open", False):
+            self._log_user_activity(
+                "threads_login_launch_skipped",
+                "reason=browser_already_open",
+            )
+            self._update_login_status(
+                "pending",
+                "이미 로그인 브라우저가 열려 있습니다. 로그인 후 창을 닫아주세요.",
+            )
+            self.signals.log.emit("로그인 브라우저가 이미 열려 있습니다. 로그인 후 창을 닫아주세요.")
+            return
+
         self.threads_login_btn.setEnabled(False)
         self.threads_login_btn.setText("여는 중...")
         self._update_login_status("pending", "브라우저 여는 중...")
@@ -2467,6 +2479,7 @@ class MainWindow(QMainWindow):
                 "reason=missing_runtime_api_key",
                 level="WARNING",
             )
+            self._threads_login_browser_open = False
             self._restore_login_btn()
             self._update_login_status("error", "Gemini API 키를 먼저 저장해주세요.")
             show_warning(self, "설정 필요", "설정에서 유효한 Gemini API 키를 저장한 뒤 다시 시도해주세요.")
@@ -2476,6 +2489,7 @@ class MainWindow(QMainWindow):
             profile_dir,
             bool(username),
         )
+        self._threads_login_browser_open = True
 
         def open_browser():
             launch_notified = False
@@ -2599,9 +2613,10 @@ class MainWindow(QMainWindow):
         if self._closed:
             return
 
-        self._restore_login_btn()
-
         if success:
+            self._threads_login_browser_open = True
+            self.threads_login_btn.setEnabled(False)
+            self.threads_login_btn.setText("로그인 창 열림")
             self._update_login_status("pending", "브라우저가 열렸습니다. 로그인 완료 후 창을 닫아주세요.")
             opened_url = str(detail or "").strip()
             self._log_user_activity("threads_login_browser_opened", f"url={opened_url or '(unknown)'}")
@@ -2611,6 +2626,8 @@ class MainWindow(QMainWindow):
                 self.signals.log.emit("Threads 로그인 브라우저가 열렸습니다. 로그인 후 창을 닫아주세요.")
             return
 
+        self._threads_login_browser_open = False
+        self._restore_login_btn()
         reason = str(detail or "").strip() or "원인을 확인할 수 없습니다."
         logger.warning("Threads 로그인 브라우저 실행 실패 원본: %s", reason)
         self._update_login_status("error", "브라우저 실행 실패")
@@ -2637,6 +2654,8 @@ class MainWindow(QMainWindow):
     def _on_threads_browser_closed(self):
         if self._closed:
             return
+        self._threads_login_browser_open = False
+        self._restore_login_btn()
         self._log_user_activity("threads_login_browser_closed", "session_saved=True")
         self._update_login_status(
             "success",
