@@ -35,13 +35,13 @@ logger = logging.getLogger(__name__)
 
 # ─── Constants ──────────────────────────────────────────────
 
-WIN_W = 1280
-WIN_H = 800
-HEADER_H = 68
-SIDEBAR_W = 280
-CONTENT_W = 1000  # WIN_W - SIDEBAR_W
-CONTENT_H = 700   # WIN_H - HEADER_H - STATUSBAR_H
-STATUSBAR_H = 32
+WIN_W = 1360
+WIN_H = 960       # 설정 페이지 모든 카드 + 안전 여유
+HEADER_H = 84
+SIDEBAR_W = 320
+CONTENT_W = 1040  # WIN_W - SIDEBAR_W
+CONTENT_H = 836   # WIN_H - HEADER_H - STATUSBAR_H
+STATUSBAR_H = 40
 
 
 # ─── Helpers ────────────────────────────────────────────────
@@ -116,24 +116,23 @@ class HeaderBar(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # 배경 그라디언트
-        grad = QLinearGradient(0, 0, w, 0)
-        grad.setColorAt(0, QColor("#12203A"))
-        grad.setColorAt(0.5, QColor("#162847"))
-        grad.setColorAt(1, QColor("#12203A"))
+        # 배경 — 웜 차콜 (Claude Dark)
+        grad = QLinearGradient(0, 0, 0, h)
+        grad.setColorAt(0, QColor(Colors.BG_HEADER))
+        grad.setColorAt(1, QColor(Colors.BG_DARK))
         painter.fillRect(self.rect(), grad)
 
-        # 상단 accent 라인
+        # 상단 accent 라인 — 코랄
         accent = QLinearGradient(0, 0, w, 0)
-        accent.setColorAt(0, QColor(13, 89, 242, 0))
+        accent.setColorAt(0, QColor(217, 119, 87, 0))
         accent.setColorAt(0.2, QColor(Colors.ACCENT))
         accent.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
         accent.setColorAt(0.8, QColor(Colors.ACCENT))
-        accent.setColorAt(1, QColor(13, 89, 242, 0))
+        accent.setColorAt(1, QColor(217, 119, 87, 0))
         painter.fillRect(0, 0, w, self.ACCENT_LINE_H, accent)
 
-        # 하단 border
-        painter.setPen(QPen(QColor(13, 89, 242, 80), 1))
+        # 하단 border — 미묘한 톤
+        painter.setPen(QPen(QColor(Colors.BORDER), 1))
         painter.drawLine(0, h - 1, w, h - 1)
 
 
@@ -150,13 +149,13 @@ class SidebarPanel(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # 배경
+        # 사이드바 배경 — 한 단계 더 어두운 차콜
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#111827"))
+        painter.setBrush(QColor(Colors.BG_SIDEBAR))
         painter.drawRect(0, 0, w, h)
 
         # 오른쪽 border 라인
-        painter.setPen(QPen(QColor(Colors.BORDER), 1))
+        painter.setPen(QPen(QColor(Colors.BORDER_SUBTLE), 1))
         painter.drawLine(w - 1, 0, w - 1, h)
 
 
@@ -300,138 +299,128 @@ class MainWindow(QMainWindow):
     # ── Header ──────────────────────────────────────────────
 
     def _build_header(self, parent):
+        """새 헤더 — 큰 브랜드(좌) + 우측 액션 그룹.
+        세로 중앙 정렬, 충분한 패딩, 알약 버튼 충돌 없음.
+        """
         header = HeaderBar(parent)
         header.setGeometry(0, 0, WIN_W, HEADER_H)
 
-        # Brand glow
-        brand_glow = QLabel("", header)
-        brand_glow.setGeometry(14, 14, 40, 40)
-        brand_glow.setStyleSheet(
-            "QLabel { background-color: rgba(13, 89, 242, 0.25);"
-            " border: 2px solid rgba(13, 89, 242, 0.4);"
-            " border-radius: 20px; }"
-        )
+        cy = HEADER_H // 2  # vertical center
 
-        # Brand icon
+        # ── 브랜드 (좌): 큰 코랄 칩 + 2줄 타이틀 ──
+        brand_size = 48
+        bx = 24
         brand_icon = QLabel("C", header)
-        brand_icon.setGeometry(16, 16, 36, 36)
+        brand_icon.setGeometry(bx, cy - brand_size // 2, brand_size, brand_size)
         brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_icon.setStyleSheet(
             f"QLabel {{ background: {Gradients.ACCENT_BTN};"
-            f" color: #FFFFFF; border-radius: 18px;"
-            f" font-size: 15pt; font-weight: 800; }}"
+            f" color: #FFFFFF; border-radius: {brand_size // 2}px;"
+            f" font-size: 18pt; font-weight: 800;"
+            f" border: 2px solid rgba(217, 119, 87, 0.35); }}"
         )
 
-        # Title
         title_label = QLabel("쿠팡 파트너스", header)
-        title_label.setGeometry(62, 10, 220, 30)
+        title_label.setGeometry(bx + brand_size + 14, cy - 24, 240, 28)
         title_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 15pt; font-weight: 800;"
-            " letter-spacing: -0.5px; background: transparent;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 16pt; font-weight: 700;"
+            f" letter-spacing: -0.4px; background: transparent;"
         )
 
-        # Subtitle
         sub_label = QLabel("THREAD AUTOMATION", header)
-        sub_label.setGeometry(62, 38, 200, 20)
+        sub_label.setGeometry(bx + brand_size + 14, cy + 4, 240, 18)
         sub_label.setStyleSheet(
             f"color: {Colors.ACCENT_LIGHT}; font-size: 8pt; font-weight: 700;"
-            " letter-spacing: 2px; background: transparent;"
+            f" letter-spacing: 2.5px; background: transparent;"
         )
 
-        # Right-side elements (positioned from right edge)
-        _nav_pill_style = (
-            f"QPushButton {{ background: rgba(13, 89, 242, 0.08);"
+        # ── 우측 액션 알약 스타일 ──
+        nav_pill = (
+            f"QPushButton {{ background: {Colors.BG_ELEVATED};"
             f" color: {Colors.TEXT_SECONDARY};"
-            f" border: 1px solid rgba(13, 89, 242, 0.15);"
-            f" border-radius: 14px; font-size: 9pt; font-weight: 600;"
-            f" padding: 4px 12px; }}"
-            f" QPushButton:hover {{ background: rgba(13, 89, 242, 0.20);"
-            f" color: #FFFFFF; border-color: rgba(13, 89, 242, 0.40); }}"
+            f" border: 1px solid {Colors.BORDER};"
+            f" border-radius: 16px; font-size: 9pt; font-weight: 600;"
+            f" padding: 6px 16px; }}"
+            f" QPushButton:hover {{ background: {Colors.BG_HOVER};"
+            f" color: {Colors.TEXT_PRIMARY}; border-color: {Colors.ACCENT}; }}"
         )
 
-        # Logout button (far right)
         self.logout_btn = QPushButton("로그아웃", header)
-        self.logout_btn.setGeometry(WIN_W - 80, 20, 64, 28)
         self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.logout_btn.setStyleSheet(
-            f"QPushButton {{ background: rgba(239, 68, 68, 0.08);"
+            f"QPushButton {{ background: transparent;"
             f" color: {Colors.TEXT_MUTED};"
-            f" border: 1px solid rgba(239, 68, 68, 0.15);"
-            f" border-radius: 14px; font-size: 9pt; font-weight: 600;"
-            f" padding: 4px 12px; }}"
-            f" QPushButton:hover {{ background: rgba(239, 68, 68, 0.25);"
-            f" color: {Colors.ERROR}; border-color: {Colors.ERROR}; }}"
+            f" border: 1px solid {Colors.BORDER};"
+            f" border-radius: 16px; font-size: 9pt; font-weight: 600;"
+            f" padding: 6px 16px; }}"
+            f" QPushButton:hover {{ background: {Colors.ERROR};"
+            f" color: #FFFFFF; border-color: {Colors.ERROR}; }}"
         )
         self.logout_btn.clicked.connect(self._do_logout)
 
-        # Tutorial button
         self.tutorial_btn = QPushButton("Tutorial", header)
-        self.tutorial_btn.setGeometry(WIN_W - 80 - 12 - 56, 20, 56, 28)
         self.tutorial_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.tutorial_btn.setStyleSheet(_nav_pill_style)
+        self.tutorial_btn.setStyleSheet(nav_pill)
         self.tutorial_btn.clicked.connect(self.open_tutorial)
 
-        # Update button
         self.update_btn = QPushButton("업데이트", header)
-        self.update_btn.setGeometry(WIN_W - 80 - 12 - 56 - 10 - 60, 20, 60, 28)
         self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.update_btn.setStyleSheet(_nav_pill_style)
+        self.update_btn.setStyleSheet(nav_pill)
         self.update_btn.clicked.connect(self.check_for_updates)
 
-        # Re-place header pills by sizeHint to avoid text clipping across fonts
-        nav_y = 20
-        nav_h = 28
-        nav_gap = 10
-        nav_right = WIN_W - 16
+        # 우측에서 좌측으로 배치 — sizeHint 기반 (+30 충분 마진으로 한국어 텍스트 잘림 방지)
+        nav_h = 32
+        nav_gap = 8
+        nav_right = WIN_W - 24
+        nav_y = cy - nav_h // 2
         for btn in (self.logout_btn, self.tutorial_btn, self.update_btn):
             btn.ensurePolished()
             btn.setFixedHeight(nav_h)
-            # Add a bit of slack to avoid left/right clipping when font rendering differs.
-            w = max(btn.sizeHint().width() + 10, 56)
+            w = max(btn.sizeHint().width() + 30, 80)
             nav_right -= w
             btn.setGeometry(nav_right, nav_y, w, nav_h)
             nav_right -= nav_gap
 
-
-        # Vertical separator
-        sep_x = nav_right - 4
+        # 세로 구분선
+        sep_x = nav_right - 6
         sep = QFrame(header)
-        sep.setGeometry(sep_x, 18, 1, 32)
-        sep.setStyleSheet(f"background-color: rgba(13, 89, 242, 0.25); border: none;")
+        sep.setGeometry(sep_x, cy - 14, 1, 28)
+        sep.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
 
-        # Plan badge (FREE / PRO)
+        # 사용 횟수 + 플랜 배지 — 칩 형태
         self._plan_badge = QLabel("FREE", header)
-        plan_x = sep_x - 10 - 64
-        self._plan_badge.setGeometry(plan_x, 20, 64, 28)
+        plan_w = 60
+        plan_x = sep_x - 10 - plan_w
+        self._plan_badge.setGeometry(plan_x, cy - 14, plan_w, 28)
         self._plan_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._plan_badge.setStyleSheet(
-            f"QLabel {{ background-color: rgba(34, 197, 94, 0.12);"
-            f" color: {Colors.SUCCESS}; border: 1px solid rgba(34, 197, 94, 0.3);"
+            f"QLabel {{ background-color: rgba(122, 184, 122, 0.16);"
+            f" color: {Colors.SUCCESS}; border: 1px solid rgba(122, 184, 122, 0.4);"
             f" border-radius: 14px; font-size: 9pt; font-weight: 700;"
-            f" letter-spacing: 1px; }}"
+            f" letter-spacing: 1.2px; }}"
         )
 
-        # Work count label
         self._work_label = QLabel("0 / 0 회", header)
-        work_x = plan_x - 10 - 90
-        self._work_label.setGeometry(work_x, 22, 90, 24)
+        work_w = 80
+        work_x = plan_x - 10 - work_w
+        self._work_label.setGeometry(work_x, cy - 12, work_w, 24)
         self._work_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._work_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
-            " background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 600;"
+            f" background: transparent;"
         )
 
-        # Status badge
+        # 상태 배지 (대기중/진행중) + 좌측 코랄 닷
         self.status_badge = Badge("대기중", Colors.SUCCESS, header)
-        status_x = work_x - 12 - 90
-        self.status_badge.setGeometry(status_x, 22, 90, 24)
+        status_w = 90
+        status_x = work_x - 14 - status_w
+        self.status_badge.setGeometry(status_x, cy - 12, status_w, 24)
 
-        # Online dot
         self._online_dot = QLabel("", header)
-        self._online_dot.setGeometry(status_x - 18, 27, 10, 10)
+        self._online_dot.setGeometry(status_x - 18, cy - 5, 10, 10)
         self._online_dot.setStyleSheet(
             f"background-color: {Colors.SUCCESS}; border-radius: 5px;"
-            f" border: 2px solid rgba(34, 197, 94, 0.3);"
+            f" border: 2px solid rgba(122, 184, 122, 0.35);"
         )
 
         self._header = header
@@ -441,7 +430,8 @@ class MainWindow(QMainWindow):
 
     def _build_sidebar(self, parent):
         sidebar = SidebarPanel(parent)
-        sidebar.setGeometry(0, HEADER_H, SIDEBAR_W, WIN_H - HEADER_H)
+        # statusbar(WIN_H-STATUSBAR_H ~ WIN_H)와 겹치지 않도록 높이를 STATUSBAR_H 만큼 줄임
+        sidebar.setGeometry(0, HEADER_H, SIDEBAR_W, WIN_H - HEADER_H - STATUSBAR_H)
         self._sidebar = sidebar
 
         # Button group for exclusive selection
@@ -449,9 +439,12 @@ class MainWindow(QMainWindow):
         self._sidebar_group.setExclusive(True)
         self._sidebar_buttons = []
 
+        # ── 메뉴 (큰 아이템, 좌측 코랄 인디케이터) ──
+        menu_top = 24
+        item_h = 56
         for i, (icon, label) in enumerate(self._SIDEBAR_ITEMS):
-            btn = QPushButton(f"  {icon}   {label}", sidebar)
-            btn.setGeometry(0, 20 + i * 48, SIDEBAR_W, 44)
+            btn = QPushButton(f"   {icon}     {label}", sidebar)
+            btn.setGeometry(0, menu_top + i * (item_h + 4), SIDEBAR_W, item_h)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(self._sidebar_btn_style())
@@ -461,132 +454,133 @@ class MainWindow(QMainWindow):
         self._sidebar_buttons[0].setChecked(True)
         self._sidebar_group.idClicked.connect(self._switch_page)
 
-        # Divider line below buttons
-        divider_y = 20 + len(self._SIDEBAR_ITEMS) * 48 + 12
-        divider = QFrame(sidebar)
-        divider.setGeometry(20, divider_y, SIDEBAR_W - 40, 1)
-        divider.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
+        section_y = menu_top + len(self._SIDEBAR_ITEMS) * (item_h + 4) + 18
 
-        # ── Progress Panel ─────────────────────────────────
-        prog_y = divider_y + 16
+        # ── 카드 #1: 진행 상황 ──
+        card_pad_x = 16
+        card_w = SIDEBAR_W - card_pad_x * 2
+        prog_card_h = 28 + 24 * len(self._PROCESS_STEPS) + 26
+        prog_card = QFrame(sidebar)
+        prog_card.setGeometry(card_pad_x, section_y, card_w, prog_card_h)
+        prog_card.setStyleSheet(
+            f"QFrame {{ background-color: {Colors.BG_SURFACE};"
+            f" border: 1px solid {Colors.BORDER_SUBTLE};"
+            f" border-radius: 14px; }}"
+        )
 
-        prog_title = QLabel("현재 진행 상황", sidebar)
-        prog_title.setGeometry(24, prog_y, 200, 20)
+        prog_title = QLabel("진행 상황", prog_card)
+        prog_title.setGeometry(16, 12, card_w - 100, 18)
         prog_title.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 700;"
-            " letter-spacing: 1.5px; background: transparent;"
+            f" letter-spacing: 1.4px; background: transparent; border: none;"
         )
-        prog_y += 28
-
-        # Queue progress
-        self._progress_queue_label = QLabel("전체: 0 / 0", sidebar)
-        self._progress_queue_label.setGeometry(24, prog_y, 240, 20)
+        self._progress_queue_label = QLabel("0 / 0", prog_card)
+        self._progress_queue_label.setGeometry(card_w - 80, 10, 64, 22)
+        self._progress_queue_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._progress_queue_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 10pt; font-weight: 700;"
-            " background: transparent;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 11pt; font-weight: 700;"
+            f" background: transparent; border: none;"
         )
-        prog_y += 28
 
-        # Step indicators
+        # Step indicators (안에 도트 + 라벨) — 라벨 색을 TEXT_SECONDARY로 끌어올려 가독성 확보
         self._step_dots = []
         self._step_labels = []
+        sy = 38
         for step_name in self._PROCESS_STEPS:
-            dot = QLabel("○", sidebar)
-            dot.setGeometry(28, prog_y, 16, 20)
+            dot = QLabel("●", prog_card)
+            dot.setGeometry(14, sy, 24, 20)
             dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
             dot.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 10pt; background: transparent;"
+                f"color: {Colors.BORDER_LIGHT}; font-size: 11pt; background: transparent; border: none;"
             )
-            label = QLabel(step_name, sidebar)
-            label.setGeometry(48, prog_y, 200, 20)
+            label = QLabel(step_name, prog_card)
+            label.setGeometry(38, sy, card_w - 50, 20)
             label.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 9pt; background: transparent;"
+                f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 500;"
+                f" background: transparent; border: none;"
             )
             self._step_dots.append(dot)
             self._step_labels.append(label)
-            prog_y += 24
+            sy += 24
 
-        prog_y += 8
+        section_y += prog_card_h + 12
 
-        # Divider before counts
-        divider2 = QFrame(sidebar)
-        divider2.setGeometry(20, prog_y, SIDEBAR_W - 40, 1)
-        divider2.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
-        prog_y += 12
-
-        # Status label
-        self._sidebar_status_label = QLabel("대기중", sidebar)
-        self._sidebar_status_label.setGeometry(24, prog_y, 240, 20)
-        self._sidebar_status_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
-            " background: transparent;"
+        # ── 카드 #2: 통계 (가로 3분할) ──
+        stat_card_h = 76
+        stat_card = QFrame(sidebar)
+        stat_card.setGeometry(card_pad_x, section_y, card_w, stat_card_h)
+        stat_card.setStyleSheet(
+            f"QFrame {{ background-color: {Colors.BG_SURFACE};"
+            f" border: 1px solid {Colors.BORDER_SUBTLE};"
+            f" border-radius: 14px; }}"
         )
-        prog_y += 26
+        col_w = (card_w - 32) // 3
 
-        # Success / Failed / Total (compact horizontal)
+        def _stat_col(idx, label, color):
+            x = 16 + col_w * idx
+            cap = QLabel(label, stat_card)
+            cap.setGeometry(x, 14, col_w, 14)
+            cap.setStyleSheet(
+                f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 700;"
+                f" letter-spacing: 1px; background: transparent; border: none;"
+            )
+            value = QLabel("0", stat_card)
+            value.setGeometry(x, 32, col_w, 30)
+            value.setStyleSheet(
+                f"color: {color}; font-size: 18pt; font-weight: 800;"
+                f" background: transparent; border: none;"
+            )
+            return value
+
+        self._sidebar_success_label = _stat_col(0, "성공", Colors.SUCCESS)
+        self._sidebar_failed_label = _stat_col(1, "실패", Colors.ERROR)
+        self._sidebar_total_label = _stat_col(2, "전체", Colors.ACCENT_LIGHT)
+        # legacy dot widgets — 더 이상 사용하지 않지만 참조 호환을 위해 더미 라벨로
         self._sidebar_success_dot = QLabel("", sidebar)
-        self._sidebar_success_dot.setGeometry(24, prog_y + 4, 8, 8)
-        self._sidebar_success_dot.setStyleSheet(
-            f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
-        )
-        self._sidebar_success_label = QLabel("성공: 0", sidebar)
-        self._sidebar_success_label.setGeometry(40, prog_y, 70, 20)
-        self._sidebar_success_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
-        )
-
         self._sidebar_failed_dot = QLabel("", sidebar)
-        self._sidebar_failed_dot.setGeometry(120, prog_y + 4, 8, 8)
-        self._sidebar_failed_dot.setStyleSheet(
-            f"background-color: {Colors.ERROR}; border-radius: 4px;"
-        )
-        self._sidebar_failed_label = QLabel("실패: 0", sidebar)
-        self._sidebar_failed_label.setGeometry(136, prog_y, 70, 20)
-        self._sidebar_failed_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
-        )
-
         self._sidebar_total_dot = QLabel("", sidebar)
-        self._sidebar_total_dot.setGeometry(216, prog_y + 4, 8, 8)
-        self._sidebar_total_dot.setStyleSheet(
-            f"background-color: {Colors.INFO}; border-radius: 4px;"
-        )
-        self._sidebar_total_label = QLabel("전체: 0", sidebar)
-        self._sidebar_total_label.setGeometry(232, prog_y, 70, 20)
-        self._sidebar_total_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
-        )
-        prog_y += 30
+        self._sidebar_success_dot.hide(); self._sidebar_failed_dot.hide(); self._sidebar_total_dot.hide()
+        # 상태 라벨 (이전 버전 호환)
+        self._sidebar_status_label = QLabel("대기중", sidebar)
+        self._sidebar_status_label.hide()
 
-        # ── Mini Log Area ──────────────────────────────────
-        log_title = QLabel("작업 로그", sidebar)
-        log_title.setGeometry(24, prog_y, 200, 20)
+        section_y += stat_card_h + 12
+
+        # ── 카드 #3: 작업 로그 (남은 공간 모두) ──
+        log_y = section_y
+        log_avail_h = WIN_H - HEADER_H - log_y - STATUSBAR_H - 12
+        log_card = QFrame(sidebar)
+        log_card.setGeometry(card_pad_x, log_y, card_w, max(log_avail_h, 120))
+        log_card.setStyleSheet(
+            f"QFrame {{ background-color: {Colors.BG_SURFACE};"
+            f" border: 1px solid {Colors.BORDER_SUBTLE};"
+            f" border-radius: 14px; }}"
+        )
+        log_title = QLabel("작업 로그", log_card)
+        log_title.setGeometry(16, 12, card_w - 32, 18)
         log_title.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 700;"
-            " letter-spacing: 1.5px; background: transparent;"
+            f" letter-spacing: 1.4px; background: transparent; border: none;"
         )
-        prog_y += 22
-
-        log_h = max(WIN_H - HEADER_H - prog_y - STATUSBAR_H - 8, 80)
-        self.log_text = QTextEdit(sidebar)
-        self.log_text.setGeometry(12, prog_y, SIDEBAR_W - 24, log_h)
+        self.log_text = QTextEdit(log_card)
+        self.log_text.setGeometry(12, 36, card_w - 24, max(log_avail_h - 48, 60))
         self.log_text.setReadOnly(True)
         self.log_text.document().setMaximumBlockCount(self.MAX_LOG_LINES)
         self.log_text.setStyleSheet(
             f"QTextEdit {{"
             f"  background-color: {Colors.BG_TERMINAL};"
             f"  border: 1px solid {Colors.BORDER};"
-            f"  border-radius: 8px;"
-            f"  padding: 6px;"
+            f"  border-radius: 10px;"
+            f"  padding: 10px;"
             f"  color: {Colors.TEXT_SECONDARY};"
             f"  font-family: {Typography.FAMILY_MONO};"
-            f"  font-size: 8pt;"
+            f"  font-size: 9pt;"
             f"}}"
         )
 
     @staticmethod
     def _sidebar_btn_style():
-        """Sidebar button stylesheet."""
+        """Sidebar menu item — 큰 알약, 좌측 코랄 인디케이터."""
         return (
             f"QPushButton {{"
             f"  background: transparent;"
@@ -594,17 +588,17 @@ class MainWindow(QMainWindow):
             f"  border: none;"
             f"  border-left: 3px solid transparent;"
             f"  text-align: left;"
-            f"  padding-left: 20px;"
-            f"  font-size: 10pt;"
+            f"  padding-left: 18px;"
+            f"  font-size: 11pt;"
             f"  font-weight: 600;"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background: rgba(13, 89, 242, 0.08);"
+            f"  background: rgba(217, 119, 87, 0.08);"
             f"  color: {Colors.TEXT_PRIMARY};"
             f"}}"
             f"QPushButton:checked {{"
-            f"  background: rgba(13, 89, 242, 0.12);"
-            f"  color: #FFFFFF;"
+            f"  background: rgba(217, 119, 87, 0.14);"
+            f"  color: {Colors.TEXT_BRIGHT};"
             f"  border-left: 3px solid {Colors.ACCENT};"
             f"}}"
         )
@@ -630,35 +624,32 @@ class MainWindow(QMainWindow):
         self._build_page2_settings(self._pages[2])
 
     def _make_page_header(self, page, icon_char, title_text):
-        """Page header helper: icon + title + separator. Returns next y."""
-        # Icon background
-        icon_bg = QLabel("", page)
-        icon_bg.setGeometry(28, 20, 36, 36)
-        icon_bg.setStyleSheet(
-            "QLabel { background-color: rgba(13, 89, 242, 0.15);"
-            " border: 1px solid rgba(13, 89, 242, 0.3);"
-            " border-radius: 18px; }"
+        """페이지 헤더 — 큰 코랄 칩 + 큰 타이틀(22pt). next y 반환."""
+        chip_size = 44
+        chip_x, chip_y = 32, 28
+        # 코랄 칩
+        chip = QLabel(icon_char, page)
+        chip.setGeometry(chip_x, chip_y, chip_size, chip_size)
+        chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        chip.setStyleSheet(
+            f"QLabel {{ background: {Gradients.ACCENT_BTN};"
+            f" color: #FFFFFF; border-radius: {chip_size // 2}px;"
+            f" font-size: 16pt; font-weight: 700;"
+            f" border: 2px solid rgba(217, 119, 87, 0.30); }}"
         )
-        # Icon text
-        icon_label = QLabel(icon_char, page)
-        icon_label.setGeometry(28, 20, 36, 36)
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 14pt; background: transparent;"
-        )
-        # Title
+        # 큰 타이틀
         title = QLabel(title_text, page)
-        title.setGeometry(76, 20, 400, 36)
+        title.setGeometry(chip_x + chip_size + 16, chip_y + 4, 460, 36)
         title.setStyleSheet(
-            "color: #FFFFFF; font-size: 15pt; font-weight: 800;"
-            " letter-spacing: -0.3px; background: transparent;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 20pt; font-weight: 700;"
+            f" letter-spacing: -0.5px; background: transparent;"
         )
-        # Separator
+        # 미세한 구분선 (칩 아래)
         sep = QFrame(page)
-        sep.setGeometry(28, 66, 944, 1)
-        sep.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
+        sep.setGeometry(28, chip_y + chip_size + 18, CONTENT_W - 56, 1)
+        sep.setStyleSheet(f"background-color: {Colors.BORDER_SUBTLE}; border: none;")
 
-        return 82  # next available y
+        return chip_y + chip_size + 32  # 다음 가용 y
 
     # ── Page 0: 링크 입력 ───────────────────────────────────
 
@@ -668,7 +659,7 @@ class MainWindow(QMainWindow):
         # Coupang Partners hyperlink (top right)
         coupang_link = QLabel(
             '<a href="https://partners.coupang.com/" '
-            'style="color: #3B7BFF; text-decoration: none; font-weight: 600;">'
+            'style="color: #E89175; text-decoration: none; font-weight: 600;">'
             '쿠팡 파트너스 바로가기 →</a>',
             page
         )
@@ -688,7 +679,7 @@ class MainWindow(QMainWindow):
 
         # Links text area (compact)
         self.links_text = QPlainTextEdit(page)
-        self.links_text.setGeometry(28, cy + 24, 944, 160)
+        self.links_text.setGeometry(28, cy + 24, 984, 160)
         self.links_text.setPlaceholderText(
             "https://link.coupang.com/a/xxx\n"
             "https://link.coupang.com/a/yyy"
@@ -706,13 +697,13 @@ class MainWindow(QMainWindow):
             f"QPushButton {{"
             f"  background: {Gradients.ACCENT_BTN};"
             f"  color: #FFFFFF;"
-            f"  border: 2px solid rgba(59, 123, 255, 0.5);"
+            f"  border: 2px solid rgba(232, 145, 117, 0.5);"
             f"  border-radius: {Radius.LG};"
             f"  font-size: 11pt; font-weight: 800; letter-spacing: 0.5px;"
             f"}}"
             f"QPushButton:hover {{"
             f"  background: {Gradients.ACCENT_BTN_HOVER};"
-            f"  border-color: rgba(59, 123, 255, 0.8);"
+            f"  border-color: rgba(232, 145, 117, 0.8);"
             f"}}"
             f"QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}"
             f"QPushButton:disabled {{"
@@ -751,7 +742,7 @@ class MainWindow(QMainWindow):
         table_h = CONTENT_H - table_y - 16
 
         self.link_table = QTableWidget(page)
-        self.link_table.setGeometry(28, table_y, 944, table_h)
+        self.link_table.setGeometry(28, table_y, 984, table_h)
         self.link_table.setColumnCount(4)
         self.link_table.setHorizontalHeaderLabels(["#", "링크", "상태", "상품명"])
         self.link_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -802,7 +793,7 @@ class MainWindow(QMainWindow):
 
         # ── Upload Interval Section ────────────────────────
         sec1 = SectionFrame(page)
-        sec1.setGeometry(28, cy, 944, 140)
+        sec1.setGeometry(28, cy, 984, 140)
 
         sec1_title = QLabel("업로드 간격", sec1)
         sec1_title.setGeometry(24, 16, 200, 22)
@@ -812,24 +803,26 @@ class MainWindow(QMainWindow):
         interval_hint.setGeometry(24, 42, 500, 16)
         interval_hint.setStyleSheet(hint_text_style())
 
+        # spinbox — text는 우측 화살표 옆까지, 우측 끝에 up/down 한 덩어리
+        # 너비는 padding(우 30 + 좌 12) + suffix("0 시간")까지 충분히
         self.hour_spin = QSpinBox(sec1)
-        self.hour_spin.setGeometry(24, 68, 120, 38)
+        self.hour_spin.setGeometry(24, 68, 140, 40)
         self.hour_spin.setRange(0, 23)
         self.hour_spin.setSuffix(" 시간")
 
         self.min_spin = QSpinBox(sec1)
-        self.min_spin.setGeometry(156, 68, 100, 38)
+        self.min_spin.setGeometry(176, 68, 120, 40)
         self.min_spin.setRange(0, 59)
         self.min_spin.setSuffix(" 분")
 
         self.sec_spin = QSpinBox(sec1)
-        self.sec_spin.setGeometry(268, 68, 100, 38)
+        self.sec_spin.setGeometry(308, 68, 120, 40)
         self.sec_spin.setRange(0, 59)
         self.sec_spin.setSuffix(" 초")
 
         # ── Upload Options Section ─────────────────────────
         sec2 = SectionFrame(page)
-        sec2.setGeometry(28, cy + 156, 944, 90)
+        sec2.setGeometry(28, cy + 156, 984, 90)
 
         sec2_title = QLabel("업로드 옵션", sec2)
         sec2_title.setGeometry(24, 16, 200, 22)
@@ -839,8 +832,9 @@ class MainWindow(QMainWindow):
         self.video_check.setGeometry(24, 48, 400, 24)
 
         # ── Save Button ────────────────────────────────────
+        # 카드 우측 끝과 정렬 (28 + 984 - 140 = 872)
         self._upload_save_btn = QPushButton("저장", page)
-        self._upload_save_btn.setGeometry(832, cy + 268, 140, 42)
+        self._upload_save_btn.setGeometry(872, cy + 268, 140, 42)
         self._upload_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._upload_save_btn.clicked.connect(self._save_settings)
 
@@ -848,6 +842,25 @@ class MainWindow(QMainWindow):
 
     def _build_page2_settings(self, page):
         cy = self._make_page_header(page, "⚙", "설정")
+
+        # ── 페이지 헤더 우측 액션 버튼 (저장 / 업데이트 확인) ──
+        # ScrollArea 안에 들어가지 않고 페이지에 직접 부착해 항상 보임
+        action_y = 32
+        save_w = 110
+        upd_w = 168     # "업데이트 확인" 한글 5자 + 영문 + 패딩 충분히
+        save_x = CONTENT_W - 28 - save_w
+        upd_x = save_x - 12 - upd_w
+
+        self._update_settings_btn = QPushButton("업데이트 확인", page)
+        self._update_settings_btn.setGeometry(upd_x, action_y, upd_w, 36)
+        self._update_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_settings_btn.setProperty("class", "ghost")
+        self._update_settings_btn.clicked.connect(self.check_for_updates)
+
+        self._settings_save_btn = QPushButton("저장", page)
+        self._settings_save_btn.setGeometry(save_x, action_y, save_w, 36)
+        self._settings_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._settings_save_btn.clicked.connect(self._save_settings)
 
         _field_lbl_style = (
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
@@ -864,14 +877,15 @@ class MainWindow(QMainWindow):
         )
 
         content = QWidget()
-        content.setFixedWidth(CONTENT_W)
+        # ScrollArea viewport는 세로 스크롤바 자리 8px 만큼 좁아짐 — 그만큼 빼서 가로 스크롤 차단
+        content.setFixedWidth(CONTENT_W - 16)
         scroll.setWidget(content)
 
         sy = 8  # y offset within scroll content
 
         # ── Section 1: 계정 정보 ───────────────────────────
         acct = SectionFrame(content)
-        acct.setGeometry(28, sy, 944, 80)
+        acct.setGeometry(28, sy, 984, 80)
 
         # User icon circle
         acct_icon = QLabel("U", acct)
@@ -895,17 +909,18 @@ class MainWindow(QMainWindow):
         )
 
         # Plan badge (right side)
+        # 카드 너비 984 기준 — 우측 끝(984-24-140=820)에 정렬
         self._acct_plan_badge = QLabel("무료 체험", acct)
-        self._acct_plan_badge.setGeometry(780, 16, 140, 26)
+        self._acct_plan_badge.setGeometry(820, 16, 140, 26)
         self._acct_plan_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._acct_plan_badge.setStyleSheet(
-            f"QLabel {{ background-color: rgba(34, 197, 94, 0.12);"
-            f" color: {Colors.SUCCESS}; border: 1px solid rgba(34, 197, 94, 0.3);"
+            f"QLabel {{ background-color: rgba(122, 184, 122, 0.12);"
+            f" color: {Colors.SUCCESS}; border: 1px solid rgba(122, 184, 122, 0.3);"
             f" border-radius: 13px; font-size: 9pt; font-weight: 700; }}"
         )
 
         self._acct_work_label = QLabel("0 / 0 회 사용", acct)
-        self._acct_work_label.setGeometry(780, 46, 140, 18)
+        self._acct_work_label.setGeometry(820, 46, 140, 18)
         self._acct_work_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._acct_work_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
@@ -915,7 +930,7 @@ class MainWindow(QMainWindow):
 
         # ── Section 2: Threads 계정 ────────────────────────
         threads_sec = SectionFrame(content)
-        threads_sec.setGeometry(28, sy, 944, 200)
+        threads_sec.setGeometry(28, sy, 984, 184)
 
         threads_title = QLabel("Threads 계정", threads_sec)
         threads_title.setGeometry(24, 12, 200, 22)
@@ -930,10 +945,10 @@ class MainWindow(QMainWindow):
         name_hint.setStyleSheet(hint_text_style())
 
         self.username_edit = QLineEdit(threads_sec)
-        self.username_edit.setGeometry(24, 64, 896, 34)
+        self.username_edit.setGeometry(24, 64, 936, 34)
         self.username_edit.setPlaceholderText("예: myaccount")
 
-        # Status dot + label
+        # Status dot + label (한 줄)
         self._threads_status_dot = QLabel("", threads_sec)
         self._threads_status_dot.setGeometry(24, 112, 10, 10)
         self._threads_status_dot.setStyleSheet(
@@ -941,57 +956,59 @@ class MainWindow(QMainWindow):
         )
 
         self.login_status_label = QLabel("연결 안됨", threads_sec)
-        self.login_status_label.setGeometry(42, 108, 300, 20)
+        self.login_status_label.setGeometry(42, 108, 200, 20)
         self.login_status_label.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
             " background: transparent;"
         )
 
-        # Threads login button
+        # 안내문 — status 라벨 우측에 같은 줄로 배치 (버튼과 겹침 방지)
+        hint_label = QLabel("로그인 후 브라우저를 닫으면 세션이 자동 저장됩니다.", threads_sec)
+        hint_label.setGeometry(260, 108, 660, 20)
+        hint_label.setStyleSheet(hint_text_style())
+
+        # Threads login button — status 라벨(y=108~128)과 12px 간격 두고 배치
         self.threads_login_btn = QPushButton("Threads 로그인", threads_sec)
-        self.threads_login_btn.setGeometry(24, 140, 200, 38)
+        self.threads_login_btn.setGeometry(24, 140, 200, 36)
         self.threads_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.threads_login_btn.clicked.connect(self._open_threads_login)
 
         # Check login button
         self.check_login_btn = QPushButton("상태 확인", threads_sec)
-        self.check_login_btn.setGeometry(234, 140, 160, 38)
+        self.check_login_btn.setGeometry(234, 140, 160, 36)
         self.check_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_login_btn.setProperty("class", "ghost")
         self.check_login_btn.clicked.connect(self._check_login_status)
 
-        hint_label = QLabel("로그인 후 브라우저를 닫으면 세션이 자동 저장됩니다.", threads_sec)
-        hint_label.setGeometry(24, 180, 600, 16)
-        hint_label.setStyleSheet(hint_text_style())
-
-        sy += 212
+        sy += 196
 
         # ── Section 3: API 설정 ────────────────────────────
         api_sec = SectionFrame(content)
-        api_sec.setGeometry(28, sy, 944, 100)
+        api_sec.setGeometry(28, sy, 984, 100)
 
         api_title = QLabel("API 설정", api_sec)
         api_title.setGeometry(24, 12, 200, 22)
         api_title.setStyleSheet(section_title_style())
 
         api_label = QLabel("마스터 API 키", api_sec)
-        api_label.setGeometry(24, 38, 200, 16)
+        api_label.setGeometry(24, 38, 110, 16)
         api_label.setStyleSheet(_field_lbl_style)
 
         api_hint = QLabel("Google AI Studio에서 발급", api_sec)
-        api_hint.setGeometry(150, 38, 300, 16)
+        api_hint.setGeometry(140, 38, 300, 16)
         api_hint.setStyleSheet(hint_text_style())
 
         self.gemini_key_edit = QLineEdit(api_sec)
-        self.gemini_key_edit.setGeometry(24, 58, 896, 34)
+        self.gemini_key_edit.setGeometry(24, 58, 936, 34)
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.gemini_key_edit.setPlaceholderText("Gemini API 키를 입력하세요")
 
         sy += 112
 
         # ── Section 4: 텔레그램 알림 ───────────────────────
+        # 채팅 ID 입력란(y=148, h=34, 끝=182)이 카드 안에 들어오도록 높이 192
         tg_sec = SectionFrame(content)
-        tg_sec.setGeometry(28, sy, 944, 180)
+        tg_sec.setGeometry(28, sy, 984, 192)
 
         tg_title = QLabel("텔레그램 알림", tg_sec)
         tg_title.setGeometry(24, 12, 200, 22)
@@ -1005,7 +1022,7 @@ class MainWindow(QMainWindow):
         bot_label.setStyleSheet(_field_lbl_style)
 
         self.bot_token_edit = QLineEdit(tg_sec)
-        self.bot_token_edit.setGeometry(24, 88, 896, 34)
+        self.bot_token_edit.setGeometry(24, 88, 936, 34)
         self.bot_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.bot_token_edit.setPlaceholderText("BotFather 토큰")
 
@@ -1017,81 +1034,59 @@ class MainWindow(QMainWindow):
         self.chat_id_edit.setGeometry(24, 148, 896, 34)
         self.chat_id_edit.setPlaceholderText("채팅 ID")
 
-        sy += 192
+        sy += 204
 
-        # ── Section 5: 앱 정보 ─────────────────────────────
-        info_sec = SectionFrame(content)
-        info_sec.setGeometry(28, sy, 944, 80)
+        # ── Sections 5–7 통합: 앱 정보 / 튜토리얼 / 문의하기를 한 줄 가로 3분할 카드 ──
+        bottom_sec = SectionFrame(content)
+        bottom_sec.setGeometry(28, sy, 984, 92)
 
-        info_title = QLabel("앱 정보", info_sec)
-        info_title.setGeometry(24, 12, 200, 22)
+        # 셀 너비 = (984 - 24*2 padding - 16*2 gap) / 3 = (984-80) / 3 = 301
+        cell_w = (984 - 24 * 2 - 16 * 2) // 3
+        cell_y = 12
+        cell_h = 64
+
+        # 5-1) 앱 정보
+        info_x = 24
+        info_title = QLabel("앱 정보", bottom_sec)
+        info_title.setGeometry(info_x, cell_y, cell_w, 18)
         info_title.setStyleSheet(section_title_style())
-
-        self._version_label = QLabel("", info_sec)
-        self._version_label.setGeometry(24, 40, 300, 18)
+        self._version_label = QLabel("", bottom_sec)
+        self._version_label.setGeometry(info_x, cell_y + 24, cell_w, 18)
         self._version_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
         )
-
-        dev_label = QLabel("개발: 쿠팡 파트너스 자동화 팀", info_sec)
-        dev_label.setGeometry(24, 58, 400, 16)
+        dev_label = QLabel("개발: 쿠팡 파트너스 자동화 팀", bottom_sec)
+        dev_label.setGeometry(info_x, cell_y + 44, cell_w, 16)
         dev_label.setStyleSheet(hint_text_style())
 
-        sy += 92
-
-        # ── Section 6: 튜토리얼 ────────────────────────────
-        tutorial_sec = SectionFrame(content)
-        tutorial_sec.setGeometry(28, sy, 944, 82)
-
-        tutorial_title = QLabel("튜토리얼", tutorial_sec)
-        tutorial_title.setGeometry(24, 12, 200, 22)
-        tutorial_title.setStyleSheet(section_title_style())
-
-        self._tutorial_settings_btn = QPushButton("튜토리얼 재실행", tutorial_sec)
-        self._tutorial_settings_btn.setGeometry(24, 40, 180, 34)
+        # 5-2) 튜토리얼
+        tut_x = info_x + cell_w + 16
+        tut_title = QLabel("튜토리얼", bottom_sec)
+        tut_title.setGeometry(tut_x, cell_y, cell_w, 18)
+        tut_title.setStyleSheet(section_title_style())
+        self._tutorial_settings_btn = QPushButton("튜토리얼 재실행", bottom_sec)
+        self._tutorial_settings_btn.setGeometry(tut_x, cell_y + 26, min(cell_w, 180), 34)
         self._tutorial_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tutorial_settings_btn.setProperty("class", "ghost")
         self._tutorial_settings_btn.clicked.connect(self.open_tutorial)
 
-        sy += 82
-
-        # ── Section 7: 문의하기 ────────────────────────────
-        contact_sec = SectionFrame(content)
-        contact_sec.setGeometry(28, sy, 944, 82)
-
-        contact_title = QLabel("문의하기", contact_sec)
-        contact_title.setGeometry(24, 12, 200, 22)
-        contact_title.setStyleSheet(section_title_style())
-
-        self._contact_btn = QPushButton("문의하기", contact_sec)
-        self._contact_btn.setGeometry(24, 40, 140, 34)
+        # 5-3) 문의하기
+        ct_x = tut_x + cell_w + 16
+        ct_title = QLabel("문의하기", bottom_sec)
+        ct_title.setGeometry(ct_x, cell_y, cell_w, 18)
+        ct_title.setStyleSheet(section_title_style())
+        self._contact_btn = QPushButton("문의하기", bottom_sec)
+        self._contact_btn.setGeometry(ct_x, cell_y + 26, min(cell_w, 140), 34)
         self._contact_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._contact_btn.setProperty("class", "ghost")
         self._contact_btn.clicked.connect(self._open_contact)
 
-        contact_desc = QLabel("이용 중 문의사항은 아래 버튼을 통해 연락주세요.", contact_sec)
-        contact_desc.setGeometry(180, 40, 500, 16)
-        contact_desc.setStyleSheet(hint_text_style())
+        sy += 104
 
-        sy += 82
+        # 액션 버튼은 페이지 헤더 우측으로 옮겼으므로 ScrollArea 안에서는 제거됨
 
-        # ── Action Buttons Row ─────────────────────────────
-        self._update_settings_btn = QPushButton("업데이트 확인", content)
-        self._update_settings_btn.setGeometry(28, sy, 150, 42)
-        self._update_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._update_settings_btn.setProperty("class", "ghost")
-        self._update_settings_btn.clicked.connect(self.check_for_updates)
-
-        # Save button (accent, right-aligned)
-        self._settings_save_btn = QPushButton("저장", content)
-        self._settings_save_btn.setGeometry(832, sy, 140, 42)
-        self._settings_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._settings_save_btn.clicked.connect(self._save_settings)
-
-        sy += 60
-
-        # Set scroll content height
-        content.setFixedHeight(sy + 20)
+        # Set scroll content height — viewport(=CONTENT_H-cy-스크롤바)에 정확히 맞춤
+        content.setFixedHeight(sy + 4)
 
     # ── StatusBar ───────────────────────────────────────────
 
@@ -1100,9 +1095,9 @@ class MainWindow(QMainWindow):
         bar.setGeometry(0, WIN_H - STATUSBAR_H, WIN_W, STATUSBAR_H)
         bar.setStyleSheet(
             f"QFrame {{"
-            f"  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
-            f"    stop:0 #12203A, stop:0.5 #162847, stop:1 #12203A);"
-            f"  border-top: 2px solid rgba(13, 89, 242, 0.3);"
+            f"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1,"
+            f"    stop:0 {Colors.BG_HEADER}, stop:1 {Colors.BG_DARK});"
+            f"  border-top: 1px solid {Colors.BORDER_SUBTLE};"
             f"}}"
         )
         self._status_bar_frame = bar
@@ -1112,7 +1107,7 @@ class MainWindow(QMainWindow):
         self._statusbar_dot.setGeometry(16, 11, 10, 10)
         self._statusbar_dot.setStyleSheet(
             f"background-color: {Colors.SUCCESS}; border-radius: 5px;"
-            f" border: 2px solid rgba(34, 197, 94, 0.3);"
+            f" border: 2px solid rgba(122, 184, 122, 0.3);"
         )
 
         # Status label
@@ -1308,9 +1303,9 @@ class MainWindow(QMainWindow):
     def _set_results(self, success, failed):
         total = success + failed
         # Update sidebar progress labels
-        self._sidebar_success_label.setText(f"성공: {success}")
-        self._sidebar_failed_label.setText(f"실패: {failed}")
-        self._sidebar_total_label.setText(f"전체: {total}")
+        self._sidebar_success_label.setText(str(success))
+        self._sidebar_failed_label.setText(str(failed))
+        self._sidebar_total_label.setText(str(total))
         # Update queue progress
         self._progress_queue_label.setText(f"전체: {total} 처리됨")
 
@@ -1458,16 +1453,16 @@ class MainWindow(QMainWindow):
         if work_count > 10:
             self._plan_badge.setText("PRO")
             self._plan_badge.setStyleSheet(
-                f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
-                f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(13, 89, 242, 0.3);"
+                f"QLabel {{ background-color: rgba(217, 119, 87, 0.15);"
+                f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(217, 119, 87, 0.3);"
                 f" border-radius: 14px; font-size: 9pt; font-weight: 700;"
                 f" letter-spacing: 1px; }}"
             )
         else:
             self._plan_badge.setText("FREE")
             self._plan_badge.setStyleSheet(
-                f"QLabel {{ background-color: rgba(34, 197, 94, 0.12);"
-                f" color: {Colors.SUCCESS}; border: 1px solid rgba(34, 197, 94, 0.3);"
+                f"QLabel {{ background-color: rgba(122, 184, 122, 0.12);"
+                f" color: {Colors.SUCCESS}; border: 1px solid rgba(122, 184, 122, 0.3);"
                 f" border-radius: 14px; font-size: 9pt; font-weight: 700;"
                 f" letter-spacing: 1px; }}"
             )
@@ -1481,8 +1476,8 @@ class MainWindow(QMainWindow):
         if work_count > 10:
             self._acct_plan_badge.setText("프로 구독")
             self._acct_plan_badge.setStyleSheet(
-                f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
-                f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(13, 89, 242, 0.3);"
+                f"QLabel {{ background-color: rgba(217, 119, 87, 0.15);"
+                f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(217, 119, 87, 0.3);"
                 f" border-radius: 13px; font-size: 9pt; font-weight: 700; }}"
             )
         else:
@@ -1695,9 +1690,9 @@ class MainWindow(QMainWindow):
         self.status_badge.update_style(Colors.WARNING, "실행중")
         self._sidebar_status_label.setText("실행중")
 
-        self._sidebar_success_label.setText("성공: 0")
-        self._sidebar_failed_label.setText("실패: 0")
-        self._sidebar_total_label.setText("전체: 0")
+        self._sidebar_success_label.setText("0")
+        self._sidebar_failed_label.setText("0")
+        self._sidebar_total_label.setText("0")
         self._progress_queue_label.setText(f"전체: 0 / {len(link_data)}")
         self._reset_steps()
 
@@ -2145,11 +2140,11 @@ class MainWindow(QMainWindow):
         painter = QPainter(self)
         w, h = self.width(), self.height()
         bot_grad = QLinearGradient(0, 0, w, 0)
-        bot_grad.setColorAt(0, QColor(13, 89, 242, 0))
+        bot_grad.setColorAt(0, QColor(217, 119, 87, 0))
         bot_grad.setColorAt(0.3, QColor(Colors.ACCENT))
         bot_grad.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
         bot_grad.setColorAt(0.7, QColor(Colors.ACCENT))
-        bot_grad.setColorAt(1, QColor(13, 89, 242, 0))
+        bot_grad.setColorAt(1, QColor(217, 119, 87, 0))
         painter.fillRect(0, h - 4, w, 4, bot_grad)
 
     def closeEvent(self, event):

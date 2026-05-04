@@ -114,26 +114,26 @@ class LoginWindow(QMainWindow):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         fn = _get_font()
 
-        # Gradient background
+        # Gradient background — Claude Dark warm coral wash
         grad = QLinearGradient(0, 0, 300, 520)
-        grad.setColorAt(0, QColor("#0A1628"))
-        grad.setColorAt(0.3, QColor("#0D2040"))
-        grad.setColorAt(0.7, QColor("#0A47C8"))
-        grad.setColorAt(1, QColor("#0D59F2"))
+        grad.setColorAt(0, QColor("#1A1916"))
+        grad.setColorAt(0.4, QColor("#2A2520"))
+        grad.setColorAt(0.75, QColor("#6B3A28"))
+        grad.setColorAt(1, QColor(Colors.ACCENT_DARK))
         painter.fillRect(0, 0, 300, 520, grad)
 
         # Top accent line
         top_grad = QLinearGradient(0, 0, 300, 0)
-        top_grad.setColorAt(0, QColor(13, 89, 242, 0))
+        top_grad.setColorAt(0, QColor(217, 119, 87, 0))
         top_grad.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
-        top_grad.setColorAt(1, QColor(13, 89, 242, 0))
+        top_grad.setColorAt(1, QColor(217, 119, 87, 0))
         painter.fillRect(0, 0, 300, 2, top_grad)
 
         # Brand icon
         painter.setPen(Qt.PenStyle.NoPen)
         cx, cy = 150, 160
         # Glow
-        painter.setBrush(QColor(59, 123, 255, 30))
+        painter.setBrush(QColor(232, 145, 117, 38))
         painter.drawEllipse(cx - 50, cy - 50, 100, 100)
         # Ring
         from PyQt6.QtGui import QPen
@@ -252,10 +252,10 @@ class LoginWindow(QMainWindow):
         self.btn_go_register.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_go_register.setStyleSheet(f"""
             QPushButton {{
-                color: #FFFFFF; background: transparent;
-                border: 2px solid {Colors.ACCENT_LIGHT}; border-radius: 8px;
+                color: {Colors.TEXT_BRIGHT}; background: transparent;
+                border: 2px solid {Colors.ACCENT_LIGHT}; border-radius: 10px;
             }}
-            QPushButton:hover {{ background: rgba(13, 89, 242, 0.15); }}
+            QPushButton:hover {{ background: rgba(217, 119, 87, 0.15); }}
         """)
         self.btn_go_register.clicked.connect(lambda: self.stack.setCurrentIndex(1))
 

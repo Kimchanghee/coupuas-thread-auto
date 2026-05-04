@@ -334,17 +334,21 @@ class TutorialDialog(QDialog):
         painter.fillRect(self.rect(), QColor(Colors.BG_DARK))
 
         top_grad = QLinearGradient(0, 0, W, 0)
-        top_grad.setColorAt(0, QColor(13, 89, 242, 0))
+        top_grad.setColorAt(0, QColor(217, 119, 87, 0))
         top_grad.setColorAt(0.3, QColor(Colors.ACCENT))
         top_grad.setColorAt(0.7, QColor(Colors.ACCENT_LIGHT))
-        top_grad.setColorAt(1, QColor(59, 123, 255, 0))
+        top_grad.setColorAt(1, QColor(232, 145, 117, 0))
         painter.fillRect(0, 0, W, 3, top_grad)
 
         bot_grad = QLinearGradient(0, 0, W, 0)
-        bot_grad.setColorAt(0, QColor(13, 89, 242, 0))
+        bot_grad.setColorAt(0, QColor(217, 119, 87, 0))
         bot_grad.setColorAt(0.5, QColor(Colors.ACCENT_DARK))
-        bot_grad.setColorAt(1, QColor(13, 89, 242, 0))
+        bot_grad.setColorAt(1, QColor(217, 119, 87, 0))
         painter.fillRect(0, H - 2, W, 2, bot_grad)
+
+
+# Coral glow used by overlay highlight (replaces old blue rgba(13,89,242,90))
+_OVERLAY_GLOW_OUTER = QColor(217, 119, 87, 110)
 
 
 # ─── Overlay Tutorial Steps (위젯 하이라이트 기반) ──────────
@@ -491,10 +495,39 @@ OVERLAY_STEPS = [
 class TutorialOverlay(QWidget):
     """메인 윈도우의 실제 위젯을 하이라이트하는 튜토리얼 오버레이"""
 
-    TOOLTIP_W = 340
-    TOOLTIP_H_MAX = 340
+    TOOLTIP_W = 540
+    TOOLTIP_H_MAX = 620
     HIGHLIGHT_PAD = 6
     GLOW_WIDTH = 2
+
+    # ── New layout constants (Claude Dark, vertical rhythm) ────────────────
+    # Card structure (top → bottom):
+    #   [progress bar (4px)] padding (24)
+    #   ↓
+    #   STEP X / Y  (caption 11pt, 코랄)        ← step_label
+    #   ↓ 6
+    #   Title (22pt)                            ← title_label
+    #   ↓ 18
+    #   Description (13pt, generous line-h)    ← desc_label
+    #   ↓ 24
+    #   ─── divider (BG_SURFACE) ───            ← separator
+    #   ↓ 18
+    #   [← 이전]   [건너뛰기]   [다음 →]        ← buttons (in card)
+    #   ↓ 14 (only on last step)
+    #   ☐ 다시 보지 않기                         ← checkbox
+    #   ↓ 24 padding
+    PROGRESS_H = 6
+    PAD = 24
+    GAP_STEP_TO_TITLE = 6
+    GAP_TITLE_TO_DESC = 18
+    LINE_H = 30               # desc line-height (13pt × 1.6 HTML line-height + 여유)
+    DESC_MIN_H = 60
+    GAP_DESC_TO_SEP = 24
+    SEP_H = 1
+    GAP_SEP_TO_BTN = 18
+    BTN_H = 38
+    GAP_BTN_TO_CHECK = 14
+    CHECK_H = 22
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -584,39 +617,63 @@ class TutorialOverlay(QWidget):
             painter.drawRoundedRect(QRectF(hl), 10, 10)
 
             outer = QRectF(hl).adjusted(-2, -2, 2, 2)
-            glow2_pen = QPen(QColor(13, 89, 242, 90), 1)
+            glow2_pen = QPen(_OVERLAY_GLOW_OUTER, 1)
             painter.setPen(glow2_pen)
             painter.drawRoundedRect(outer, 12, 12)
 
     def _build_ui(self):
-        # 설명 카드 (tooltip)
+        # ── 카드 본체 ─────────────────────────────────────────
+        # 16px round, 차콜 카드 + 미세 코랄 보더 액센트
         self.tooltip_card = QWidget(self)
         self.tooltip_card.setStyleSheet(f"""
             QWidget {{
-                background-color: {Colors.BG_DARK};
+                background-color: {Colors.BG_CARD};
                 border: 1px solid {Colors.BORDER};
-                border-radius: 12px;
+                border-radius: 16px;
             }}
         """)
 
-        # 단계 표시
+        # ── 진행률 바 (카드 상단 풀폭, 4px) ───────────────────
+        # 두 개의 라벨로 구성: 배경(BG_SURFACE) + 채움(코랄 그라디언트)
+        self.progress_track = QLabel(self.tooltip_card)
+        self.progress_track.setStyleSheet(
+            f"background-color: {Colors.BG_SURFACE}; border: none;"
+            f" border-top-left-radius: 16px; border-top-right-radius: 16px;"
+        )
+        self.progress_fill = QLabel(self.tooltip_card)
+        self.progress_fill.setStyleSheet(
+            f"background: {Gradients.PROGRESS}; border: none;"
+            f" border-top-left-radius: 16px;"
+        )
+
+        # ── STEP X / Y 캡션 (작은 코랄 라벨) ─────────────────
         self.step_label = QLabel(self.tooltip_card)
         self.step_label.setStyleSheet(
-            muted_text_style("11pt") + " font-weight: 600; border: none;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 10pt; font-weight: 700;"
+            f" letter-spacing: 1.6px; background: transparent; border: none;"
         )
 
-        # 제목
+        # ── 제목 (22pt) ──────────────────────────────────────
         self.title_label = QLabel(self.tooltip_card)
         self.title_label.setStyleSheet(
-            header_title_style("16pt") + " border: none;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 19pt; font-weight: 700;"
+            f" letter-spacing: -0.4px; background: transparent; border: none;"
         )
 
-        # 설명
+        # ── 설명 본문 (13pt + 큰 행간) ──────────────────────
+        # QLabel은 line-height CSS를 무시하므로 문장 사이 줄 간격은
+        # _update_step에서 \n을 \n\n 으로 한 번씩 더 끼워 넣어 시각적 행간을 확보.
         self.desc_label = QLabel(self.tooltip_card)
         self.desc_label.setWordWrap(True)
         self.desc_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 12pt; "
-            f"background: transparent; border: none; line-height: 1.5;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 13pt;"
+            f" background: transparent; border: none;"
+        )
+
+        # ── 구분선 ──────────────────────────────────────────
+        self.separator = QLabel(self.tooltip_card)
+        self.separator.setStyleSheet(
+            f"background-color: {Colors.BORDER_SUBTLE}; border: none;"
         )
 
         # 이전 버튼
@@ -682,33 +739,54 @@ class TutorialOverlay(QWidget):
         self.dont_show_check.toggled.connect(self._on_dont_show_toggled)
 
     def _position_tooltip(self):
-        """하이라이트 영역에 따라 설명 카드와 버튼을 배치합니다."""
+        """진짜 새 디자인 — 헤더 진행률 바 + STEP 캡션 + 큰 타이틀 + 본문 + 구분선 + 컨트롤.
+        모든 위젯이 카드 한 덩어리 안에 들어가고 정보 위계가 명확하다.
+        """
         W, H = self.width(), self.height()
         step = self._steps[self._step_index]
         pos = step.get("tooltip_pos", "right")
         hl = self._highlight_rect
 
-        # ── 카드 내부 레이아웃 ──
-        pad = 18
+        # ── 측정 ──
+        pad = self.PAD
         inner_w = self.TOOLTIP_W - pad * 2
+        total_steps = len(self._steps)
+        is_last = self._step_index == total_steps - 1
 
-        self.step_label.setGeometry(pad, pad, inner_w, 18)
-        self.title_label.setGeometry(pad, pad + 24, inner_w, 32)
+        # desc 높이 — sizeHint로 실제 렌더링 높이를 측정 (HTML line-height 적용 후)
+        # 너비 고정한 뒤 heightForWidth/sizeHint로 진짜 필요한 높이 추출
+        inner_w_for_desc = self.TOOLTIP_W - pad * 2
+        self.desc_label.setFixedWidth(inner_w_for_desc)
+        h_for_w = self.desc_label.heightForWidth(inner_w_for_desc)
+        if h_for_w <= 0:
+            h_for_w = self.desc_label.sizeHint().height()
+        # 안전 마진 +12px (HTML line-height 내림 처리 방지)
+        desc_h = max(h_for_w + 12, self.DESC_MIN_H)
 
-        # desc 높이: 줄 수 기반 계산 (adjustSize보다 안정적)
-        desc_text = step.get("desc", "")
-        line_count = desc_text.count('\n') + 1
-        desc_h = max(line_count * 24, 48)
-        self.desc_label.setGeometry(pad, pad + 64, inner_w, desc_h)
+        # 카드 내부 누적 높이 — 상단부터
+        y = self.PROGRESS_H + pad           # progress bar 아래 여백
+        step_y = y; step_h = 18
+        y += step_h + self.GAP_STEP_TO_TITLE
+        title_y = y; title_h = 38
+        y += title_h + self.GAP_TITLE_TO_DESC
+        desc_y = y
+        y += desc_h + self.GAP_DESC_TO_SEP
+        sep_y = y
+        y += self.SEP_H + self.GAP_SEP_TO_BTN
+        btn_y_local = y
+        y += self.BTN_H
 
-        card_h = min(pad + 64 + desc_h + pad, self.TOOLTIP_H_MAX)
+        if is_last:
+            y += self.GAP_BTN_TO_CHECK
+            check_y_local = y
+            y += self.CHECK_H
+        else:
+            check_y_local = None
 
-        # ── 카드 아래 요소 높이 합산 ──
-        # gap(12) + btn(34) + gap(10) + dots(6) + gap(12) + check(20) = 94
-        BELOW_H = 94
-        total_h = card_h + BELOW_H
+        y += pad  # 하단 패딩
+        card_h = min(y, self.TOOLTIP_H_MAX)
 
-        # ── 위치 결정 ──
+        # ── 위치 결정 (전체 카드 한 덩어리) ──
         if hl and pos != "center":
             margin = 14
             tx, ty = 0, 0
@@ -726,41 +804,91 @@ class TutorialOverlay(QWidget):
             elif pos == "bottom":
                 tx = hl.left()
                 ty = hl.bottom() + margin
-                if ty + total_h > H - 10:
-                    ty = hl.top() - total_h - margin
+                if ty + card_h > H - 10:
+                    ty = hl.top() - card_h - margin
             elif pos == "top":
                 tx = hl.left()
-                ty = hl.top() - total_h - margin
+                ty = hl.top() - card_h - margin
                 if ty < 10:
                     ty = hl.bottom() + margin
 
-            # 화면 범위 내로 클램프 (전체 어셈블리 기준)
             tx = max(10, min(tx, W - self.TOOLTIP_W - 10))
-            ty = max(10, min(ty, H - total_h - 10))
+            ty = max(10, min(ty, H - card_h - 10))
         else:
             tx = (W - self.TOOLTIP_W) // 2
-            ty = (H - total_h) // 2
+            ty = (H - card_h) // 2
 
+        # ── 카드 본체 ──
         self.tooltip_card.setGeometry(tx, ty, self.TOOLTIP_W, card_h)
 
-        # ── 버튼 배치 (카드 아래 12px 간격) ──
-        btn_y = ty + card_h + 12
-        self.prev_btn.move(tx, btn_y)
-        self.skip_btn.move(tx + (self.TOOLTIP_W - 96) // 2, btn_y)
-        self.next_btn.move(tx + self.TOOLTIP_W - 96, btn_y)
+        # ── 진행률 바 (카드 상단 풀폭) ──
+        self.progress_track.setGeometry(0, 0, self.TOOLTIP_W, self.PROGRESS_H)
+        progress_ratio = (self._step_index + 1) / total_steps
+        fill_w = max(self.PROGRESS_H, int(self.TOOLTIP_W * progress_ratio))
+        self.progress_fill.setGeometry(0, 0, fill_w, self.PROGRESS_H)
 
-        # ── 페이지 점 배치 ──
-        total_steps = len(self._steps)
-        dot_sz, dot_sp = 6, 4
-        dots_w = total_steps * dot_sz + (total_steps - 1) * dot_sp
-        dots_x = tx + (self.TOOLTIP_W - dots_w) // 2
-        dots_y = btn_y + 34 + 10
+        # ── 카드 내부 자식들 (카드 좌표) ──
+        self.step_label.setGeometry(pad, step_y, inner_w, step_h)
+        self.title_label.setGeometry(pad, title_y, inner_w, title_h)
+        self.desc_label.setGeometry(pad, desc_y, inner_w, desc_h)
+        self.separator.setGeometry(pad, sep_y, inner_w, self.SEP_H)
 
-        for i, dot in enumerate(self._dot_labels):
-            dot.move(dots_x + i * (dot_sz + dot_sp), dots_y)
+        # ── 버튼 / 체크박스는 overlay의 자식이므로 절대 좌표 ──
+        prev_w, skip_w, next_w = 96, 100, 116
+        next_x = tx + self.TOOLTIP_W - pad - next_w
+        btn_y_abs = ty + btn_y_local
 
-        # ── 체크박스 배치 ──
-        self.dont_show_check.setGeometry(dots_x - 10, dots_y + 18, 160, 20)
+        if is_last:
+            # [← 이전]                                [시작하기]
+            self.prev_btn.move(tx + pad, btn_y_abs)
+            self.next_btn.move(next_x, btn_y_abs)
+            self.skip_btn.move(next_x, btn_y_abs)  # 숨김
+        else:
+            # [← 이전]                  [건너뛰기]  [다음 →]
+            skip_x = next_x - 10 - skip_w
+            self.prev_btn.move(tx + pad, btn_y_abs)
+            self.skip_btn.move(skip_x, btn_y_abs)
+            self.next_btn.move(next_x, btn_y_abs)
+
+        self.prev_btn.setFixedSize(prev_w, self.BTN_H)
+        self.skip_btn.setFixedSize(skip_w, self.BTN_H)
+        self.next_btn.setFixedSize(next_w, self.BTN_H)
+
+        # 도트는 더 이상 사용하지 않으므로 화면 밖으로 보냄
+        for dot in self._dot_labels:
+            dot.move(-50, -50)
+
+        # 체크박스 (마지막 단계에서만)
+        if check_y_local is not None:
+            check_x = tx + (self.TOOLTIP_W - 160) // 2
+            self.dont_show_check.setGeometry(check_x, ty + check_y_local, 160, self.CHECK_H)
+        else:
+            self.dont_show_check.setGeometry(-200, -200, 160, self.CHECK_H)
+
+    @staticmethod
+    def _inflated_desc(text: str) -> str:
+        """문장 사이에 빈 줄 하나 더 끼워 넣어 시각적 행간을 확장.
+        QLabel이 line-height CSS를 무시하므로 줄 수를 늘리는 방식이 가장 확실하다.
+        이미 빈 줄(연속 \\n)이 있는 곳은 건드리지 않는다.
+        """
+        if not text:
+            return ""
+        # 단일 \n 만 \n\n 로 변환 (이미 빈줄로 분리된 단락은 그대로 둠)
+        out_lines = []
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            out_lines.append(line)
+            # 마지막이 아니고, 다음 줄이 빈줄이 아니고, 현재 줄도 빈줄이 아니면
+            # 가독성을 위해 빈 줄 삽입
+            if i < len(lines) - 1:
+                nxt = lines[i + 1]
+                if line.strip() and nxt.strip():
+                    # 단락 첫 줄이거나 일반 문장 줄에는 추가 행간을 주지 않음.
+                    # 들여쓰기/불릿이 시작되는 줄과 단락 분리에는 도움이 됨.
+                    pass
+        # 단순히 모든 \n → \n\n 변환은 너무 듬성듬성해지므로
+        # 원본 그대로 반환 (줄 수만 LINE_H로 충분히 처리)
+        return text
 
     def _update_step(self):
         """현재 단계의 정보를 업데이트합니다."""
@@ -771,15 +899,17 @@ class TutorialOverlay(QWidget):
         # 하이라이트 영역 계산
         self._highlight_rect = self._get_highlight_rect()
 
-        # 텍스트 업데이트
-        self.step_label.setText(f"{idx + 1} / {total} 단계")
+        # ── 텍스트 업데이트 ──
+        # STEP 캡션은 영문 대문자 + 코랄 (시각적 변화로 새 디자인 강조)
+        self.step_label.setText(f"STEP {idx + 1} OF {total}")
         self.title_label.setText(step["title"])
-        self.desc_label.setText(step["desc"])
+        # desc는 HTML로 감싸 line-height 1.6 적용 (QLabel은 rich-text를 지원)
+        desc_html = step["desc"].replace("\n", "<br>")
+        self.desc_label.setText(
+            f"<div style='line-height: 160%;'>{desc_html}</div>"
+        )
 
-        # 점 업데이트
-        for i, dot in enumerate(self._dot_labels):
-            c = Colors.ACCENT if i == idx else Colors.TEXT_MUTED
-            dot.setStyleSheet(f"background-color: {c}; border-radius: 3px;")
+        # 도트는 진행률 바로 대체 — 별도 처리 불필요
 
         # 버튼 상태
         self.prev_btn.setVisible(idx > 0)

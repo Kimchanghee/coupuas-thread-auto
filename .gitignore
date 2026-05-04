@@ -74,3 +74,48 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# ─── Dev/QA 임시 산출물 (root 레벨만 무시) ───
+# UI 캡처 (디자인 검수용 임시 산출물)
+/tour_*.png
+/zoom_*.png
+/zoom2_*.png
+/zoom3_*.png
+/zoom4_*.png
+/real_*.png
+/flow_*.png
+/step_*.png
+/main_*.png
+/login_*.png
+/actual_*.png
+/full_*.png
+/spin_*.png
+/scan_*.png
+/insp_*.png
+/clean_*.png
+/fix_*.png
+/confirm_*.png
+/v[0-9]_*.png
+/v[0-9][0-9]_*.png
+/inspect_p*.png
+
+# 자동 검수 결과 텍스트
+/inspect_result*.txt
+/inspect[0-9]*.txt
+/i.txt
+/i[0-9]*.txt
+/aggro_out.txt
+/tour_run.log
+
+# 일회성 dev 헬퍼 스크립트 (정식 배포 모듈 아님)
+/auto_launch.py
+/keep_main_open.py
+/tour_capture.py
+/tour_dialogs.py
+/test_aggro.py
+/test_gui_flow.py
+/test_register_flow.py
+
+# 테스트용 자동 생성물
+/test_account.json
+/last_gui_user.txt

@@ -1,74 +1,78 @@
 """
 Coupang Partners Thread Auto - Design System
-"Stitch Blue" Theme - Generated from Google Stitch AI
+"Claude Dark" Theme — warm charcoal + coral
 
-Centralized color palette, typography, spacing, shadows,
-gradients, and stylesheet constants.
+Inspired by Claude.ai's signature warm palette.
+Centralized color tokens, typography, spacing, gradients,
+and reusable QSS helpers.
 """
 
 
 class Colors:
-    """Color palette - Stitch Blue Dark Theme"""
-    # Backgrounds (deep navy-slate gradient)
-    BG_DARK = "#101622"
-    BG_CARD = "#1B2740"
-    BG_INPUT = "#1A2332"
-    BG_ELEVATED = "#222D40"
-    BG_HOVER = "#283448"
-    BG_TERMINAL = "#080C14"
-    BG_SURFACE = "#161E2E"  # subtle card surfaces
+    """Color palette — Claude Dark (warm charcoal + coral)."""
 
-    # Accent (Electric Blue)
-    ACCENT = "#0D59F2"
-    ACCENT_LIGHT = "#3B7BFF"
-    ACCENT_DARK = "#0A47C8"
-    ACCENT_GLOW = "rgba(13, 89, 242, 0.15)"
-    ACCENT_SHADOW = "rgba(13, 89, 242, 0.30)"
-    ACCENT_SUBTLE = "rgba(13, 89, 242, 0.08)"
+    # ── Surfaces (warm charcoal stack) ───────────────────────
+    BG_DARK = "#1F1E1B"        # app background
+    BG_CARD = "#2A2825"        # cards / elevated panels
+    BG_INPUT = "#262420"       # input fields
+    BG_ELEVATED = "#322F2A"    # hover / elevated states
+    BG_HOVER = "#3A3631"
+    BG_TERMINAL = "#161513"    # deepest (logs)
+    BG_SURFACE = "#252320"     # subtle card surfaces
+    BG_SIDEBAR = "#1A1916"     # left rail (slightly darker than BG_DARK)
+    BG_HEADER = "#23211E"      # top bar
 
-    # Semantic
-    SUCCESS = "#22C55E"
-    SUCCESS_BG = "rgba(34, 197, 94, 0.10)"
-    SUCCESS_BORDER = "rgba(34, 197, 94, 0.25)"
-    WARNING = "#F59E0B"
-    WARNING_BG = "rgba(245, 158, 11, 0.10)"
-    WARNING_BORDER = "rgba(245, 158, 11, 0.25)"
-    ERROR = "#EF4444"
-    ERROR_BG = "rgba(239, 68, 68, 0.10)"
-    ERROR_BORDER = "rgba(239, 68, 68, 0.25)"
-    INFO = "#3B82F6"
-    INFO_BG = "rgba(59, 130, 246, 0.10)"
-    INFO_BORDER = "rgba(59, 130, 246, 0.25)"
+    # ── Accent (Claude Coral) ────────────────────────────────
+    ACCENT = "#D97757"
+    ACCENT_LIGHT = "#E89175"
+    ACCENT_DARK = "#B85F3F"
+    ACCENT_GLOW = "rgba(217, 119, 87, 0.15)"
+    ACCENT_SHADOW = "rgba(217, 119, 87, 0.30)"
+    ACCENT_SUBTLE = "rgba(217, 119, 87, 0.08)"
 
-    # Text (고대비 - 어두운 배경에서 선명하게)
-    TEXT_PRIMARY = "#FFFFFF"
-    TEXT_SECONDARY = "#CFD8DC"
-    TEXT_MUTED = "#90A4AE"
-    TEXT_PLACEHOLDER = "#6B7F8E"
-    TEXT_ACCENT = "#3B82F6"
-    TEXT_BRIGHT = "#FFFFFF"
+    # ── Semantic (warm-tuned) ────────────────────────────────
+    SUCCESS = "#7AB87A"
+    SUCCESS_BG = "rgba(122, 184, 122, 0.10)"
+    SUCCESS_BORDER = "rgba(122, 184, 122, 0.28)"
+    WARNING = "#E0A062"
+    WARNING_BG = "rgba(224, 160, 98, 0.10)"
+    WARNING_BORDER = "rgba(224, 160, 98, 0.28)"
+    ERROR = "#D86A65"
+    ERROR_BG = "rgba(216, 106, 101, 0.10)"
+    ERROR_BORDER = "rgba(216, 106, 101, 0.28)"
+    INFO = "#88A8D4"
+    INFO_BG = "rgba(136, 168, 212, 0.10)"
+    INFO_BORDER = "rgba(136, 168, 212, 0.28)"
 
-    # Borders (밝은 톤 - Stitch 디자인)
-    BORDER = "#3D4F6A"
-    BORDER_LIGHT = "#506080"
-    BORDER_ACTIVE = "#0D59F2"
-    BORDER_SUBTLE = "#232D3F"
+    # ── Text (warm whites) ───────────────────────────────────
+    TEXT_PRIMARY = "#F5F4ED"
+    TEXT_SECONDARY = "#D6D3CC"
+    TEXT_MUTED = "#9A968F"
+    TEXT_PLACEHOLDER = "#6E6A63"
+    TEXT_ACCENT = "#E89175"
+    TEXT_BRIGHT = "#FAF9F5"
 
-    # Misc
-    SCROLLBAR = "#2D3748"
-    SCROLLBAR_HOVER = "#4A5568"
+    # ── Borders (warm subtle) ────────────────────────────────
+    BORDER = "#3A3833"
+    BORDER_LIGHT = "#4D4A44"
+    BORDER_ACTIVE = "#D97757"
+    BORDER_SUBTLE = "#2C2A26"
+
+    # ── Misc ─────────────────────────────────────────────────
+    SCROLLBAR = "#3A3833"
+    SCROLLBAR_HOVER = "#5A574F"
     SHADOW = "rgba(0, 0, 0, 0.5)"
-    OVERLAY = "rgba(16, 22, 34, 0.90)"
+    OVERLAY = "rgba(31, 30, 27, 0.92)"
 
 
 class Typography:
-    """Font definitions - resolved at runtime by resolve_fonts()"""
+    """Font definitions — resolved at runtime by resolve_fonts()."""
     FAMILY = "Segoe UI"
     FAMILY_MONO = "Consolas"
 
-    TITLE_XL = f"font-family: {FAMILY}; font-size: 24pt; font-weight: 700; letter-spacing: -0.5px;"
-    TITLE_LG = f"font-family: {FAMILY}; font-size: 18pt; font-weight: 700; letter-spacing: -0.3px;"
-    TITLE_MD = f"font-family: {FAMILY}; font-size: 14pt; font-weight: 600;"
+    TITLE_XL = f"font-family: {FAMILY}; font-size: 24pt; font-weight: 700; letter-spacing: -0.6px;"
+    TITLE_LG = f"font-family: {FAMILY}; font-size: 18pt; font-weight: 700; letter-spacing: -0.4px;"
+    TITLE_MD = f"font-family: {FAMILY}; font-size: 14pt; font-weight: 600; letter-spacing: -0.2px;"
     TITLE_SM = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 600;"
     BODY = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 400;"
     BODY_SM = f"font-family: {FAMILY}; font-size: 11pt; font-weight: 400;"
@@ -78,15 +82,15 @@ class Typography:
 
 class Radius:
     SM = "6px"
-    MD = "8px"
-    LG = "12px"
-    XL = "16px"
-    XXL = "20px"
+    MD = "10px"   # softer corners (Claude aesthetic)
+    LG = "14px"
+    XL = "18px"
+    XXL = "22px"
     PILL = "100px"
 
 
 class Spacing:
-    """Consistent spacing scale (4px base)"""
+    """Consistent spacing scale (4px base)."""
     XS = 4
     SM = 8
     MD = 12
@@ -97,88 +101,91 @@ class Spacing:
 
 
 class Shadows:
-    """Box shadow presets (CSS-like, for custom painting)"""
-    # For QPainter-based shadow simulation
-    CARD = (0, 2, 8, "rgba(0, 0, 0, 0.25)")
-    ELEVATED = (0, 4, 16, "rgba(0, 0, 0, 0.35)")
-    DROPDOWN = (0, 8, 24, "rgba(0, 0, 0, 0.45)")
-    GLOW_ACCENT = (0, 0, 12, "rgba(13, 89, 242, 0.25)")
-    GLOW_SUCCESS = (0, 0, 12, "rgba(34, 197, 94, 0.20)")
-    GLOW_ERROR = (0, 0, 12, "rgba(239, 68, 68, 0.20)")
+    """Box shadow presets (CSS-like, for custom painting)."""
+    CARD = (0, 2, 10, "rgba(0, 0, 0, 0.30)")
+    ELEVATED = (0, 6, 20, "rgba(0, 0, 0, 0.40)")
+    DROPDOWN = (0, 10, 28, "rgba(0, 0, 0, 0.50)")
+    GLOW_ACCENT = (0, 0, 14, "rgba(217, 119, 87, 0.28)")
+    GLOW_SUCCESS = (0, 0, 12, "rgba(122, 184, 122, 0.22)")
+    GLOW_ERROR = (0, 0, 12, "rgba(216, 106, 101, 0.22)")
 
 
 class Gradients:
-    """QSS gradient definitions for common patterns"""
-    # Button gradients
+    """QSS gradient definitions (Claude Dark — warm, low-saturation)."""
+
+    # Buttons — flat coral with subtle warm shift
     ACCENT_BTN = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 {Colors.ACCENT}, stop:1 {Colors.ACCENT_LIGHT})"
+        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        f"stop:0 {Colors.ACCENT_LIGHT}, stop:1 {Colors.ACCENT})"
     )
     ACCENT_BTN_HOVER = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 {Colors.ACCENT_LIGHT}, stop:1 #5B93FF)"
+        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        f"stop:0 #F0A088, stop:1 {Colors.ACCENT_LIGHT})"
     )
     ACCENT_BTN_PRESSED = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 {Colors.ACCENT_DARK}, stop:1 {Colors.ACCENT})"
+        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        f"stop:0 {Colors.ACCENT}, stop:1 {Colors.ACCENT_DARK})"
     )
 
-    # Header / bar gradients
+    # Header — warm charcoal, near-flat
     HEADER = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 {Colors.BG_CARD}, stop:0.5 #131A2A, stop:1 {Colors.BG_CARD})"
+        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        f"stop:0 {Colors.BG_HEADER}, stop:1 {Colors.BG_DARK})"
     )
     HEADER_ACCENT = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 rgba(13, 89, 242, 0), stop:0.3 {Colors.ACCENT}, "
-        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(59, 123, 255, 0))"
+        f"stop:0 rgba(217, 119, 87, 0), stop:0.3 {Colors.ACCENT}, "
+        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(232, 145, 117, 0))"
     )
 
-    # Progress bar gradient
+    # Progress
     PROGRESS = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
         f"stop:0 {Colors.ACCENT}, stop:1 {Colors.ACCENT_LIGHT})"
     )
 
-    # Surface gradients
+    # Surface
     CARD_SUBTLE = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
         f"stop:0 {Colors.BG_CARD}, stop:1 {Colors.BG_SURFACE})"
     )
 
+    # Login splash — warm coral wash
+    LOGIN_SPLASH = (
+        f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+        f"stop:0 #1A1916, stop:0.45 #2A2520, stop:0.85 #6B3A28, stop:1 #B85F3F)"
+    )
+
 
 class Timing:
-    """Animation duration & easing constants"""
+    """Animation duration & easing constants."""
     FAST = 120
     NORMAL = 200
     SLOW = 350
-    # QEasingCurve types used in code: OutCubic, InOutQuad, etc.
 
 
 # ─── Utility Functions ─────────────────────────────────────
 
 
 def hex_alpha(color, alpha_hex):
-    """#RRGGBB 색상에 알파 hex 접미사 추가. hex가 아니면 그대로 반환."""
+    """Append alpha hex suffix to #RRGGBB. Pass-through for non-hex strings."""
     if isinstance(color, str) and color.startswith('#') and len(color) == 7:
         return f"{color}{alpha_hex}"
     return color
 
 
 def semantic_bg(color, opacity="0D"):
-    """시맨틱 색상의 배경 (투명도 포함) 반환"""
     return hex_alpha(color, opacity)
 
 
-def semantic_border(color, opacity="25"):
-    """시맨틱 색상의 테두리 (투명도 포함) 반환"""
+def semantic_border(color, opacity="35"):
     return hex_alpha(color, opacity)
 
 
 def badge_style(color):
-    """알약형 배지 스타일 생성"""
-    bg = hex_alpha(color, "18")
-    border = hex_alpha(color, "35")
+    """Pill badge."""
+    bg = hex_alpha(color, "1F")
+    border = hex_alpha(color, "45")
     return f"""
         QLabel {{
             background-color: {bg};
@@ -193,35 +200,35 @@ def badge_style(color):
 
 
 def stat_card_style(color):
-    """통계 카드 스타일 생성 - 채움 배경 (Stitch)"""
+    """Filled stat card."""
     bg = hex_alpha(color, "1A")
-    border = hex_alpha(color, "45")
+    border = hex_alpha(color, "40")
     return f"""
         QFrame {{
             background-color: {bg};
-            border: 2px solid {border};
+            border: 1px solid {border};
             border-radius: {Radius.LG};
-            padding: 10px;
+            padding: 12px;
         }}
     """
 
 
 def ghost_btn_style():
-    """고스트(투명) 버튼 스타일"""
+    """Ghost (transparent) button — 한국어 12pt 텍스트가 잘리지 않도록 좌우 padding 축소."""
     return f"""
         QPushButton {{
             background-color: transparent;
             color: {Colors.TEXT_SECONDARY};
-            border: 1px solid {Colors.BORDER};
+            border: 1px solid {Colors.BORDER_LIGHT};
             border-radius: {Radius.MD};
-            padding: 8px 20px;
+            padding: 9px 14px;
             font-weight: 600;
             font-size: 12pt;
         }}
         QPushButton:hover {{
             background-color: {Colors.BG_ELEVATED};
             color: {Colors.TEXT_PRIMARY};
-            border-color: {Colors.BORDER_LIGHT};
+            border-color: {Colors.ACCENT};
         }}
         QPushButton:pressed {{
             background-color: {Colors.BG_HOVER};
@@ -230,15 +237,15 @@ def ghost_btn_style():
 
 
 def accent_btn_style(use_gradient=True):
-    """액센트(기본) 버튼 스타일"""
+    """Primary accent button."""
     if use_gradient:
         return f"""
             QPushButton {{
                 background: {Gradients.ACCENT_BTN};
-                color: #FFFFFF;
+                color: {Colors.TEXT_BRIGHT};
                 border: none;
                 border-radius: {Radius.MD};
-                padding: 10px 28px;
+                padding: 11px 28px;
                 font-weight: 600;
                 font-size: 12pt;
             }}
@@ -256,10 +263,10 @@ def accent_btn_style(use_gradient=True):
     return f"""
         QPushButton {{
             background-color: {Colors.ACCENT};
-            color: #FFFFFF;
+            color: {Colors.TEXT_BRIGHT};
             border: none;
             border-radius: {Radius.MD};
-            padding: 10px 28px;
+            padding: 11px 28px;
             font-weight: 600;
             font-size: 12pt;
         }}
@@ -277,7 +284,7 @@ def accent_btn_style(use_gradient=True):
 
 
 def outline_btn_style(color):
-    """아웃라인 버튼 스타일 (color별)"""
+    """Outline button per color."""
     return f"""
         QPushButton {{
             background-color: transparent;
@@ -290,11 +297,11 @@ def outline_btn_style(color):
         }}
         QPushButton:hover {{
             background-color: {color};
-            color: #FFFFFF;
+            color: {Colors.TEXT_BRIGHT};
         }}
         QPushButton:pressed {{
             background-color: {color};
-            color: #FFFFFF;
+            color: {Colors.TEXT_BRIGHT};
         }}
         QPushButton:disabled {{
             background-color: {Colors.BG_ELEVATED};
@@ -305,18 +312,19 @@ def outline_btn_style(color):
 
 
 def input_style():
-    """공통 입력 필드 스타일"""
+    """Standard input field."""
     return f"""
         QLineEdit {{
             background-color: {Colors.BG_INPUT};
             border: 1px solid {Colors.BORDER};
             border-radius: {Radius.MD};
-            padding: 10px 14px;
+            padding: 11px 14px;
             color: {Colors.TEXT_PRIMARY};
             font-size: 12pt;
         }}
         QLineEdit:focus {{
             border: 1.5px solid {Colors.ACCENT};
+            background-color: {Colors.BG_CARD};
         }}
         QLineEdit:disabled {{
             background-color: {Colors.BG_ELEVATED};
@@ -329,7 +337,6 @@ def input_style():
 
 
 def section_title_style():
-    """섹션 제목 스타일"""
     return (
         f"color: {Colors.TEXT_PRIMARY}; font-size: 13pt; font-weight: 700; "
         f"background: transparent; border: none; padding: 0;"
@@ -337,7 +344,6 @@ def section_title_style():
 
 
 def section_icon_style():
-    """섹션 아이콘 스타일"""
     return (
         f"color: {Colors.ACCENT}; font-size: 14pt; font-weight: 700; "
         f"background: transparent;"
@@ -345,25 +351,21 @@ def section_icon_style():
 
 
 def header_title_style(size="14pt"):
-    """헤더 타이틀 스타일"""
     return (
         f"color: {Colors.TEXT_PRIMARY}; font-size: {size}; font-weight: 700; "
-        f"letter-spacing: -0.3px; background: transparent;"
+        f"letter-spacing: -0.4px; background: transparent;"
     )
 
 
 def muted_text_style(size="9pt"):
-    """연한 텍스트 스타일"""
     return f"color: {Colors.TEXT_MUTED}; font-size: {size}; background: transparent;"
 
 
 def hint_text_style():
-    """힌트/안내 텍스트 스타일"""
     return f"color: {Colors.TEXT_MUTED}; font-size: 9pt; background: transparent;"
 
 
 def close_btn_style():
-    """닫기 버튼 스타일"""
     return f"""
         QPushButton {{
             background: transparent;
@@ -381,7 +383,7 @@ def close_btn_style():
 
 
 def tab_widget_style():
-    """탭 위젯 스타일 - 필 탭 (Stitch)"""
+    """Pill tabs (Claude)."""
     return f"""
         QTabWidget::pane {{
             border: none;
@@ -402,14 +404,13 @@ def tab_widget_style():
             background-color: {Colors.BG_ELEVATED};
         }}
         QTabBar::tab:selected {{
-            color: #FFFFFF;
+            color: {Colors.TEXT_BRIGHT};
             background-color: {Colors.ACCENT};
         }}
     """
 
 
 def terminal_text_style():
-    """터미널/로그 텍스트 영역 스타일"""
     return f"""
         QTextEdit {{
             background-color: {Colors.BG_TERMINAL};
@@ -420,18 +421,17 @@ def terminal_text_style():
             font-family: {Typography.FAMILY_MONO};
             font-size: 9pt;
             selection-background-color: {Colors.ACCENT};
-            selection-color: #FFFFFF;
+            selection-color: {Colors.TEXT_BRIGHT};
         }}
     """
 
 
 def progress_bar_style():
-    """프로그레스 바 스타일"""
     return f"""
         QProgressBar {{
             background-color: {Colors.BG_INPUT};
             border: 1px solid {Colors.BORDER};
-            border-radius: 6px;
+            border-radius: 7px;
             height: 24px;
             text-align: center;
             color: {Colors.TEXT_SECONDARY};
@@ -440,13 +440,12 @@ def progress_bar_style():
         }}
         QProgressBar::chunk {{
             background: {Gradients.PROGRESS};
-            border-radius: 5px;
+            border-radius: 6px;
         }}
     """
 
 
 def scroll_area_style():
-    """스크롤 영역 스타일"""
     return f"""
         QScrollArea {{
             background: {Colors.BG_DARK};
@@ -456,7 +455,6 @@ def scroll_area_style():
 
 
 def dialog_style():
-    """다이얼로그 기본 스타일"""
     return f"""
         QDialog {{
             background-color: {Colors.BG_DARK};
@@ -465,12 +463,11 @@ def dialog_style():
 
 
 def window_control_btn_style(is_close=False):
-    """윈도우 컨트롤 버튼 (최소화/닫기)"""
     hover_bg = Colors.ERROR if is_close else Colors.BG_HOVER
-    hover_color = "white" if is_close else Colors.TEXT_PRIMARY
+    hover_color = Colors.TEXT_BRIGHT if is_close else Colors.TEXT_PRIMARY
     return f"""
         QPushButton {{
-            background: {Colors.BG_ELEVATED}; border: none; border-radius: 4px;
+            background: {Colors.BG_ELEVATED}; border: none; border-radius: 6px;
             color: {Colors.TEXT_SECONDARY}; font-size: 9pt;
         }}
         QPushButton:hover {{ background: {hover_bg}; color: {hover_color}; }}
@@ -481,7 +478,7 @@ def window_control_btn_style(is_close=False):
 
 
 def global_stylesheet():
-    """Application-wide base stylesheet - Stitch Blue theme"""
+    """Application-wide base stylesheet — Claude Dark."""
     c = Colors
     r = Radius
     t = Typography
@@ -507,12 +504,12 @@ def global_stylesheet():
         /* ===== Scrollbar ===== */
         QScrollBar:vertical {{
             background: transparent;
-            width: 6px;
+            width: 8px;
             margin: 4px 2px;
         }}
         QScrollBar::handle:vertical {{
             background: {c.SCROLLBAR};
-            border-radius: 3px;
+            border-radius: 4px;
             min-height: 30px;
         }}
         QScrollBar::handle:vertical:hover {{
@@ -523,12 +520,12 @@ def global_stylesheet():
         }}
         QScrollBar:horizontal {{
             background: transparent;
-            height: 6px;
+            height: 8px;
             margin: 2px 4px;
         }}
         QScrollBar::handle:horizontal {{
             background: {c.SCROLLBAR};
-            border-radius: 3px;
+            border-radius: 4px;
             min-width: 30px;
         }}
         QScrollBar::handle:horizontal:hover {{
@@ -546,7 +543,7 @@ def global_stylesheet():
             padding: 14px;
             color: {c.TEXT_PRIMARY};
             selection-background-color: {c.ACCENT};
-            selection-color: #FFFFFF;
+            selection-color: {c.TEXT_BRIGHT};
             font-family: {t.FAMILY_MONO};
             font-size: 11pt;
         }}
@@ -565,6 +562,7 @@ def global_stylesheet():
         QLineEdit:focus {{
             border-color: {c.ACCENT};
             border-width: 1.5px;
+            background-color: {c.BG_CARD};
         }}
         QLineEdit:disabled {{
             background-color: {c.BG_ELEVATED};
@@ -577,10 +575,10 @@ def global_stylesheet():
         /* ===== Buttons ===== */
         QPushButton {{
             background: {g.ACCENT_BTN};
-            color: #FFFFFF;
+            color: {c.TEXT_BRIGHT};
             border: none;
             border-radius: {r.MD};
-            padding: 10px 28px;
+            padding: 11px 28px;
             font-weight: 600;
             font-size: 12pt;
         }}
@@ -595,19 +593,18 @@ def global_stylesheet():
             color: {c.TEXT_MUTED};
         }}
 
-        /* Ghost / Secondary */
         QPushButton[class="ghost"] {{
             background-color: transparent;
             color: {c.TEXT_SECONDARY};
-            border: 1px solid {c.BORDER};
+            border: 1px solid {c.BORDER_LIGHT};
+            padding: 9px 14px;        /* base QPushButton 28px padding override → 한국어 텍스트 잘림 방지 */
         }}
         QPushButton[class="ghost"]:hover {{
             background-color: {c.BG_ELEVATED};
             color: {c.TEXT_PRIMARY};
-            border-color: {c.BORDER_LIGHT};
+            border-color: {c.ACCENT};
         }}
 
-        /* Outline variants */
         QPushButton[class="outline-danger"] {{
             background-color: transparent;
             color: {c.ERROR};
@@ -615,7 +612,7 @@ def global_stylesheet():
         }}
         QPushButton[class="outline-danger"]:hover {{
             background-color: {c.ERROR};
-            color: #FFFFFF;
+            color: {c.TEXT_BRIGHT};
         }}
 
         QPushButton[class="outline-success"] {{
@@ -625,7 +622,7 @@ def global_stylesheet():
         }}
         QPushButton[class="outline-success"]:hover {{
             background-color: {c.SUCCESS};
-            color: #FFFFFF;
+            color: {c.TEXT_BRIGHT};
         }}
 
         /* ===== Lists ===== */
@@ -638,7 +635,7 @@ def global_stylesheet():
             outline: none;
         }}
         QListWidget::item {{
-            padding: 8px 12px;
+            padding: 9px 12px;
             border-radius: {r.SM};
         }}
         QListWidget::item:selected {{
@@ -649,26 +646,55 @@ def global_stylesheet():
             background-color: {c.BG_ELEVATED};
         }}
 
-        /* ===== SpinBox ===== */
+        /* ===== SpinBox — 텍스트 우측 정렬, up/down은 우측 끝 한 덩어리 ===== */
         QSpinBox {{
             background-color: {c.BG_INPUT};
             border: 1px solid {c.BORDER};
             border-radius: {r.MD};
-            padding: 8px 10px;
+            padding: 6px 30px 6px 12px;   /* 우측 패딩으로 버튼 자리 확보 */
             color: {c.TEXT_PRIMARY};
             font-size: 12pt;
+            font-weight: 600;
+            qproperty-alignment: 'AlignVCenter | AlignLeft';
         }}
         QSpinBox:focus {{
             border-color: {c.ACCENT};
         }}
-        QSpinBox::up-button, QSpinBox::down-button {{
+        QSpinBox::up-button {{
+            subcontrol-origin: border;
+            subcontrol-position: top right;
             background-color: {c.BG_ELEVATED};
             border: none;
-            width: 22px;
-            border-radius: 3px;
+            border-top-right-radius: {r.MD};
+            border-left: 1px solid {c.BORDER};
+            border-bottom: 1px solid {c.BORDER_SUBTLE};
+            width: 24px;
+        }}
+        QSpinBox::down-button {{
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            background-color: {c.BG_ELEVATED};
+            border: none;
+            border-bottom-right-radius: {r.MD};
+            border-left: 1px solid {c.BORDER};
+            width: 24px;
         }}
         QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-            background-color: {c.BG_HOVER};
+            background-color: {c.ACCENT};
+        }}
+        QSpinBox::up-arrow {{
+            image: none;
+            width: 0; height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-bottom: 5px solid {c.TEXT_SECONDARY};
+        }}
+        QSpinBox::down-arrow {{
+            image: none;
+            width: 0; height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid {c.TEXT_SECONDARY};
         }}
 
         /* ===== Checkbox ===== */
@@ -743,7 +769,7 @@ def global_stylesheet():
         QProgressBar {{
             background-color: {c.BG_INPUT};
             border: 1px solid {c.BORDER};
-            border-radius: 6px;
+            border-radius: 7px;
             height: 24px;
             text-align: center;
             color: {c.TEXT_SECONDARY};
@@ -752,7 +778,7 @@ def global_stylesheet():
         }}
         QProgressBar::chunk {{
             background: {g.PROGRESS};
-            border-radius: 5px;
+            border-radius: 6px;
         }}
 
         /* ===== GroupBox ===== */
@@ -761,12 +787,12 @@ def global_stylesheet():
             border: 1px solid {c.BORDER};
             border-radius: {r.LG};
             margin-top: 14px;
-            padding: 20px 16px 16px 16px;
+            padding: 22px 18px 18px 18px;
             font-weight: 600;
         }}
         QGroupBox::title {{
             subcontrol-origin: margin;
-            left: 16px;
+            left: 18px;
             padding: 2px 10px;
             color: {c.TEXT_PRIMARY};
             font-size: 12pt;
@@ -783,7 +809,7 @@ def global_stylesheet():
 
         /* ===== StatusBar ===== */
         QStatusBar {{
-            background-color: {c.BG_CARD};
+            background-color: {c.BG_HEADER};
             color: {c.TEXT_SECONDARY};
             border-top: 1px solid {c.BORDER};
             padding: 4px 16px;
@@ -801,11 +827,11 @@ def global_stylesheet():
         }}
         QMessageBox QPushButton {{
             background: {g.ACCENT_BTN};
-            color: white;
+            color: {c.TEXT_BRIGHT};
             border: none;
             border-radius: {r.MD};
-            padding: 8px 24px;
-            min-width: 80px;
+            padding: 9px 26px;
+            min-width: 88px;
             font-weight: 600;
         }}
         QMessageBox QPushButton:hover {{
@@ -816,7 +842,7 @@ def global_stylesheet():
         QToolTip {{
             background-color: {c.BG_ELEVATED};
             color: {c.TEXT_PRIMARY};
-            border: 1px solid {c.BORDER};
+            border: 1px solid {c.BORDER_LIGHT};
             border-radius: {r.SM};
             padding: 8px 12px;
             font-size: 11pt;
@@ -825,31 +851,28 @@ def global_stylesheet():
 
 
 def resolve_fonts():
-    """Resolve best available system fonts. Must call after QApplication is created."""
+    """Resolve best available system fonts. Call after QApplication is created."""
     from PyQt6.QtGui import QFontDatabase
     available = set(QFontDatabase.families())
 
-    # UI font
     ui_candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic",
-                     "Apple SD Gothic Neo", "Segoe UI"]
+                     "Apple SD Gothic Neo", "Inter", "Segoe UI"]
     for name in ui_candidates:
         if name in available:
             Typography.FAMILY = name
             break
 
-    # Mono font
     mono_candidates = ["JetBrains Mono", "Cascadia Code", "Consolas", "Courier New"]
     for name in mono_candidates:
         if name in available:
             Typography.FAMILY_MONO = name
             break
 
-    # Regenerate inline style strings with resolved single font name
     f = Typography.FAMILY
     fm = Typography.FAMILY_MONO
-    Typography.TITLE_XL = f"font-family: {f}; font-size: 24pt; font-weight: 700; letter-spacing: -0.5px;"
-    Typography.TITLE_LG = f"font-family: {f}; font-size: 18pt; font-weight: 700; letter-spacing: -0.3px;"
-    Typography.TITLE_MD = f"font-family: {f}; font-size: 14pt; font-weight: 600;"
+    Typography.TITLE_XL = f"font-family: {f}; font-size: 24pt; font-weight: 700; letter-spacing: -0.6px;"
+    Typography.TITLE_LG = f"font-family: {f}; font-size: 18pt; font-weight: 700; letter-spacing: -0.4px;"
+    Typography.TITLE_MD = f"font-family: {f}; font-size: 14pt; font-weight: 600; letter-spacing: -0.2px;"
     Typography.TITLE_SM = f"font-family: {f}; font-size: 12pt; font-weight: 600;"
     Typography.BODY = f"font-family: {f}; font-size: 12pt; font-weight: 400;"
     Typography.BODY_SM = f"font-family: {f}; font-size: 11pt; font-weight: 400;"
