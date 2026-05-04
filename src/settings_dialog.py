@@ -113,9 +113,8 @@ class DialogHeader(QFrame):
     def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        grad = QLinearGradient(0, 0, self.width(), 0)
-        grad.setColorAt(0, QColor(Colors.BG_CARD))
-        grad.setColorAt(0.5, QColor("#131A2A"))
+        grad = QLinearGradient(0, 0, 0, self.height())
+        grad.setColorAt(0, QColor(Colors.BG_HEADER))
         grad.setColorAt(1, QColor(Colors.BG_CARD))
         painter.fillRect(self.rect(), grad)
         painter.setPen(QColor(Colors.BORDER))
