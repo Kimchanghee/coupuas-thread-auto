@@ -74,28 +74,29 @@ class ThemedAlertDialog(QDialog):
         self._build_ui(str(message or ""))
 
     def _build_ui(self, message: str) -> None:
+        # Claude Dark — warm charcoal + coral, kind별 accent는 _meta에서 동적 적용
         self.setStyleSheet(
             f"""
             QDialog#alertDialog {{
-                background-color: #0C1423;
-                border: 1px solid rgba(59, 123, 255, 0.28);
+                background-color: {Colors.BG_DARK};
+                border: 1px solid {Colors.BORDER};
                 border-radius: {Radius.LG};
             }}
             QFrame#alertHeader {{
-                background-color: #172A4A;
+                background-color: {Colors.BG_HEADER};
                 border-top-left-radius: {Radius.LG};
                 border-top-right-radius: {Radius.LG};
                 border: none;
-                border-bottom: 1px solid rgba(59, 123, 255, 0.20);
+                border-bottom: 1px solid {Colors.BORDER_SUBTLE};
             }}
             QFrame#statusStrip {{
-                background-color: #1A2740;
-                border: 1px solid rgba(59, 123, 255, 0.20);
+                background-color: {Colors.BG_SURFACE};
+                border: 1px solid {Colors.BORDER_SUBTLE};
                 border-radius: {Radius.MD};
             }}
             QPushButton#primaryBtn {{
-                background-color: #E31639;
-                color: #FFFFFF;
+                background-color: {Colors.ACCENT};
+                color: {Colors.TEXT_BRIGHT};
                 border: none;
                 border-radius: {Radius.MD};
                 min-width: 124px;
@@ -104,15 +105,15 @@ class ThemedAlertDialog(QDialog):
                 font-weight: 700;
             }}
             QPushButton#primaryBtn:hover {{
-                background-color: #C41231;
+                background-color: {Colors.ACCENT_LIGHT};
             }}
             QPushButton#primaryBtn:pressed {{
-                background-color: #A01028;
+                background-color: {Colors.ACCENT_DARK};
             }}
             QPushButton#secondaryBtn {{
-                background: #24344F;
-                color: #D2DCEB;
-                border: 1px solid rgba(114, 143, 183, 0.55);
+                background: transparent;
+                color: {Colors.TEXT_SECONDARY};
+                border: 1px solid {Colors.BORDER_LIGHT};
                 border-radius: {Radius.MD};
                 min-width: 124px;
                 min-height: 40px;
@@ -120,9 +121,9 @@ class ThemedAlertDialog(QDialog):
                 font-weight: 700;
             }}
             QPushButton#secondaryBtn:hover {{
-                background: #2C3E5D;
-                color: #FFFFFF;
-                border-color: rgba(160, 186, 223, 0.75);
+                background: {Colors.BG_ELEVATED};
+                color: {Colors.TEXT_PRIMARY};
+                border-color: {Colors.ACCENT};
             }}
             """
         )
