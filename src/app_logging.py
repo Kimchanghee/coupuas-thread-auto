@@ -294,8 +294,8 @@ def setup_logging(
     if level:
         log_level_name = level
     else:
-        # 기본값을 DEBUG로 두어 터미널에서 가능한 모든 로그를 확인할 수 있게 합니다.
-        log_level_name = os.getenv("THREAD_AUTO_LOG_LEVEL", "DEBUG")
+        default_level = "INFO" if is_frozen else "DEBUG"
+        log_level_name = os.getenv("THREAD_AUTO_LOG_LEVEL", default_level)
 
     log_level = _resolve_level(log_level_name)
     log_dir = get_log_dir()

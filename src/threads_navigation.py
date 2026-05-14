@@ -14,6 +14,14 @@ DEFAULT_THREADS_BASE_URLS: tuple[str, ...] = (
     "https://threads.net",
     "https://threads.com",
 )
+ALLOWED_THREADS_HOSTS: frozenset[str] = frozenset(
+    {
+        "threads.net",
+        "www.threads.net",
+        "threads.com",
+        "www.threads.com",
+    }
+)
 
 
 def _normalize_base_url(raw: str) -> str:
@@ -25,6 +33,8 @@ def _normalize_base_url(raw: str) -> str:
     parsed = urlparse(text)
     host = str(parsed.hostname or "").strip().lower()
     if not host:
+        return ""
+    if host not in ALLOWED_THREADS_HOSTS:
         return ""
     return f"https://{host}"
 

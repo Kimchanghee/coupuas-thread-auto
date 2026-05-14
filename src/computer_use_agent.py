@@ -57,6 +57,7 @@ class ComputerUseAgent:
         "www.threads.com",
         "instagram.com",
         "www.instagram.com",
+        "accountscenter.instagram.com",
         "facebook.com",
         "www.facebook.com",
         "www.google.com",
@@ -142,6 +143,23 @@ class ComputerUseAgent:
             pass
 
         return host in cls.ALLOWED_NAVIGATION_HOSTS
+
+    @classmethod
+    def _enforce_allowed_page_url(cls, page: Page, action: str = "navigation") -> None:
+        current_url = str(getattr(page, "url", "") or "")
+        if cls._is_allowed_navigation_url(current_url):
+            return
+        if current_url == "about:blank":
+            return
+        try:
+            page.goto("about:blank", wait_until="domcontentloaded", timeout=5000)
+        except Exception:
+            pass
+        raise ValueError(f"허용되지 않은 최종 URL입니다 ({action}): {current_url}")
+
+    @classmethod
+    def _is_allowed_document_request(cls, raw_url: str) -> bool:
+        return cls._is_allowed_navigation_url(raw_url)
 
     @classmethod
     def _sanitize_type_text(cls, value: Any) -> str:
@@ -375,6 +393,18 @@ class ComputerUseAgent:
             context_kwargs["storage_state"] = storage_state
 
         self.context = self.browser.new_context(**context_kwargs)
+
+        def _guard_document_navigation(route, request):
+            try:
+                if request.resource_type == "document" and not self._is_allowed_document_request(request.url):
+                    route.abort()
+                    return
+            except Exception:
+                route.abort()
+                return
+            route.continue_()
+
+        self.context.route("**/*", _guard_document_navigation)
         self.page = self.context.new_page()
 
     def save_session(self):
@@ -482,16 +512,20 @@ class ComputerUseAgent:
                     time.sleep(5)
                 elif fname == "go_back":
                     page.go_back()
+                    self._enforce_allowed_page_url(page, fname)
                 elif fname == "go_forward":
                     page.go_forward()
+                    self._enforce_allowed_page_url(page, fname)
                 elif fname == "search":
                     page.goto("https://www.google.com", wait_until="domcontentloaded")
+                    self._enforce_allowed_page_url(page, fname)
                 elif fname == "navigate":
                     url = args.get("url")
                     if url:
                         if not self._is_allowed_navigation_url(str(url)):
                             raise ValueError(f"허용되지 않은 URL 이동 요청입니다: {url}")
                         page.goto(url, wait_until="domcontentloaded")
+                        self._enforce_allowed_page_url(page, fname)
                 elif fname == "click_at":
                     x = _denormalize_x(args["x"], screen_width)
                     y = _denormalize_y(args["y"], screen_height)
@@ -556,6 +590,7 @@ class ComputerUseAgent:
 
                 page.wait_for_timeout(500)
                 page.wait_for_load_state("domcontentloaded")
+                self._enforce_allowed_page_url(page, fname)
                 time.sleep(0.5)
                 results.append(ExecutedAction(fname, extra_fields))
             except Exception as e:
@@ -685,4 +720,3 @@ def main(argv: List[str]):
 
 if __name__ == "__main__":
     main(sys.argv)
-

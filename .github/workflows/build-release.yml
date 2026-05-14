@@ -68,9 +68,34 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: 1
-          COUPUAS_ALLOW_UNPINNED_UPDATER_SIGNER: "1"
+          COUPUAS_TRUSTED_SIGNER_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           python build_exe.py
+
+      - name: Sign executable
+        shell: pwsh
+        env:
+          WINDOWS_CODE_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_CERT_BASE64 }}
+          WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
+          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGN_CERT_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGN_CERT_PASSWORD) -or
+              [string]::IsNullOrWhiteSpace($env:CODE_SIGN_CERT_THUMBPRINT)) {
+            throw "Code signing secrets are required for release builds."
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODE_SIGN_CERT_BASE64))
+          $securePassword = ConvertTo-SecureString $env:WINDOWS_CODE_SIGN_CERT_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword | Out-Null
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            throw "signtool.exe not found."
+          }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 $env:CODE_SIGN_CERT_THUMBPRINT "dist\CoupangThreadAuto.exe"
+          & $signtool.FullName verify /pa /v "dist\CoupangThreadAuto.exe"
 
       - name: Verify build
         run: |
@@ -100,6 +125,23 @@ jobs:
           PYTHONUTF8: 1
         run: |
           python build_installer.py
+
+      - name: Sign installer
+        shell: pwsh
+        env:
+          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CODE_SIGN_CERT_THUMBPRINT)) {
+            throw "CODE_SIGN_CERT_THUMBPRINT is required for release builds."
+          }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            throw "signtool.exe not found."
+          }
+          & $signtool.FullName sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 $env:CODE_SIGN_CERT_THUMBPRINT "dist\CoupangThreadAutoSetup.exe"
+          & $signtool.FullName verify /pa /v "dist\CoupangThreadAutoSetup.exe"
 
       - name: Verify installer
         run: |

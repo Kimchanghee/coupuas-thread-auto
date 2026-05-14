@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.threads_navigation import (
     friendly_threads_navigation_error,
+    get_threads_base_urls,
     goto_threads_with_fallback,
     is_browser_launch_error,
 )
@@ -129,3 +130,14 @@ def test_goto_threads_with_fallback_warns_once_when_all_domains_fail(monkeypatch
         assert "Threads 접속 실패" in str(exc)
 
     assert len(logger.warnings) == 1
+
+
+def test_get_threads_base_urls_ignores_non_threads_env_hosts(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URL", "https://evil.example")
+    monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URLS", "https://www.threads.com,https://phish.example")
+
+    urls = get_threads_base_urls()
+
+    assert "https://evil.example" not in urls
+    assert "https://phish.example" not in urls
+    assert "https://www.threads.com" in urls

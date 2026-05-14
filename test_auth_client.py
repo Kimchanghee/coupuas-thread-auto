@@ -456,6 +456,27 @@ def test_login_success_without_user_id_falls_back_to_username(monkeypatch):
     assert auth_client.is_logged_in() is True
 
 
+def test_login_success_without_user_id_does_not_trust_unverified_token_sub(monkeypatch):
+    _reset_auth_state()
+    token = _make_unverified_jwt({"sub": 9999})
+    response = _FakeResponse(
+        200,
+        {
+            "status": True,
+            "key": token,
+        },
+    )
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("paiduser", "SamplePass123")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["user_id"] == "paiduser"
+    assert state["token"] == token
+
+
 def test_login_success_ignores_null_like_user_id_and_uses_username(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(
@@ -504,19 +525,19 @@ def test_login_extracts_nested_user_id_from_data_data(monkeypatch):
     assert state["token"] == "nested-token"
 
 
-def test_get_session_user_and_token_repairs_mismatched_user_id_from_token_sub():
+def test_get_session_user_and_token_does_not_trust_unverified_token_sub():
     _reset_auth_state()
     auth_client._auth_state["user_id"] = "wrong-user"
     auth_client._auth_state["token"] = _make_unverified_jwt({"sub": 321})
 
     user_id, token = auth_client._get_session_user_and_token()
 
-    assert user_id == 321
+    assert user_id == "wrong-user"
     assert token == auth_client._auth_state["token"]
-    assert auth_client._auth_state["user_id"] == 321
+    assert auth_client._auth_state["user_id"] == "wrong-user"
 
 
-def test_create_payapp_checkout_repairs_user_id_before_request(monkeypatch):
+def test_create_payapp_checkout_uses_server_session_user_id_not_unverified_token_sub(monkeypatch):
     _reset_auth_state()
     auth_client._auth_state["user_id"] = "wrong-user"
     auth_client._auth_state["token"] = _make_unverified_jwt({"sub": 777})
@@ -530,9 +551,9 @@ def test_create_payapp_checkout_repairs_user_id_before_request(monkeypatch):
     assert result["success"] is True
     assert session.calls, "payment request should be sent"
     sent = session.calls[-1]
-    assert sent["headers"]["X-User-ID"] == "777"
-    assert sent["json"]["user_id"] == "777"
-    assert auth_client._auth_state["user_id"] == 777
+    assert sent["headers"]["X-User-ID"] == "wrong-user"
+    assert sent["json"]["user_id"] == "wrong-user"
+    assert auth_client._auth_state["user_id"] == "wrong-user"
 
 
 def test_check_username_rejects_empty_input_without_network(monkeypatch):

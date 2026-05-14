@@ -24,6 +24,7 @@ _SUSPICIOUS_ENV_VARS = (
     "THREAD_AUTO_ALLOW_CLIENT_IP_OVERRIDE",
     "THREAD_AUTO_LOAD_EXTERNAL_ENV",
     "THREAD_AUTO_TRUST_EXTERNAL_ENV",
+    "THREAD_AUTO_ALLOW_ANALYSIS_MODE",
     "COUPUAS_ALLOW_UNPINNED_UPDATER_SIGNER",
     "THREAD_AUTO_SECURITY_BYPASS",
 )
@@ -131,10 +132,6 @@ def assess_runtime_security() -> Tuple[bool, str]:
     For development/source mode, checks are bypassed.
     """
     if not _is_frozen_build():
-        return True, ""
-
-    # Emergency override for support scenarios.
-    if str(os.getenv("THREAD_AUTO_ALLOW_ANALYSIS_MODE", "")).strip() == "1":
         return True, ""
 
     if _is_debugger_attached():

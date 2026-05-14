@@ -2,7 +2,6 @@
 """Auth client for dashboard API."""
 
 import json
-import base64
 import logging
 import os
 import re
@@ -215,10 +214,16 @@ def _read_api_host_lock() -> str:
 
 def _write_api_host_lock(host: str) -> bool:
     _ensure_cred_dir()
-    protected = _protect_secret(str(host or "").strip().lower())
+    normalized_host = str(host or "").strip().lower()
+    protected = _protect_secret(normalized_host)
     if not protected:
-        logger.warning("API 호스트 잠금 정보 보호 처리에 실패했습니다.")
-        return False
+        if getattr(sys, "frozen", False):
+            logger.warning("API 호스트 잠금 정보 보호 처리에 실패했습니다.")
+            return False
+        # Source/dev mode may run on macOS/Linux where DPAPI is unavailable.
+        # The host lock is not a secret; keep a plaintext development lock so
+        # local tests and non-Windows development still exercise host pinning.
+        protected = normalized_host
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -735,26 +740,6 @@ def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _extract_token_subject_unverified(token: Any) -> Any:
-    token_text = str(token or "").strip()
-    if not token_text:
-        return None
-    parts = token_text.split(".")
-    if len(parts) < 2:
-        return None
-
-    payload_part = parts[1]
-    padding = "=" * ((4 - (len(payload_part) % 4)) % 4)
-    try:
-        payload_raw = base64.urlsafe_b64decode(f"{payload_part}{padding}".encode("ascii"))
-        payload = json.loads(payload_raw.decode("utf-8"))
-    except Exception:
-        return None
-    if not isinstance(payload, dict):
-        return None
-    return _normalize_session_user_id(payload.get("sub"))
-
-
 def _merge_account_state(payload: Dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         return
@@ -878,10 +863,6 @@ def _get_session_user_and_token() -> tuple[Any, Any]:
     with _AUTH_STATE_LOCK:
         user_id = _normalize_session_user_id(_auth_state.get("user_id"))
         token = _auth_state.get("token")
-        token_user_id = _extract_token_subject_unverified(token)
-        if token_user_id is not None and str(token_user_id) != str(user_id):
-            _auth_state["user_id"] = token_user_id
-            user_id = token_user_id
         return user_id, token
 
 
@@ -1303,9 +1284,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
                         _auth_state["token"] = resolved_token
                         _auth_state["token_issued_at"] = time.time()
                     if resolved_user_id is None:
-                        resolved_user_id = _extract_token_subject_unverified(resolved_token)
-                    if resolved_user_id is None:
-                        # Legacy fallback when backend omits user id and token sub.
+                        # Legacy fallback when backend omits a user id.
                         resolved_user_id = username
                     _auth_state["user_id"] = resolved_user_id
                     _auth_state["username"] = username

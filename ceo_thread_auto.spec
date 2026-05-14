@@ -118,10 +118,6 @@ hidden_imports = [
     'tenacity',
     'colorama',
 
-    # ============ DuckDuckGo 검색 ============
-    'duckduckgo_search',
-    'duckduckgo_search.duckduckgo_search',
-
     # ============ 표준 라이브러리 ============
     'json',
     'base64',
