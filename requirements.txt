@@ -12,6 +12,7 @@ cryptography==46.0.7
 pyasn1==0.6.3
 urllib3==2.7.0
 grpcio==1.80.0
+colorama==0.4.6
 
 # Build/update dependencies
 pyinstaller==6.19.0
