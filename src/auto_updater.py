@@ -200,6 +200,7 @@ class AutoUpdater:
             "$cert=$sig.SignerCertificate;"
             "$obj=[PSCustomObject]@{"
             "Status=$sig.Status.ToString();"
+            "StatusMessage=$sig.StatusMessage;"
             "Subject=($(if($cert){$cert.Subject}else{''}));"
             "Thumbprint=($(if($cert){$cert.Thumbprint}else{''}))"
             "};"
@@ -215,16 +216,26 @@ class AutoUpdater:
             )
             data = json.loads((completed.stdout or "").strip() or "{}")
             status = str(data.get("Status", "")).strip().lower()
+            status_message = str(data.get("StatusMessage", "")).strip().lower()
             subject = str(data.get("Subject", "")).strip()
             thumbprint = str(data.get("Thumbprint", "")).strip().upper()
 
-            if status != "valid":
-                return False
             if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
                 return False
             subject_identities = self._extract_subject_identities(subject)
             if self.trusted_publishers and not subject_identities.intersection(self.trusted_publishers):
                 return False
+            if status != "valid":
+                trust_chain_only_error = status == "nottrusted" or (
+                    status == "unknownerror"
+                    and (
+                        "not trusted" in status_message
+                        or "root certificate" in status_message
+                        or "trust provider" in status_message
+                    )
+                )
+                if not (self.trusted_thumbprints and trust_chain_only_error):
+                    return False
             return bool(subject)
         except Exception:
             return False
