@@ -65,13 +65,27 @@ try {
     throw "Signed artifact hash mismatch: $Path"
   }
 
-  $acceptedStatuses = @("Valid", "NotTrusted", "UnknownError")
   $status = $signature.Status.ToString()
-  if ($acceptedStatuses -notcontains $status) {
+
+  if ($status -eq "Valid") {
+    Write-Host "Signature status: $status"
+  } elseif ($status -eq "NotTrusted" -or $status -eq "UnknownError") {
+    $message = $signature.StatusMessage
+    $isTrustChainOnly =
+      $message -match "(?i)not trusted" -or
+      $message -match "(?i)root certificate" -or
+      $message -match "(?i)trust provider" -or
+      $message -match "(?i)certificate chain"
+
+    if (-not $isTrustChainOnly) {
+      throw "Unexpected Authenticode trust status for ${Path}: $status - $message"
+    }
+
+    Write-Host "Signature status: $status"
+  } else {
     throw "Unexpected Authenticode status for ${Path}: $status - $($signature.StatusMessage)"
   }
 
-  Write-Host "Signature status: $status"
   if (-not [string]::IsNullOrWhiteSpace($signature.StatusMessage)) {
     Write-Host "Signature message: $($signature.StatusMessage)"
   }
