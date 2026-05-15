@@ -81,27 +81,7 @@ jobs:
           WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGN_CERT_BASE64) -or
-              [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGN_CERT_PASSWORD) -or
-              [string]::IsNullOrWhiteSpace($env:CODE_SIGN_CERT_THUMBPRINT)) {
-            throw "Code signing secrets are required for release builds."
-          }
-          $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CODE_SIGN_CERT_BASE64))
-          $securePassword = ConvertTo-SecureString $env:WINDOWS_CODE_SIGN_CERT_PASSWORD -AsPlainText -Force
-          $cert = Import-PfxCertificate -FilePath $certPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePassword
-          $certPublicPath = Join-Path $env:RUNNER_TEMP "codesign.cer"
-          Export-Certificate -Cert $cert -FilePath $certPublicPath | Out-Null
-          Import-Certificate -FilePath $certPublicPath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-          Import-Certificate -FilePath $certPublicPath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $signtool) {
-            throw "signtool.exe not found."
-          }
-          & $signtool.FullName sign /fd SHA256 /sha1 $env:CODE_SIGN_CERT_THUMBPRINT "dist\CoupangThreadAuto.exe"
-          & $signtool.FullName verify /pa /v "dist\CoupangThreadAuto.exe"
+          & ".github/scripts/sign-windows-artifact.ps1" -Path "dist\CoupangThreadAuto.exe"
 
       - name: Verify build
         run: |
@@ -136,19 +116,11 @@ jobs:
         shell: pwsh
         timeout-minutes: 5
         env:
+          WINDOWS_CODE_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_CERT_BASE64 }}
+          WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:CODE_SIGN_CERT_THUMBPRINT)) {
-            throw "CODE_SIGN_CERT_THUMBPRINT is required for release builds."
-          }
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $signtool) {
-            throw "signtool.exe not found."
-          }
-          & $signtool.FullName sign /fd SHA256 /sha1 $env:CODE_SIGN_CERT_THUMBPRINT "dist\CoupangThreadAutoSetup.exe"
-          & $signtool.FullName verify /pa /v "dist\CoupangThreadAutoSetup.exe"
+          & ".github/scripts/sign-windows-artifact.ps1" -Path "dist\CoupangThreadAutoSetup.exe"
 
       - name: Verify installer
         run: |
