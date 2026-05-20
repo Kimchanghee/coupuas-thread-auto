@@ -13,6 +13,10 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
+# main.py is a developer auto-entrypoint. Enable unlimited local test runs
+# unless the environment explicitly overrides this flag.
+os.environ.setdefault("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "1")
+
 def _to_utf8_text_stream(stream, std_stream=None):
     """
     Wrap stream buffer with UTF-8 TextIOWrapper when possible.

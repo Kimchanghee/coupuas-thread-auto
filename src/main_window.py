@@ -2795,6 +2795,11 @@ class MainWindow(QMainWindow):
     # ────────────────────────────────────────────────────────
 
     @staticmethod
+    def _is_dev_quota_bypass_enabled():
+        value = str(os.getenv("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "") or "").strip().lower()
+        return value in {"1", "true", "yes", "y", "on"}
+
+    @staticmethod
     def _is_work_allowed(work_response):
         if not isinstance(work_response, dict):
             return False
@@ -2834,23 +2839,28 @@ class MainWindow(QMainWindow):
         interval = max(config.upload_interval, 30)
         logger.info("업로드 준비 완료: links=%d interval=%d", len(link_data), interval)
 
-        try:
-            from src import auth_client
-            work_check = auth_client.check_work_available()
-            if not self._is_work_allowed(work_check):
-                self._log_user_activity("batch_start_blocked", "reason=work_quota_unavailable", level="WARNING")
-                quota_message = (
-                    work_check.get("message", "사용 가능한 작업량이 없습니다.")
-                    if isinstance(work_check, dict)
-                    else "작업량 확인에 실패했습니다."
-                )
-                logger.warning("업로드 시작 차단: 작업 가능 수량 없음 message=%s", quota_message)
-                show_warning(self, "작업 제한", quota_message)
+        quota_bypass = self._is_dev_quota_bypass_enabled()
+        if quota_bypass:
+            logger.info("개발자 모드: 작업량 사전 점검을 건너뜁니다.")
+            self._log_user_activity("batch_start_quota_bypass", "mode=developer_unlimited")
+        else:
+            try:
+                from src import auth_client
+                work_check = auth_client.check_work_available()
+                if not self._is_work_allowed(work_check):
+                    self._log_user_activity("batch_start_blocked", "reason=work_quota_unavailable", level="WARNING")
+                    quota_message = (
+                        work_check.get("message", "사용 가능한 작업량이 없습니다.")
+                        if isinstance(work_check, dict)
+                        else "작업량 확인에 실패했습니다."
+                    )
+                    logger.warning("업로드 시작 차단: 작업 가능 수량 없음 message=%s", quota_message)
+                    show_warning(self, "작업 제한", quota_message)
+                    return
+            except Exception:
+                logger.exception("업로드 시작 차단: 작업량 사전 점검 실패")
+                show_warning(self, "작업 제한", "작업량 확인에 실패했습니다. 잠시 후 다시 시도해주세요.")
                 return
-        except Exception:
-            logger.exception("업로드 시작 차단: 작업량 사전 점검 실패")
-            show_warning(self, "작업 제한", "작업량 확인에 실패했습니다. 잠시 후 다시 시도해주세요.")
-            return
 
         self._log_user_activity(
             "batch_start_confirmation_prompt",
@@ -2999,6 +3009,7 @@ class MainWindow(QMainWindow):
         }
 
         total_links = self.link_queue.qsize()
+        quota_bypass = self._is_dev_quota_bypass_enabled()
 
         def log(msg):
             message_text = str(msg or "").strip()
@@ -3011,6 +3022,8 @@ class MainWindow(QMainWindow):
         agent = None
         try:
             log(f"업로드 시작 (대기열: {self.link_queue.qsize()})")
+            if quota_bypass:
+                log("개발자 모드: 작업량 제한 및 차감 동기화를 건너뜁니다.")
             self.signals.status.emit("처리중")
 
             api_key = str((worker_config or {}).get("api_key") or "")
@@ -3075,23 +3088,24 @@ class MainWindow(QMainWindow):
                     results["cancelled"] = True
                     break
 
-                try:
-                    from src import auth_client
-                    work_check = auth_client.check_work_available()
-                    if not self._is_work_allowed(work_check):
-                        quota_message = (
-                            work_check.get("message", "사용 가능한 작업량이 없습니다.")
-                            if isinstance(work_check, dict)
-                            else "작업량 확인에 실패했습니다."
-                        )
-                        log(f"작업량 확인 실패: {quota_message}")
+                if not quota_bypass:
+                    try:
+                        from src import auth_client
+                        work_check = auth_client.check_work_available()
+                        if not self._is_work_allowed(work_check):
+                            quota_message = (
+                                work_check.get("message", "사용 가능한 작업량이 없습니다.")
+                                if isinstance(work_check, dict)
+                                else "작업량 확인에 실패했습니다."
+                            )
+                            log(f"작업량 확인 실패: {quota_message}")
+                            results["cancelled"] = True
+                            break
+                    except Exception:
+                        logger.exception("업로드 루프에서 작업량 확인 실패")
+                        log("작업량 확인 실패로 업로드를 중단합니다.")
                         results["cancelled"] = True
                         break
-                except Exception:
-                    logger.exception("업로드 루프에서 작업량 확인 실패")
-                    log("작업량 확인 실패로 업로드를 중단합니다.")
-                    results["cancelled"] = True
-                    break
 
                 processed_count += 1
                 url, keyword = item if isinstance(item, tuple) else (item, None)
@@ -3162,80 +3176,88 @@ class MainWindow(QMainWindow):
                     ]
 
                     # Reserve work token when backend supports atomic quota flow.
-                    try:
-                        from src import auth_client
-                        reserve_result = auth_client.reserve_work()
-                        if isinstance(reserve_result, dict) and reserve_result.get("unsupported"):
-                            log("작업 예약 API를 지원하지 않아 기존 과금 동기화를 사용합니다.")
-                            reservation_supported = False
-                            reserved_work_id = None
-                        elif not self._is_work_allowed(reserve_result):
-                            quota_message = (
-                                reserve_result.get("message", "사용 가능한 작업량이 없습니다.")
-                                if isinstance(reserve_result, dict)
-                                else "작업량 확인에 실패했습니다."
-                            )
-                            log(f"작업 예약 실패: {quota_message}")
-                            results["cancelled"] = True
-                            break
-                        else:
-                            reservation_supported = True
-                            reserved_work_id = (
-                                str(
-                                    reserve_result.get("reservation_id")
-                                    or reserve_result.get("reserve_id")
-                                    or reserve_result.get("work_token")
-                                    or ""
-                                ).strip()
-                                if isinstance(reserve_result, dict)
-                                else ""
-                            )
-                            if not reserved_work_id:
-                                log("작업 예약 ID가 없어 안전상 업로드를 중단합니다.")
+                    if not quota_bypass:
+                        try:
+                            from src import auth_client
+                            reserve_result = auth_client.reserve_work()
+                            if isinstance(reserve_result, dict) and reserve_result.get("unsupported"):
+                                log("작업 예약 API를 지원하지 않아 기존 과금 동기화를 사용합니다.")
+                                reservation_supported = False
+                                reserved_work_id = None
+                            elif not self._is_work_allowed(reserve_result):
+                                quota_message = (
+                                    reserve_result.get("message", "사용 가능한 작업량이 없습니다.")
+                                    if isinstance(reserve_result, dict)
+                                    else "작업량 확인에 실패했습니다."
+                                )
+                                log(f"작업 예약 실패: {quota_message}")
                                 results["cancelled"] = True
                                 break
-                    except Exception:
-                        logger.exception("업로드 루프에서 작업량 예약 실패")
-                        log("작업 예약 실패로 업로드를 중단합니다.")
-                        results["cancelled"] = True
-                        break
+                            else:
+                                reservation_supported = True
+                                reserved_work_id = (
+                                    str(
+                                        reserve_result.get("reservation_id")
+                                        or reserve_result.get("reserve_id")
+                                        or reserve_result.get("work_token")
+                                        or ""
+                                    ).strip()
+                                    if isinstance(reserve_result, dict)
+                                    else ""
+                                )
+                                if not reserved_work_id:
+                                    log("작업 예약 ID가 없어 안전상 업로드를 중단합니다.")
+                                    results["cancelled"] = True
+                                    break
+                        except Exception:
+                            logger.exception("업로드 루프에서 작업량 예약 실패")
+                            log("작업 예약 실패로 업로드를 중단합니다.")
+                            results["cancelled"] = True
+                            break
 
                     success = helper.create_thread_direct(posts_data)
                     recorded_success = bool(success)
                     stop_for_billing_sync = False
                     if success:
-                        try:
-                            from src import auth_client
-                            if reservation_supported and reserved_work_id:
-                                use_result = auth_client.commit_reserved_work(reserved_work_id)
-                            else:
-                                use_result = auth_client.use_work()
-                            if not isinstance(use_result, dict) or not bool(use_result.get("success")):
-                                billing_msg = (
-                                    use_result.get("message", "알 수 없음")
-                                    if isinstance(use_result, dict)
-                                    else "알 수 없음"
-                                )
+                        if quota_bypass:
+                            results["uploaded"] += 1
+                            log(f"업로드 성공: {product_name}")
+                            self.signals.step_update.emit(2, "done")
+                            self.signals.step_update.emit(3, "done")
+                            self.signals.link_status.emit(url, "완료", product_name)
+                        else:
+                            try:
+                                from src import auth_client
+                                if reservation_supported and reserved_work_id:
+                                    use_result = auth_client.commit_reserved_work(reserved_work_id)
+                                else:
+                                    use_result = auth_client.use_work()
+                                if not isinstance(use_result, dict) or not bool(use_result.get("success")):
+                                    billing_msg = (
+                                        use_result.get("message", "알 수 없음")
+                                        if isinstance(use_result, dict)
+                                        else "알 수 없음"
+                                    )
+                                    recorded_success = False
+                                    stop_for_billing_sync = True
+                                    results["failed"] += 1
+                                    log(f"작업량 동기화 실패: {billing_msg}. 안전상 업로드를 중단합니다.")
+                                    self.signals.step_update.emit(3, "error")
+                                    self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
+                                else:
+                                    results["uploaded"] += 1
+                                    log(f"업로드 성공: {product_name}")
+                                    self.signals.step_update.emit(2, "done")
+                                    self.signals.step_update.emit(3, "done")
+                                    self.signals.link_status.emit(url, "완료", product_name)
+                            except Exception:
+                                logger.exception("업로드 성공 후 작업량 동기화 실패")
                                 recorded_success = False
                                 stop_for_billing_sync = True
                                 results["failed"] += 1
-                                log(f"작업량 동기화 실패: {billing_msg}. 안전상 업로드를 중단합니다.")
+                                log("작업량 동기화 실패로 안전상 업로드를 중단합니다.")
                                 self.signals.step_update.emit(3, "error")
-                                self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
-                            else:
-                                results["uploaded"] += 1
-                                log(f"업로드 성공: {product_name}")
-                                self.signals.step_update.emit(2, "done")
-                                self.signals.step_update.emit(3, "done")
-                                self.signals.link_status.emit(url, "완료", product_name)
-                        except Exception:
-                            logger.exception("업로드 성공 후 작업량 동기화 실패")
-                            recorded_success = False
-                            stop_for_billing_sync = True
-                            results["failed"] += 1
-                            log("작업량 동기화 실패로 안전상 업로드를 중단합니다.")
-                            self.signals.step_update.emit(3, "error")
-                            self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
+                                self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
                     else:
                         if reservation_supported and reserved_work_id:
                             try:
