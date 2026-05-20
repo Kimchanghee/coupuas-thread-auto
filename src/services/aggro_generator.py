@@ -23,6 +23,12 @@ class AggroGenerator:
         "이에 따른 일정액의 수수료를 제공받습니다.\"\n\n"
         "2. 수신자 동의 없는 메시지/SNS 발송은 스팸으로 간주될 수 있습니다."
     )
+    MAX_HOOK_LENGTH = 65
+    MAX_SUPPORT_LENGTH = 55
+    _FORBIDDEN_CLAIM_PATTERNS = (
+        re.compile(r"\b(100%|무조건|확정|보장)\b", re.IGNORECASE),
+        re.compile(r"(부작용\s*없|완치|치료)", re.IGNORECASE),
+    )
 
     def __init__(self, api_key: str = "") -> None:
         self._client = None
@@ -63,10 +69,70 @@ class AggroGenerator:
                     return part_text
         return ""
 
+    @staticmethod
+    def _normalize_text(value: str) -> str:
+        text = str(value or "")
+        text = text.replace("\r", "\n")
+        text = text.replace("\u200b", "")
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    @classmethod
+    def _trim_line(cls, value: str, max_len: int) -> str:
+        text = cls._normalize_text(value).replace("\n", " ")
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 1].rstrip() + "…"
+
+    @classmethod
+    def _contains_forbidden_claim(cls, text: str) -> bool:
+        normalized = str(text or "")
+        return any(pattern.search(normalized) for pattern in cls._FORBIDDEN_CLAIM_PATTERNS)
+
+    @staticmethod
+    def _select_core_keyword(title: str, keywords: str) -> str:
+        merged = " ".join([str(title or ""), str(keywords or "")]).strip()
+        candidates = [
+            token.strip()
+            for token in re.split(r"[\s,/|]+", merged)
+            if token and token.strip()
+        ]
+        candidates = [token for token in candidates if len(token) >= 2]
+        if not candidates:
+            return "추천템"
+        # 길이가 적당하고 정보량 있는 토큰 우선
+        candidates.sort(key=lambda x: (abs(len(x) - 6), -len(x)))
+        return candidates[0][:16]
+
+    @classmethod
+    def _build_fallback_first_post(cls, title: str, keywords: str) -> str:
+        token = cls._select_core_keyword(title, keywords)
+        hook_templates = [
+            f"{token} 찾는 사람들, 이거 먼저 봐도 괜찮을 듯",
+            f"{token} 고민 중이면 비교 포인트부터 체크해보세요",
+            f"{token} 살 때 실패 줄이는 기준, 이거였어요",
+            f"{token} 고를 때 제일 많이 헷갈리는 부분 정리해봄",
+            f"{token} 그냥 사기 전에 이것만 보면 시간 아껴요",
+        ]
+        support_templates = [
+            "광고지만 과장 없이 핵심만 짧게 남겨둘게요.",
+            "실사용 기준으로 고른 이유만 간단히 적어볼게요.",
+            "비슷한 용도 제품이랑 비교한 포인트도 같이 남깁니다.",
+            "가격보다 사용 장면 기준으로 보면 선택이 빨라져요.",
+            "저처럼 선택장애 있는 분들 기준으로 정리해봤어요.",
+        ]
+        seed = sum(ord(ch) for ch in f"{title}|{keywords}")
+        hook = hook_templates[seed % len(hook_templates)]
+        support = support_templates[(seed // 3) % len(support_templates)]
+        hook = cls._trim_line(hook, cls.MAX_HOOK_LENGTH)
+        support = cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)
+        return f"{hook}\n{support}"
+
     def generate_aggro_text(
         self, product_title: str, product_keywords: str = "", api_key: str = ""
     ) -> str:
-        """Generate one short hook sentence for Threads."""
+        """Generate engagement-oriented first post copy for Threads."""
         if api_key:
             self.set_api_key(api_key)
 
@@ -75,31 +141,57 @@ class AggroGenerator:
             seed_text = "추천 상품"
 
         if self._client is None:
-            return f"이거 보고 안 사면 손해일 수도 있음 {seed_text[:15]}"
+            return self._build_fallback_first_post(product_title, product_keywords)
 
         try:
             prompt = (
                 f"상품명: {seed_text}\n\n"
-                "Threads용 한 줄 훅 문장을 작성해줘.\n"
+                "Threads용 제휴 홍보 문구 2줄을 작성해줘.\n"
                 "규칙:\n"
-                "- 25~40자\n"
-                "- 과장된 후기체/충동구매 유도 톤\n"
+                "- 1줄차: 질문형/문제해결형/비교형 훅 (22~45자)\n"
+                "- 2줄차: 과장 없는 보조 설명 + 자연스러운 참여 유도 (18~38자)\n"
+                "- 병원/치료/완치, 100%보장, 무조건 같은 표현 금지\n"
+                "- 허위 후기처럼 보이는 표현 금지\n"
                 "- 해시태그 금지\n"
                 "- 한국어만 사용\n"
-                "- 문장 하나만 출력\n"
+                "- 줄바꿈 1회만 사용 (총 2줄)\n"
+                "- 따옴표/번호/불릿 없이 문구 본문만 출력\n"
             )
             result = self._generate_text(prompt).strip()
             if not result:
                 raise ValueError("empty response")
 
-            result = result.strip("\"'")
-            result = result.replace("\n", " ").strip()
+            result = result.strip("\"'`")
             result = re.sub(r"[\u4e00-\u9fff]+", "", result)
             result = re.sub(r"#\S+", "", result).strip()
-            return result
+            result = self._normalize_text(result)
+
+            lines = [line.strip(" -•") for line in result.split("\n") if line.strip()]
+            if not lines:
+                raise ValueError("empty lines")
+            if len(lines) == 1:
+                lines.append("실사용 기준으로 핵심만 간단히 남길게요.")
+            hook = self._trim_line(lines[0], self.MAX_HOOK_LENGTH)
+            support = self._trim_line(lines[1], self.MAX_SUPPORT_LENGTH)
+            merged = f"{hook}\n{support}"
+            if self._contains_forbidden_claim(merged):
+                raise ValueError("forbidden claim detected")
+            return merged
         except Exception as exc:
             print(f"  애그로 문구 생성 오류: {exc}")
-            return "이거 보고 안 사면 손해일 수도 있음"
+            return self._build_fallback_first_post(product_title, product_keywords)
+
+    @classmethod
+    def _build_second_post_text(cls, original_url: str, title: str, keywords: str) -> str:
+        token = cls._select_core_keyword(title, keywords)
+        compact_title = cls._trim_line(title or token, 28)
+        lines = [
+            f"[광고] {compact_title} 정보 정리",
+            f"구매 링크: {original_url}",
+            f"비슷한 {token} 비교가 필요하면 댓글로 상황 남겨주세요.",
+            cls.COUPANG_DISCLOSURE,
+        ]
+        return "\n".join(lines)
 
     def generate_product_post(self, product_info: dict, api_key: str = "") -> Dict[str, object]:
         """Build 3-part post payload with media metadata."""
@@ -112,7 +204,7 @@ class AggroGenerator:
         aggro_text = self.generate_aggro_text(title, keywords, api_key=api_key)
         media_path = video_path if video_path else image_path
 
-        second_text = f"상품 구경하기\n{original_url}\n\n{self.COUPANG_DISCLOSURE}"
+        second_text = self._build_second_post_text(original_url, title, keywords)
 
         return {
             "first_post": {

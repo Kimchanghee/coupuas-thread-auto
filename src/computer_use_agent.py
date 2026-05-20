@@ -24,7 +24,14 @@ from urllib.parse import urlparse
 from google import genai
 from google.genai import types
 from google.genai.types import Content, Part
-from playwright.sync_api import Page, sync_playwright
+
+try:
+    from playwright.sync_api import Page, sync_playwright
+    _PLAYWRIGHT_IMPORT_ERROR = None
+except ModuleNotFoundError as exc:
+    Page = Any  # type: ignore[assignment]
+    sync_playwright = None  # type: ignore[assignment]
+    _PLAYWRIGHT_IMPORT_ERROR = exc
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
@@ -341,6 +348,12 @@ class ComputerUseAgent:
     def start_browser(self):
         if self.context:
             return
+        if sync_playwright is None:
+            raise RuntimeError(
+                "Playwright가 설치되어 있지 않습니다. "
+                "먼저 `python3 -m pip install playwright` 실행 후 "
+                "`python3 -m playwright install chromium`로 브라우저를 설치하세요."
+            ) from _PLAYWRIGHT_IMPORT_ERROR
 
         self.playwright = sync_playwright().start()
         launch_errors: List[Exception] = []

@@ -7,9 +7,12 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Optional, List
 
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeout
+try:
+    from playwright.sync_api import Page
+except ModuleNotFoundError:
+    Page = Any  # type: ignore[assignment]
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.threads_navigation import goto_threads_with_fallback
