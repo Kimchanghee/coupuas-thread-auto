@@ -32,7 +32,7 @@ class AggroGenerator:
 
     def __init__(self, api_key: str = "") -> None:
         self._client = None
-        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash")
+        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-3.5-flash")
         self.set_api_key(api_key)
 
     def set_api_key(self, api_key: str) -> None:

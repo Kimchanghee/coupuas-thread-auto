@@ -34,7 +34,7 @@ class ImageSearchService:
         os.makedirs(self.CACHE_DIR, exist_ok=True)
         self._gemini_client = None
         self._gemini_key_fingerprint = ""
-        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-2.0-flash")
+        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-3.5-flash")
         self._prune_cache()
 
     def _get_gemini_client(self, api_key: str):

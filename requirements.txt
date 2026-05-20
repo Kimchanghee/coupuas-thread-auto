@@ -1,7 +1,6 @@
 # Runtime dependencies
 PyQt6==6.10.2
-google-generativeai==0.8.6
-google-genai==1.56.0
+google-genai==2.4.0
 Pillow==12.2.0
 requests==2.33.0
 selenium==4.41.0

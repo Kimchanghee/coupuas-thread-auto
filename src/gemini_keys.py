@@ -11,7 +11,7 @@ from src.config import config
 logger = logging.getLogger(__name__)
 
 MAX_GEMINI_API_KEYS = 10
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 
 _KEY_ERROR_MARKERS = (
     "invalid api key",

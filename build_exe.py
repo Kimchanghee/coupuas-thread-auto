@@ -14,9 +14,11 @@ MAIN_SCRIPT = "login_main.py"
 ICON_PATH = str((Path(__file__).resolve().parent / "images" / "app_icon.ico").resolve())
 
 HIDDEN_IMPORTS = [
-    # Google AI
-    "google.generativeai",
-    "google.ai.generativelanguage",
+    # Google GenAI
+    "google.genai",
+    "google.genai.types",
+    "google.genai.client",
+    "google.genai.models",
     "google.api_core",
     "google.auth",
     "google.protobuf",

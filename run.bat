@@ -19,9 +19,19 @@ echo Python 확인 완료
 echo.
 
 REM 보안상 자동 패키지 설치 금지
-pip show google-generativeai >nul 2>&1
+pip show google-genai >nul 2>&1
 if errorlevel 1 (
-    echo [오류] 필수 패키지가 설치되어 있지 않습니다.
+    echo [오류] 필수 패키지 google-genai 가 설치되어 있지 않습니다.
+    echo 보안상의 이유로 run.bat에서 자동 설치를 수행하지 않습니다.
+    echo 아래 명령으로 수동 설치 후 다시 실행해 주세요:
+    echo     pip install -r requirements.txt
+    pause
+    exit /b 1
+)
+
+pip show playwright >nul 2>&1
+if errorlevel 1 (
+    echo [오류] 필수 패키지 playwright 가 설치되어 있지 않습니다.
     echo 보안상의 이유로 run.bat에서 자동 설치를 수행하지 않습니다.
     echo 아래 명령으로 수동 설치 후 다시 실행해 주세요:
     echo     pip install -r requirements.txt

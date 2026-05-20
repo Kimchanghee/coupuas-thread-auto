@@ -40,17 +40,11 @@ hidden_imports = [
 
     # ============ Google/Gemini AI ============
     'google',
-    'google.generativeai',
-    'google.generativeai.types',
-    'google.generativeai.client',
-    'google.generativeai.models',
     'google.genai',
     'google.genai.types',
     'google.genai.client',
     'google.genai.models',
     'google.ai',
-    'google.ai.generativelanguage',
-    'google.ai.generativelanguage_v1beta',
     'google.api_core',
     'google.api_core.gapic_v1',
     'google.api_core.exceptions',
@@ -151,13 +145,6 @@ try:
     datas += tmp_ret[0]; binaries += tmp_ret[1]; hidden_imports += tmp_ret[2]
 except Exception as e:
     print(f"Warning: PyQt6 collect failed: {e}")
-
-# Google 관련 전체 수집
-try:
-    tmp_ret = collect_all('google.generativeai')
-    datas += tmp_ret[0]; binaries += tmp_ret[1]; hidden_imports += tmp_ret[2]
-except Exception as e:
-    print(f"Warning: google.generativeai collect failed: {e}")
 
 try:
     tmp_ret = collect_all('google.genai')

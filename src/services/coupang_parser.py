@@ -199,7 +199,7 @@ Access Denied이거나 정보를 찾을 수 없으면 빈 객체 {{}}를 반환�
 JSON만 출력하세요."""
 
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.5-flash",
                     contents=prompt,
                     config=GenerateContentConfig(tools=tools)
                 )
@@ -250,7 +250,7 @@ JSON만 출력하세요."""
         try:
             print(f"  [Parse] Using Gemini REST API with URL Context...")
 
-            api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+            api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
             prompt = f"""다음 쿠팡 상품 페이지에서 정보를 추출해주세요: {url}
 
@@ -314,7 +314,7 @@ JSON만 출력하세요."""
             image_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
             # Gemini API 호출
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
             prompt = """이 쿠팡 상품 페이지 스크린샷을 분석하여 다음 정보를 JSON 형식으로 추출해주세요:
 
