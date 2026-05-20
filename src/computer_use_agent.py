@@ -57,16 +57,13 @@ class ExecutedAction:
 
 
 class ComputerUseAgent:
-    ALLOWED_NAVIGATION_HOSTS = {
+    ALLOWED_NAVIGATION_DOMAINS = {
         "threads.net",
-        "www.threads.net",
         "threads.com",
-        "www.threads.com",
         "instagram.com",
-        "www.instagram.com",
-        "accountscenter.instagram.com",
         "facebook.com",
-        "www.facebook.com",
+    }
+    ALLOWED_NAVIGATION_EXACT_HOSTS = {
         "www.google.com",
     }
     MAX_TYPE_TEXT_LENGTH = 4000
@@ -149,7 +146,13 @@ class ComputerUseAgent:
             # Not an IP literal. Continue domain checks.
             pass
 
-        return host in cls.ALLOWED_NAVIGATION_HOSTS
+        if host in cls.ALLOWED_NAVIGATION_EXACT_HOSTS:
+            return True
+
+        for domain in cls.ALLOWED_NAVIGATION_DOMAINS:
+            if host == domain or host.endswith(f".{domain}"):
+                return True
+        return False
 
     @classmethod
     def _enforce_allowed_page_url(cls, page: Page, action: str = "navigation") -> None:
@@ -410,6 +413,7 @@ class ComputerUseAgent:
         def _guard_document_navigation(route, request):
             try:
                 if request.resource_type == "document" and not self._is_allowed_document_request(request.url):
+                    logger.warning("허용되지 않은 문서 이동 차단: %s", request.url)
                     route.abort()
                     return
             except Exception:

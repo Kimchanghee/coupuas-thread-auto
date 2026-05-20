@@ -2502,13 +2502,38 @@ class MainWindow(QMainWindow):
                     profile_dir=profile_dir
                 )
                 agent.start_browser()
-                opened_url = goto_threads_with_fallback(
-                    agent.page,
-                    path="/login",
-                    timeout=30000,
-                    retries_per_url=1,
-                    logger=logger,
-                )
+                safe_username = "".join(ch for ch in username.lstrip("@") if ch.isalnum() or ch in {"_", "."})
+                path_candidates = []
+                if safe_username:
+                    path_candidates.append(f"/@{safe_username}")
+                path_candidates.extend(["/login", "/"])
+
+                opened_url = ""
+                last_nav_error = None
+                for path_candidate in path_candidates:
+                    try:
+                        opened_url = goto_threads_with_fallback(
+                            agent.page,
+                            path=path_candidate,
+                            timeout=30000,
+                            retries_per_url=1,
+                            logger=logger,
+                        )
+                        break
+                    except Exception as nav_exc:
+                        last_nav_error = nav_exc
+                        logger.warning(
+                            "Threads 로그인 경로 시도 실패(path=%s): %s",
+                            path_candidate,
+                            nav_exc,
+                        )
+
+                if not opened_url:
+                    raise RuntimeError(
+                        f"Threads 로그인 페이지 접속 실패: {last_nav_error}"
+                        if last_nav_error
+                        else "Threads 로그인 페이지 접속 실패"
+                    )
                 self.signals.threads_login_launch.emit(True, opened_url)
                 self._log_user_activity("threads_login_browser_opened", f"url={opened_url}")
                 launch_notified = True
