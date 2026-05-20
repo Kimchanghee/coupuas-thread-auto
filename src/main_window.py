@@ -13,6 +13,7 @@ import threading
 import queue
 import sys
 from datetime import datetime
+from urllib.parse import unquote, urlparse
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel,
     QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
@@ -1866,15 +1867,50 @@ class MainWindow(QMainWindow):
     # ────────────────────────────────────────────────────────
 
     @staticmethod
+    def _normalize_threads_username(value):
+        """Extract a clean Threads/Instagram username from id or profile URL."""
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+
+        candidate = raw
+        lower_candidate = candidate.lower()
+        if "://" in candidate or lower_candidate.startswith("www."):
+            url_text = candidate if "://" in candidate else f"https://{candidate}"
+            try:
+                parsed = urlparse(url_text)
+                path = unquote(str(parsed.path or ""))
+                segments = [seg.strip() for seg in path.split("/") if seg.strip()]
+                if segments:
+                    candidate = segments[-1]
+                else:
+                    candidate = str(parsed.netloc or "")
+            except Exception:
+                pass
+
+        if "/" in candidate:
+            candidate = candidate.rsplit("/", 1)[-1]
+
+        candidate = candidate.split("?", 1)[0].split("#", 1)[0].strip()
+        if candidate.startswith("@"):
+            candidate = candidate[1:]
+
+        # Threads/Instagram username character set
+        candidate = re.sub(r"[^A-Za-z0-9._]", "", candidate)
+        return candidate[:30]
+
+    @staticmethod
     def _sanitize_profile_name(username):
         """프로필 디렉터리 이름용 사용자명 정리."""
-        name = username.split('@')[0] if '@' in username else username
-        return re.sub(r'[^\w\-.]', '_', name)
+        name = MainWindow._normalize_threads_username(username)
+        if not name:
+            name = str(username or "")
+        return re.sub(r"[^\w\-.]", "_", name)
 
     def _get_profile_dir(self):
-        username = self.username_edit.text().strip()
+        username = self._normalize_threads_username(self.username_edit.text().strip())
         if not username:
-            username = str(getattr(config, "instagram_username", "") or "").strip()
+            username = self._normalize_threads_username(str(getattr(config, "instagram_username", "") or "").strip())
         if username:
             profile_name = self._sanitize_profile_name(username)
             return f".threads_profile_{profile_name}"
@@ -2444,7 +2480,16 @@ class MainWindow(QMainWindow):
     # ────────────────────────────────────────────────────────
 
     def _open_threads_login(self):
-        username = self.username_edit.text().strip()
+        raw_username = self.username_edit.text().strip()
+        username = self._normalize_threads_username(raw_username)
+
+        if raw_username and username and raw_username != username:
+            self.username_edit.setText(username)
+            self._log_user_activity(
+                "threads_username_normalized",
+                f"raw={raw_username[:80]}; normalized={username}",
+            )
+
         if username:
             config.instagram_username = username
             config.save()
@@ -2509,10 +2554,9 @@ class MainWindow(QMainWindow):
                 except Exception:
                     logger.exception("Threads 로그인 시작 전 저장 세션 초기화에 실패했습니다.")
                 agent.start_browser()
-                safe_username = "".join(ch for ch in username.lstrip("@") if ch.isalnum() or ch in {"_", "."})
                 path_candidates = []
-                if safe_username:
-                    path_candidates.append(f"/@{safe_username}")
+                if username:
+                    path_candidates.append(f"/@{username}")
                 path_candidates.extend(["/login", "/"])
 
                 opened_url = ""
