@@ -2501,6 +2501,13 @@ class MainWindow(QMainWindow):
                     headless=False,
                     profile_dir=profile_dir
                 )
+                # Some accounts fall into redirect loops when stale session/cookie
+                # state is reused. Start from a clean saved-state file for login flow.
+                try:
+                    agent.clear_saved_session()
+                    logger.info("Threads 로그인 시작 전 저장 세션을 초기화했습니다.")
+                except Exception:
+                    logger.exception("Threads 로그인 시작 전 저장 세션 초기화에 실패했습니다.")
                 agent.start_browser()
                 safe_username = "".join(ch for ch in username.lstrip("@") if ch.isalnum() or ch in {"_", "."})
                 path_candidates = []

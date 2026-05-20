@@ -62,6 +62,7 @@ class ComputerUseAgent:
         "threads.com",
         "instagram.com",
         "facebook.com",
+        "meta.com",
     }
     ALLOWED_NAVIGATION_EXACT_HOSTS = {
         "www.google.com",
