@@ -207,7 +207,7 @@ except Exception as e:
 
 # Analysis
 a = Analysis(
-    ['main.py'],
+    ['login_main.py'],
     pathex=[project_root],
     binaries=binaries,
     datas=datas + [

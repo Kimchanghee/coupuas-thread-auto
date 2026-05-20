@@ -7,7 +7,7 @@ import playwright
 playwright_driver = os.path.join(os.path.dirname(playwright.__file__), "driver")
 
 a = Analysis(
-    ['main.py'],
+    ['login_main.py'],
     pathex=[],
     binaries=[],
     datas=[('fonts', 'fonts'), ('images/app_icon.ico', 'images'), (playwright_driver, 'playwright/driver')],

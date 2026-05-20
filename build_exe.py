@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "CoupangThreadAuto"
-MAIN_SCRIPT = "main.py"
+MAIN_SCRIPT = "login_main.py"
 ICON_PATH = str((Path(__file__).resolve().parent / "images" / "app_icon.ico").resolve())
 
 HIDDEN_IMPORTS = [
@@ -236,7 +236,7 @@ def build_exe() -> bool:
 
     size_mb = os.path.getsize(exe_path) / (1024 * 1024)
     try:
-        with open("main.py", "r", encoding="utf-8") as handle:
+        with open("login_main.py", "r", encoding="utf-8") as handle:
             for line in handle:
                 if "VERSION =" in line:
                     app_version = line.split("=")[1].strip().strip('"').strip("'")

@@ -7,6 +7,7 @@ recursive-include src *.py
 include requirements.txt
 include setup.py
 include main.py
+include login_main.py
 include ceo_thread_auto.spec
 
 # 문서

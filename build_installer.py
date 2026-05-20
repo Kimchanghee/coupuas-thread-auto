@@ -20,7 +20,7 @@ def _resolve_app_version() -> str:
         return env_version.lstrip("v")
 
     try:
-        main_py = Path("main.py").read_text(encoding="utf-8")
+        main_py = Path("login_main.py").read_text(encoding="utf-8")
         match = re.search(r'^\s*VERSION\s*=\s*["\']([^"\']+)["\']', main_py, re.MULTILINE)
         if match:
             return str(match.group(1)).strip().lstrip("v")

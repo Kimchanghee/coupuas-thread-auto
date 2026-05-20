@@ -73,7 +73,7 @@ python setup_login.py
 
 ### 2. 애플리케이션 실행
 ```bash
-python main.py
+python login_main.py
 ```
 
 ### 3. API 키 설정
@@ -147,7 +147,8 @@ ceo-thread-auto/
 ├── images/                            # 생성된 이미지 저장
 ├── .threads_profile/                  # 브라우저 세션 저장 (자동 생성)
 │   └── storage_state.json            # Instagram 로그인 세션
-├── main.py                            # 메인 실행 파일
+├── main.py                            # 개발자 자동 진입 실행 파일 (로그인 우회)
+├── login_main.py                      # 실제 로그인 시작 실행 파일
 ├── setup_login.py                     # 초기 로그인 설정 스크립트
 ├── setup_login.bat                    # Windows용 설정 배치 파일
 ├── get_threads_token.py               # Threads API 토큰 생성

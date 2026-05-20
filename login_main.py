@@ -2,8 +2,7 @@
 쿠팡 파트너스 스레드 자동화 - 메인 애플리케이션
 Stitch Blue 테마
 
-개발자 자동 진입 엔트리포인트입니다.
-실제 로그인 시작 엔트리포인트는 login_main.py 입니다.
+백엔드 project-user-dashboard(.env)를 함께 로드합니다.
 """
 import sys
 import os
@@ -268,100 +267,6 @@ class SplashScreen(QSplashScreen):
         self.repaint()
 
 
-def _parse_int_env(env_name: str, default: int) -> int:
-    raw_value = str(os.getenv(env_name, "")).strip()
-    if not raw_value:
-        return default
-    try:
-        return int(raw_value)
-    except ValueError:
-        return default
-
-
-def _parse_bool_env(env_name: str, default: bool) -> bool:
-    raw_value = str(os.getenv(env_name, "")).strip().lower()
-    if not raw_value:
-        return default
-    if raw_value in {"1", "true", "yes", "y", "on"}:
-        return True
-    if raw_value in {"0", "false", "no", "n", "off"}:
-        return False
-    return default
-
-
-def _build_developer_auth_result() -> dict:
-    username = str(os.getenv("THREAD_AUTO_DEV_USERNAME", "developer") or "").strip() or "developer"
-    user_id = str(os.getenv("THREAD_AUTO_DEV_USER_ID", username) or "").strip() or username
-    token = str(os.getenv("THREAD_AUTO_DEV_TOKEN", f"dev-session-{user_id}") or "").strip()
-    if not token:
-        token = f"dev-session-{user_id}"
-
-    work_count = max(_parse_int_env("THREAD_AUTO_DEV_WORK_COUNT", 999_999), 0)
-    work_used = max(_parse_int_env("THREAD_AUTO_DEV_WORK_USED", 0), 0)
-    if work_used > work_count:
-        work_count = work_used
-    remaining_count = max(work_count - work_used, 0)
-
-    plan_type = str(os.getenv("THREAD_AUTO_DEV_PLAN_TYPE", "pro") or "").strip() or "pro"
-    subscription_status = str(
-        os.getenv("THREAD_AUTO_DEV_SUBSCRIPTION_STATUS", "active") or ""
-    ).strip() or "active"
-    is_paid = _parse_bool_env("THREAD_AUTO_DEV_IS_PAID", True)
-
-    return {
-        "status": True,
-        "id": user_id,
-        "user_id": user_id,
-        "username": username,
-        "key": token,
-        "token": token,
-        "work_count": work_count,
-        "work_used": work_used,
-        "remaining_count": remaining_count,
-        "plan_type": plan_type,
-        "subscription_status": subscription_status,
-        "is_paid": is_paid,
-    }
-
-
-def _inject_developer_auth_state(auth_result: dict) -> None:
-    try:
-        from src import auth_client
-
-        merge_fn = getattr(auth_client, "_merge_account_state", None)
-        if callable(merge_fn):
-            merge_fn(auth_result)
-            logger.info(
-                "개발자 세션 주입 완료 (username=%s, user_id=%s)",
-                auth_result.get("username"),
-                auth_result.get("user_id"),
-            )
-            return
-
-        state = getattr(auth_client, "_auth_state", None)
-        state_lock = getattr(auth_client, "_AUTH_STATE_LOCK", None)
-        if isinstance(state, dict) and state_lock is not None:
-            with state_lock:
-                state.update(
-                    {
-                        "user_id": auth_result.get("user_id"),
-                        "username": auth_result.get("username"),
-                        "token": auth_result.get("token"),
-                        "token_issued_at": time.time(),
-                        "work_count": int(auth_result.get("work_count", 0)),
-                        "work_used": int(auth_result.get("work_used", 0)),
-                        "remaining_count": int(auth_result.get("remaining_count", 0)),
-                        "plan_type": auth_result.get("plan_type"),
-                        "subscription_status": auth_result.get("subscription_status"),
-                        "is_paid": bool(auth_result.get("is_paid", True)),
-                    }
-                )
-            logger.info("개발자 세션 메모리 상태 주입 완료")
-            return
-    except Exception:
-        logger.exception("개발자 세션 주입에 실패했습니다.")
-
-
 def main():
     log_file = setup_logging(capture_print=True)
     logger.info("애플리케이션을 시작합니다.")
@@ -424,16 +329,34 @@ def main():
             time.sleep(0.05)
             app.processEvents()
 
-    auth_result = _build_developer_auth_result()
-    _inject_developer_auth_state(auth_result)
-    app._login_window = None
-    app._main_window = _create_main_window(None, auth_result)
-    splash.finish(app._main_window)
-    logger.info(
-        "개발자 자동 진입 완료 (username=%s, user_id=%s)",
-        auth_result.get("username"),
-        auth_result.get("user_id"),
-    )
+    # Login window
+    from src.login_window import LoginWindow
+    login_win = LoginWindow()
+    logger.info("로그인 창 표시 완료")
+    app._login_window = login_win
+    app._main_window = None
+
+    def on_login_success(result):
+        logger.info("로그인 성공 콜백 수신")
+        login_win.hide()
+        from src.login_loading_dialog import LoginLoadingDialog
+
+        loading_dialog = LoginLoadingDialog(parent=login_win)
+        app._login_loading_dialog = loading_dialog
+
+        def _open_main_window():
+            try:
+                app._main_window = _create_main_window(login_win, result)
+                logger.info("메인 윈도우 생성 및 표시 완료")
+            finally:
+                loading_dialog.close()
+                app._login_loading_dialog = None
+
+        loading_dialog.show()
+        loading_dialog.start(on_finished=_open_main_window)
+    login_win.login_success.connect(on_login_success)
+    login_win.show()
+    splash.finish(login_win)
 
     sys.exit(app.exec())
 

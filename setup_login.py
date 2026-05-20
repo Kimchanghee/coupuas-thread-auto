@@ -76,7 +76,7 @@ def main() -> None:
 
         print()
         print("Setup complete.")
-        print("Now run: python main.py")
+        print("Now run: python login_main.py")
 
     except Exception as exc:
         print()
