@@ -2479,11 +2479,11 @@ class MainWindow(QMainWindow):
         opened = self._open_external_link(pay_url, "settings_payapp_checkout")
         if not opened:
             self._log_user_activity("payment_checkout_open_failed", f"url={safe_pay_url}", level="WARNING")
-            show_error(self, "결제 요청 실패", f"결제 페이지를 열지 못했습니다.\n{pay_url}")
+            show_error(self, "결제 요청 실패", f"결제 페이지를 열지 못했습니다.\n{safe_pay_url}")
             return
 
         self._log_user_activity("payment_checkout_opened", f"url={safe_pay_url}")
-        self.signals.log.emit(f"PayApp 결제 페이지가 열렸습니다: {pay_url}")
+        self.signals.log.emit(f"PayApp 결제 페이지가 열렸습니다: {safe_pay_url}")
 
     def open_settings(self):
         """Switch to settings page (page 2) instead of opening dialog."""
