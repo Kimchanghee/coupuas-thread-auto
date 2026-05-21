@@ -23,11 +23,19 @@ class AggroGenerator:
         "이에 따른 일정액의 수수료를 제공받습니다.\"\n\n"
         "2. 수신자 동의 없는 메시지/SNS 발송은 스팸으로 간주될 수 있습니다."
     )
-    MAX_HOOK_LENGTH = 65
-    MAX_SUPPORT_LENGTH = 55
+    MAX_HOOK_LENGTH = 82
+    MAX_SUPPORT_LENGTH = 62
+    _FIRST_POST_BLOCK_PATTERNS = (
+        re.compile(r"https?://\S+", re.IGNORECASE),
+        re.compile(r"\b(link\.coupang\.com|www\.coupang\.com)\S*", re.IGNORECASE),
+        re.compile(r"(쿠팡\s*파트너스|파트너스\s*활동|수수료를\s*제공받습니다)", re.IGNORECASE),
+        re.compile(r"(구매\s*링크|제품\s*확인\s*링크|확인\s*링크|바로\s*가기|링크는\s*여기)", re.IGNORECASE),
+    )
     _FORBIDDEN_CLAIM_PATTERNS = (
         re.compile(r"\b(100%|무조건|확정|보장)\b", re.IGNORECASE),
         re.compile(r"(부작용\s*없|완치|치료)", re.IGNORECASE),
+        re.compile(r"(소음\s*없이|무소음|칼바람|완벽하게|확실하게)", re.IGNORECASE),
+        re.compile(r"(사진을\s*공개|영상\s*공개|장착\s*사진|리뷰\s*공개)", re.IGNORECASE),
     )
 
     def __init__(self, api_key: str = "") -> None:
@@ -93,14 +101,39 @@ class AggroGenerator:
     @staticmethod
     def _select_core_keyword(title: str, keywords: str) -> str:
         merged = " ".join([str(title or ""), str(keywords or "")]).strip()
-        candidates = [
+        raw_candidates = [
             token.strip()
             for token in re.split(r"[\s,/|]+", merged)
             if token and token.strip()
         ]
+        color_words = {
+            "블랙", "화이트", "그레이", "실버", "레드", "블루", "그린", "핑크",
+            "브라운", "베이지", "탄", "아이보리", "네이비",
+        }
+        modifier_words = {"되는", "있는", "없는", "가능", "전용"}
+        korean_tokens = [
+            token
+            for token in raw_candidates
+            if re.search(r"[가-힣]", token)
+            and len(token) >= 2
+            and token not in color_words
+            and token not in modifier_words
+        ]
+        if len(korean_tokens) >= 2:
+            return " ".join(korean_tokens[-2:])[:16]
+        if len(korean_tokens) == 1:
+            return korean_tokens[0][:16]
+
+        candidates = raw_candidates
         candidates = [token for token in candidates if len(token) >= 2]
         if not candidates:
             return "추천템"
+        candidates = [
+            token
+            for token in candidates
+            if not re.fullmatch(r"[A-Za-z]*\d[A-Za-z0-9_-]*", token)
+            and token not in color_words
+        ] or candidates
         # 길이가 적당하고 정보량 있는 토큰 우선
         candidates.sort(key=lambda x: (abs(len(x) - 6), -len(x)))
         return candidates[0][:16]
@@ -109,18 +142,18 @@ class AggroGenerator:
     def _build_fallback_first_post(cls, title: str, keywords: str) -> str:
         token = cls._select_core_keyword(title, keywords)
         hook_templates = [
-            f"{token} 찾는 사람들, 이거 먼저 봐도 괜찮을 듯",
-            f"{token} 고민 중이면 비교 포인트부터 체크해보세요",
-            f"{token} 살 때 실패 줄이는 기준, 이거였어요",
-            f"{token} 고를 때 제일 많이 헷갈리는 부분 정리해봄",
-            f"{token} 그냥 사기 전에 이것만 보면 시간 아껴요",
+            f"{token}, 이름은 평범한데 쓰는 장면이 은근 반칙임",
+            f"{token} 찾는 사람은 대체 뭘 불편해했을까? 정답이 꽤 현실적임",
+            f"{token} 안 써본 사람은 이 불편을 그냥 참고 있었을지도",
+            f"{token}를 굳이 사는 이유, 생각보다 작은 순간에서 터짐",
+            f"{token} 하나로 해결될 수 있는 불편을 계속 버티고 있었을지도",
         ]
         support_templates = [
-            "광고지만 과장 없이 핵심만 짧게 남겨둘게요.",
-            "실사용 기준으로 고른 이유만 간단히 적어볼게요.",
-            "비슷한 용도 제품이랑 비교한 포인트도 같이 남깁니다.",
-            "가격보다 사용 장면 기준으로 보면 선택이 빨라져요.",
-            "저처럼 선택장애 있는 분들 기준으로 정리해봤어요.",
+            "무슨 상황에서 필요한지 보면 바로 감 옵니다.",
+            "가격보다 '언제 쓰이냐'가 포인트라 따로 정리했어요.",
+            "비슷한 제품 넘기기 전에 이 장면부터 떠올려보세요.",
+            "필요했던 장면이 떠오르는 사람은 바로 감 옵니다.",
+            "필요한 사람한테는 꽤 선명하게 꽂히는 물건입니다.",
         ]
         seed = sum(ord(ch) for ch in f"{title}|{keywords}")
         hook = hook_templates[seed % len(hook_templates)]
@@ -128,6 +161,39 @@ class AggroGenerator:
         hook = cls._trim_line(hook, cls.MAX_HOOK_LENGTH)
         support = cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)
         return f"{hook}\n{support}"
+
+    @classmethod
+    def _clean_first_post_candidate(cls, text: str, title: str, keywords: str) -> str:
+        """Keep the first post as pure curiosity copy with no link/disclosure."""
+        cleaned = cls._normalize_text(str(text or "").strip("\"'` "))
+        if not cleaned:
+            return ""
+
+        for pattern in cls._FIRST_POST_BLOCK_PATTERNS:
+            if pattern.search(cleaned):
+                return ""
+
+        cleaned = re.sub(r"[\u4e00-\u9fff]+", "", cleaned)
+        cleaned = re.sub(r"#\S+", "", cleaned)
+        cleaned = cls._normalize_text(cleaned)
+
+        lines = [line.strip(" -•0123456789.()") for line in cleaned.split("\n") if line.strip()]
+        if not lines:
+            return ""
+        if len(lines) == 1:
+            lines.append("왜 필요한지 보면 바로 감이 옵니다.")
+
+        hook = cls._trim_line(lines[0], cls.MAX_HOOK_LENGTH)
+        support = cls._trim_line(lines[1], cls.MAX_SUPPORT_LENGTH)
+        merged = f"{hook}\n{support}"
+        if cls._contains_forbidden_claim(merged):
+            return ""
+
+        token = cls._select_core_keyword(title, keywords)
+        token_parts = [part for part in token.split() if len(part) >= 2]
+        if token_parts and not any(part in merged for part in token_parts):
+            return ""
+        return merged
 
     def generate_aggro_text(
         self, product_title: str, product_keywords: str = "", api_key: str = ""
@@ -146,10 +212,15 @@ class AggroGenerator:
         try:
             prompt = (
                 f"상품명: {seed_text}\n\n"
-                "Threads용 제휴 홍보 문구 2줄을 작성해줘.\n"
+                "Threads 첫 번째 글에 들어갈 초강력 호기심 유발 문구 2줄을 작성해줘.\n"
                 "규칙:\n"
-                "- 1줄차: 질문형/문제해결형/비교형 훅 (22~45자)\n"
-                "- 2줄차: 과장 없는 보조 설명 + 자연스러운 참여 유도 (18~38자)\n"
+                "- 이 글은 첫 번째 글이다. URL, 쿠팡 링크, 구매 링크, 광고 고지 문구는 절대 넣지 마\n"
+                "- 1줄차: 상품의 실제 사용 장면과 불편함을 뒤집는 어그로 훅 (35~65자)\n"
+                "- 2줄차: 더 보고 싶게 만드는 짧은 보조 문장 (20~45자)\n"
+                "- 상품군이 드러나야 한다. 너무 일반적인 문구 금지\n"
+                "- '대박', '무조건 사라', '역대급', '꿀템' 같은 흔한 표현 금지\n"
+                "- 독특하고 아이디어가 느껴지는 문장으로 작성\n"
+                "- 실제 확인하지 않은 성능 단정, 소음/풍량 단정, 사진/영상 공개 표현 금지\n"
                 "- 병원/치료/완치, 100%보장, 무조건 같은 표현 금지\n"
                 "- 허위 후기처럼 보이는 표현 금지\n"
                 "- 해시태그 금지\n"
@@ -161,21 +232,9 @@ class AggroGenerator:
             if not result:
                 raise ValueError("empty response")
 
-            result = result.strip("\"'`")
-            result = re.sub(r"[\u4e00-\u9fff]+", "", result)
-            result = re.sub(r"#\S+", "", result).strip()
-            result = self._normalize_text(result)
-
-            lines = [line.strip(" -•") for line in result.split("\n") if line.strip()]
-            if not lines:
-                raise ValueError("empty lines")
-            if len(lines) == 1:
-                lines.append("실사용 기준으로 핵심만 간단히 남길게요.")
-            hook = self._trim_line(lines[0], self.MAX_HOOK_LENGTH)
-            support = self._trim_line(lines[1], self.MAX_SUPPORT_LENGTH)
-            merged = f"{hook}\n{support}"
-            if self._contains_forbidden_claim(merged):
-                raise ValueError("forbidden claim detected")
+            merged = self._clean_first_post_candidate(result, product_title, product_keywords)
+            if not merged:
+                raise ValueError("invalid first post candidate")
             return merged
         except Exception as exc:
             print(f"  애그로 문구 생성 오류: {exc}")
@@ -186,9 +245,8 @@ class AggroGenerator:
         token = cls._select_core_keyword(title, keywords)
         compact_title = cls._trim_line(title or token, 28)
         lines = [
-            f"[광고] {compact_title} 정보 정리",
-            f"구매 링크: {original_url}",
-            f"비슷한 {token} 비교가 필요하면 댓글로 상황 남겨주세요.",
+            f"{compact_title} 확인 링크",
+            original_url,
             cls.COUPANG_DISCLOSURE,
         ]
         return "\n".join(lines)
