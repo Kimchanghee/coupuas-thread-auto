@@ -37,6 +37,11 @@ class AggroGenerator:
         re.compile(r"(소음\s*없이|무소음|칼바람|완벽하게|확실하게)", re.IGNORECASE),
         re.compile(r"(사진을\s*공개|영상\s*공개|장착\s*사진|리뷰\s*공개)", re.IGNORECASE),
     )
+    _AWKWARD_COPY_PATTERNS = (
+        re.compile(r"(등짝|차꾸|감성\s*쪽|살려버리|송풍구\s*감성)"),
+        re.compile(r"(반칙임|킹받|노골적으로|숨은\s*비결|소문난|비주얼은)"),
+        re.compile(r"(검은\s+선풍기\s+달|시커먼\s+선풍기\s+달)"),
+    )
     _EMOJI_PATTERN = re.compile(r"[\U0001F300-\U0001FAFF]")
 
     def __init__(self, api_key: str = "") -> None:
@@ -99,6 +104,11 @@ class AggroGenerator:
         normalized = str(text or "")
         return any(pattern.search(normalized) for pattern in cls._FORBIDDEN_CLAIM_PATTERNS)
 
+    @classmethod
+    def _contains_awkward_copy(cls, text: str) -> bool:
+        normalized = str(text or "")
+        return any(pattern.search(normalized) for pattern in cls._AWKWARD_COPY_PATTERNS)
+
     @staticmethod
     def _select_core_keyword(title: str, keywords: str) -> str:
         merged = " ".join([str(title or ""), str(keywords or "")]).strip()
@@ -143,18 +153,18 @@ class AggroGenerator:
     def _build_fallback_first_post(cls, title: str, keywords: str) -> str:
         token = cls._select_core_keyword(title, keywords)
         hook_templates = [
-            f"👀 {token}, '이게 왜 필요해?' 했다가 필요한 장면이 바로 떠오름",
-            f"🤔 {token} 찾는 사람들, 사실 참고 있던 불편이 다 비슷했음",
-            f"😮 은근 킹받는 순간 하나 때문에 {token} 얘기가 갑자기 이해됨",
-            f"🫢 {token}를 굳이 찾는 이유? 생각보다 사소한 순간에서 터짐",
-            f"✨ {token}, 평범해 보이는데 필요한 장면은 꽤 노골적으로 떠오름",
+            f"🚗 에어컨을 켜도 차 안이 묘하게 답답할 때 있죠?",
+            f"🌀 {token} 찾다 보면 색깔 때문에 망설여질 때도 있죠",
+            f"👀 차 안 분위기 해치지 않는 {token}, 은근 찾기 어렵습니다",
+            f"🤔 {token}, 필요할 땐 확실히 떠오르는데 고르기는 애매하죠",
+            f"✨ 검정 일색이 싫었다면 이 {token}는 눈이 좀 갑니다",
         ]
         support_templates = [
-            "없어도 살지만 있으면 계속 눈 가는 그 애매한 포지션 🌀",
-            "가격보다 '아 이때 쓰는 거구나'가 먼저 꽂힘 👇",
-            "비슷한 제품 넘기기 전에 이 장면부터 떠올려보면 됨 🚗",
-            "필요했던 순간이 딱 떠오르면 이미 반쯤 납득한 거임 ⚡",
-            "딱 맞는 사람한테만 이상하게 선명하게 꽂히는 타입 🔍",
+            "탄색이라 차 안에 둬도 튀지 않는 쪽이라 눈길이 갑니다 👀",
+            "기능보다 먼저 '내 차에 어울리나'가 걸렸던 분들용입니다 🌀",
+            "필요한 순간이 떠오르는 사람한테만 딱 꽂히는 제품이에요 🔍",
+            "가볍게 넘기려다 한 번 더 보게 되는 쪽입니다 🚗",
+            "차량용 제품도 색감 신경 쓰는 분이면 볼 만합니다 ✨",
         ]
         seed = sum(ord(ch) for ch in f"{title}|{keywords}")
         hook = hook_templates[seed % len(hook_templates)]
@@ -222,6 +232,8 @@ class AggroGenerator:
         merged = f"{hook}\n{support}"
         if cls._contains_forbidden_claim(merged):
             return ""
+        if cls._contains_awkward_copy(merged):
+            return ""
 
         token = cls._select_core_keyword(title, keywords)
         token_parts = [part for part in token.split() if len(part) >= 2]
@@ -254,6 +266,8 @@ class AggroGenerator:
                 "- 이모지 1~2개를 자연스럽게 넣어. 너무 많이 넣지 마\n"
                 "- 말투는 Threads처럼 짧고 장난기 있게. 광고 설명문처럼 쓰지 마\n"
                 "- 딱딱한 표현 금지: 주목하세요, 확인하세요, 정리했습니다, 포인트입니다\n"
+                "- 어색한 신조어/억지 밈 금지: 등짝, 차꾸, 반칙임, 킹받는, 감성 쪽, 살려버리네, 숨은 비결, 소문난\n"
+                "- 자연스러운 한국어 구어체로 써. 사람이 실제로 말할 법한 문장만 사용\n"
                 "- 상품군이 드러나야 한다. 너무 일반적인 문구 금지\n"
                 "- '대박', '무조건 사라', '역대급', '꿀템' 같은 흔한 표현 금지\n"
                 "- 독특하고 아이디어가 느껴지는 문장으로 작성\n"

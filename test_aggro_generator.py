@@ -67,3 +67,16 @@ def test_plain_model_output_gets_playful_emojis():
     assert "선풍기" in cleaned
     assert AggroGenerator._EMOJI_PATTERN.search(cleaned)
     assert len([line for line in cleaned.splitlines() if line.strip()]) == 2
+
+
+def test_awkward_copy_is_rejected():
+    generator = AggroGenerator()
+
+    cleaned = generator._clean_first_post_candidate(
+        "🥵 차 안에서 등짝만 익어가는데, 검은 선풍기 달긴 또 싫었던 사람?\n"
+        "탄색 차량용 선풍기라니... 이건 차꾸 감성 쪽으로 살짝 반칙임 👀",
+        "켈리마 차량용 선풍기 R8037 탄",
+        "켈리마 차량용 선풍기 R8037 탄",
+    )
+
+    assert cleaned == ""
