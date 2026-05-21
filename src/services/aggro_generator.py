@@ -37,6 +37,7 @@ class AggroGenerator:
         re.compile(r"(소음\s*없이|무소음|칼바람|완벽하게|확실하게)", re.IGNORECASE),
         re.compile(r"(사진을\s*공개|영상\s*공개|장착\s*사진|리뷰\s*공개)", re.IGNORECASE),
     )
+    _EMOJI_PATTERN = re.compile(r"[\U0001F300-\U0001FAFF]")
 
     def __init__(self, api_key: str = "") -> None:
         self._client = None
@@ -142,18 +143,18 @@ class AggroGenerator:
     def _build_fallback_first_post(cls, title: str, keywords: str) -> str:
         token = cls._select_core_keyword(title, keywords)
         hook_templates = [
-            f"{token}, 이름은 평범한데 쓰는 장면이 은근 반칙임",
-            f"{token} 찾는 사람은 대체 뭘 불편해했을까? 정답이 꽤 현실적임",
-            f"{token} 안 써본 사람은 이 불편을 그냥 참고 있었을지도",
-            f"{token}를 굳이 사는 이유, 생각보다 작은 순간에서 터짐",
-            f"{token} 하나로 해결될 수 있는 불편을 계속 버티고 있었을지도",
+            f"👀 {token}, '이게 왜 필요해?' 했다가 필요한 장면이 바로 떠오름",
+            f"🤔 {token} 찾는 사람들, 사실 참고 있던 불편이 다 비슷했음",
+            f"😮 은근 킹받는 순간 하나 때문에 {token} 얘기가 갑자기 이해됨",
+            f"🫢 {token}를 굳이 찾는 이유? 생각보다 사소한 순간에서 터짐",
+            f"✨ {token}, 평범해 보이는데 필요한 장면은 꽤 노골적으로 떠오름",
         ]
         support_templates = [
-            "무슨 상황에서 필요한지 보면 바로 감 옵니다.",
-            "가격보다 '언제 쓰이냐'가 포인트라 따로 정리했어요.",
-            "비슷한 제품 넘기기 전에 이 장면부터 떠올려보세요.",
-            "필요했던 장면이 떠오르는 사람은 바로 감 옵니다.",
-            "필요한 사람한테는 꽤 선명하게 꽂히는 물건입니다.",
+            "없어도 살지만 있으면 계속 눈 가는 그 애매한 포지션 🌀",
+            "가격보다 '아 이때 쓰는 거구나'가 먼저 꽂힘 👇",
+            "비슷한 제품 넘기기 전에 이 장면부터 떠올려보면 됨 🚗",
+            "필요했던 순간이 딱 떠오르면 이미 반쯤 납득한 거임 ⚡",
+            "딱 맞는 사람한테만 이상하게 선명하게 꽂히는 타입 🔍",
         ]
         seed = sum(ord(ch) for ch in f"{title}|{keywords}")
         hook = hook_templates[seed % len(hook_templates)]
@@ -161,6 +162,38 @@ class AggroGenerator:
         hook = cls._trim_line(hook, cls.MAX_HOOK_LENGTH)
         support = cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)
         return f"{hook}\n{support}"
+
+    @classmethod
+    def _emoji_pair_for_product(cls, title: str, keywords: str) -> tuple[str, str]:
+        text = f"{title} {keywords}"
+        if re.search(r"(차량|자동차|차박|운전|차\s)", text):
+            return "🚗", "👀"
+        if re.search(r"(선풍기|쿨링|냉각|바람)", text):
+            return "🌀", "😮"
+        if re.search(r"(텀블러|컵|커피|음료|보온|보냉)", text):
+            return "☕", "🤔"
+        if re.search(r"(주방|요리|냄비|후라이팬|칼|도마)", text):
+            return "🍳", "✨"
+        if re.search(r"(캠핑|야외|등산|낚시)", text):
+            return "🏕️", "🔥"
+        return "👀", "✨"
+
+    @classmethod
+    def _ensure_playful_emojis(cls, hook: str, support: str, title: str, keywords: str) -> tuple[str, str]:
+        first_emoji, second_emoji = cls._emoji_pair_for_product(title, keywords)
+        joined = f"{hook}\n{support}"
+        emoji_count = len(cls._EMOJI_PATTERN.findall(joined))
+
+        if emoji_count == 0:
+            hook = f"{first_emoji} {hook}"
+            support = f"{support} {second_emoji}"
+        elif emoji_count == 1 and not cls._EMOJI_PATTERN.search(support):
+            support = f"{support} {second_emoji}"
+
+        return cls._trim_line(hook, cls.MAX_HOOK_LENGTH), cls._trim_line(
+            support,
+            cls.MAX_SUPPORT_LENGTH,
+        )
 
     @classmethod
     def _clean_first_post_candidate(cls, text: str, title: str, keywords: str) -> str:
@@ -185,6 +218,7 @@ class AggroGenerator:
 
         hook = cls._trim_line(lines[0], cls.MAX_HOOK_LENGTH)
         support = cls._trim_line(lines[1], cls.MAX_SUPPORT_LENGTH)
+        hook, support = cls._ensure_playful_emojis(hook, support, title, keywords)
         merged = f"{hook}\n{support}"
         if cls._contains_forbidden_claim(merged):
             return ""
@@ -217,6 +251,9 @@ class AggroGenerator:
                 "- 이 글은 첫 번째 글이다. URL, 쿠팡 링크, 구매 링크, 광고 고지 문구는 절대 넣지 마\n"
                 "- 1줄차: 상품의 실제 사용 장면과 불편함을 뒤집는 어그로 훅 (35~65자)\n"
                 "- 2줄차: 더 보고 싶게 만드는 짧은 보조 문장 (20~45자)\n"
+                "- 이모지 1~2개를 자연스럽게 넣어. 너무 많이 넣지 마\n"
+                "- 말투는 Threads처럼 짧고 장난기 있게. 광고 설명문처럼 쓰지 마\n"
+                "- 딱딱한 표현 금지: 주목하세요, 확인하세요, 정리했습니다, 포인트입니다\n"
                 "- 상품군이 드러나야 한다. 너무 일반적인 문구 금지\n"
                 "- '대박', '무조건 사라', '역대급', '꿀템' 같은 흔한 표현 금지\n"
                 "- 독특하고 아이디어가 느껴지는 문장으로 작성\n"
@@ -245,7 +282,7 @@ class AggroGenerator:
         token = cls._select_core_keyword(title, keywords)
         compact_title = cls._trim_line(title or token, 28)
         lines = [
-            f"{compact_title} 확인 링크",
+            f"🔗 {compact_title} 확인 링크",
             original_url,
             cls.COUPANG_DISCLOSURE,
         ]
