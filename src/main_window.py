@@ -2460,14 +2460,29 @@ class MainWindow(QMainWindow):
             logger.warning("결제 성공 응답에 URL 누락: %s", result)
             return
 
-        self._log_user_activity("payment_checkout_url_ready", f"url={pay_url}")
+        if not auth_client.is_trusted_payment_url(pay_url):
+            safe_url = auth_client.safe_url_for_log(pay_url)
+            self._log_user_activity(
+                "payment_checkout_request_failed",
+                f"reason=untrusted_payment_url; url={safe_url}",
+                level="ERROR",
+            )
+            show_error(
+                self,
+                "결제 요청 실패",
+                "신뢰할 수 없는 결제 URL이 감지되어 결제창을 열지 않았습니다.",
+            )
+            return
+
+        safe_pay_url = auth_client.safe_url_for_log(pay_url)
+        self._log_user_activity("payment_checkout_url_ready", f"url={safe_pay_url}")
         opened = self._open_external_link(pay_url, "settings_payapp_checkout")
         if not opened:
-            self._log_user_activity("payment_checkout_open_failed", f"url={pay_url}", level="WARNING")
+            self._log_user_activity("payment_checkout_open_failed", f"url={safe_pay_url}", level="WARNING")
             show_error(self, "결제 요청 실패", f"결제 페이지를 열지 못했습니다.\n{pay_url}")
             return
 
-        self._log_user_activity("payment_checkout_opened", f"url={pay_url}")
+        self._log_user_activity("payment_checkout_opened", f"url={safe_pay_url}")
         self.signals.log.emit(f"PayApp 결제 페이지가 열렸습니다: {pay_url}")
 
     def open_settings(self):
@@ -3549,7 +3564,12 @@ class MainWindow(QMainWindow):
                     return
 
                 expected_sha256 = str(update_info.get("expected_sha256", "") or "")
-                if updater.install_update(update_file, expected_sha256=expected_sha256):
+                asset_name = str(update_info.get("asset_name", "") or "")
+                if updater.install_update(
+                    update_file,
+                    expected_sha256=expected_sha256,
+                    asset_name=asset_name,
+                ):
                     logger.info("자동 업데이트 설치 프로그램 실행됨, 애플리케이션을 종료합니다")
                     app = QApplication.instance()
                     if app is not None:

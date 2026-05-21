@@ -25,9 +25,9 @@
 
 ### 방법 1: 설치형 (권장) ✨
 
-1. [최신 릴리즈 페이지](https://github.com/yourusername/coupuas-thread-auto/releases/latest)에서 `CoupangThreadAuto.exe` 다운로드
-2. 다운로드한 파일을 원하는 위치에 저장
-3. 더블클릭으로 실행
+1. [최신 설치 파일](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)을 다운로드
+2. `CoupangThreadAutoSetup.exe` 실행
+3. 설치 마법사의 안내대로 설치
 
 **자동 업데이트**: 프로그램 실행 시 자동으로 새 버전을 확인하고 업데이트할 수 있습니다! 🔄
 
@@ -278,41 +278,33 @@ playwright install chromium
 
 # EXE 빌드
 python build_exe.py
+
+# 설치 파일 빌드 (Windows + Inno Setup 필요)
+python build_installer.py
 ```
 
-빌드된 파일은 `dist/CoupangThreadAuto.exe`에 생성됩니다.
+빌드된 파일은 `dist/CoupangThreadAuto.exe`, 설치 파일은 `dist/CoupangThreadAutoSetup.exe`에 생성됩니다.
 
 ### 릴리즈 배포
 
-1. **버전 업데이트**
-   ```bash
-   # main.py에서 VERSION 수정
-   VERSION = "v2.3.0"
-   ```
-
-2. **변경사항 커밋**
+1. **변경사항 커밋**
    ```bash
    git add .
-   git commit -m "Release v2.3.0"
+   git commit -m "Update app"
+   git push origin master
    ```
 
-3. **태그 생성 및 푸시**
-   ```bash
-   git tag v2.3.0
-   git push origin v2.3.0
-   ```
-
-4. **자동 빌드 및 릴리즈**
-   - GitHub Actions가 자동으로 실행됩니다
-   - Windows 환경에서 빌드
-   - GitHub Releases에 자동 업로드
-   - 사용자들은 자동으로 업데이트 알림을 받습니다
+2. **자동 버전/릴리즈**
+   - `master`에 프로그램 변경사항이 푸시되면 GitHub Actions가 최신 태그 기준으로 다음 패치 버전을 계산합니다.
+   - 수동 실행 시 `version`을 비워두면 자동 패치 버전, `bump`으로 minor/major를 선택할 수 있습니다.
+   - 릴리즈에는 설치형 `CoupangThreadAutoSetup.exe`, 단독 실행형 `CoupangThreadAuto.exe`, SHA-256 체크섬, `latest.json`이 업로드됩니다.
+   - 웹사이트 다운로드 버튼은 `releases/latest/download/CoupangThreadAutoSetup.exe`를 사용하므로 최신 릴리즈로 자동 연결됩니다.
 
 ### GitHub Actions 워크플로우
 
-- `.github/workflows/build-release.yml`: 태그 푸시 시 자동 빌드 및 릴리즈
-- Windows 환경에서 PyInstaller로 빌드
-- 생성된 EXE를 GitHub Releases에 자동 업로드
+- `.github/workflows/build-release.yml`: master 푸시, 태그 푸시, 수동 실행 시 자동 버전 산출/빌드/릴리즈
+- Windows 환경에서 PyInstaller EXE와 Inno Setup 설치 파일 빌드
+- Authenticode 서명, SHA-256 체크섬 생성 후 GitHub Releases에 업로드
 
 ## 향후 계획
 

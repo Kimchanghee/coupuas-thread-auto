@@ -542,7 +542,7 @@ def test_create_payapp_checkout_uses_server_session_user_id_not_unverified_token
     auth_client._auth_state["user_id"] = "wrong-user"
     auth_client._auth_state["token"] = _make_unverified_jwt({"sub": 777})
     session = _FakeSession(
-        _FakeResponse(200, {"success": True, "payurl": "https://pay.example/ok"})
+        _FakeResponse(200, {"success": True, "payurl": "https://payapp.kr/ok?token=secret"})
     )
     monkeypatch.setattr(auth_client, "_session", session)
 
@@ -554,6 +554,29 @@ def test_create_payapp_checkout_uses_server_session_user_id_not_unverified_token
     assert sent["headers"]["X-User-ID"] == "wrong-user"
     assert sent["json"]["user_id"] == "wrong-user"
     assert auth_client._auth_state["user_id"] == "wrong-user"
+
+
+def test_create_payapp_checkout_rejects_untrusted_payment_url(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "user-1"
+    auth_client._auth_state["token"] = "server-token"
+    session = _FakeSession(
+        _FakeResponse(200, {"success": True, "payurl": "https://evil.example/pay"})
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.create_payapp_checkout("01012345678")
+
+    assert result["success"] is False
+    assert "신뢰할 수 없는 결제 URL" in result["message"]
+
+
+def test_payment_url_helpers_allow_only_https_payapp():
+    assert auth_client.is_trusted_payment_url("https://payapp.kr/pay/123")
+    assert auth_client.is_trusted_payment_url("https://m.payapp.kr/pay/123?secret=1")
+    assert not auth_client.is_trusted_payment_url("http://payapp.kr/pay/123")
+    assert not auth_client.is_trusted_payment_url("https://payapp.kr.evil.example/pay")
+    assert auth_client.safe_url_for_log("https://m.payapp.kr/pay/123?secret=1#frag") == "https://m.payapp.kr/pay/123"
 
 
 def test_check_username_rejects_empty_input_without_network(monkeypatch):

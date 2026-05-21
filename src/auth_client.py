@@ -65,6 +65,7 @@ _ALLOWED_PAYAPP_PAYMENT_TYPES = frozenset(
         "tpay",
     }
 )
+_TRUSTED_PAYMENT_URL_ROOT = "payapp.kr"
 
 if not API_SERVER_URL:
     logger.warning("API_SERVER_URL이 설정되지 않았습니다.")
@@ -888,6 +889,33 @@ def _normalize_phone_number(value: Any) -> str:
     return re.sub(r"[^0-9]", "", str(value or ""))
 
 
+def is_trusted_payment_url(value: Any) -> bool:
+    """Return True only for HTTPS PayApp checkout URLs."""
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except Exception:
+        return False
+    if parsed.scheme != "https":
+        return False
+    if parsed.username or parsed.password:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    return host == _TRUSTED_PAYMENT_URL_ROOT or host.endswith(f".{_TRUSTED_PAYMENT_URL_ROOT}")
+
+
+def safe_url_for_log(value: Any) -> str:
+    """Return URL without query/fragment/userinfo for logs."""
+    try:
+        parsed = urlparse(str(value or "").strip())
+    except Exception:
+        return ""
+    host = (parsed.hostname or "").strip().lower()
+    if not parsed.scheme or not host:
+        return ""
+    path = parsed.path or ""
+    return f"{parsed.scheme}://{host}{path}"
+
+
 def _resolve_default_payapp_plan_id() -> str:
     return _FIXED_PAYAPP_PLAN_ID
 
@@ -971,6 +999,19 @@ def create_payapp_checkout(
                 payload = {"success": False, "message": "결제 서버 응답이 비었습니다."}
             payload.setdefault("success", bool(payload.get("payurl")))
             payload.setdefault("plan_id", resolved_plan_id)
+            for url_key in ("payurl", "payapp_url", "payment_url", "url"):
+                candidate_url = str(payload.get(url_key) or "").strip()
+                if candidate_url and not is_trusted_payment_url(candidate_url):
+                    logger.warning(
+                        "신뢰되지 않은 결제 URL 차단: key=%s url=%s",
+                        url_key,
+                        safe_url_for_log(candidate_url),
+                    )
+                    return {
+                        "success": False,
+                        "message": "결제 서버가 신뢰할 수 없는 결제 URL을 반환했습니다. 관리자에게 문의해주세요.",
+                        "plan_id": resolved_plan_id,
+                    }
             return payload
 
         if resp.status_code == 422:

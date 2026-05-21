@@ -42,6 +42,16 @@ _SUSPICIOUS_PROCESS_NAMES = {
     "procexp.exe",
     "wireshark.exe",
     "fiddler.exe",
+    "charles.exe",
+    "httpdebuggerui.exe",
+    "httpdebuggerpro.exe",
+    "processhacker.exe",
+    "processhacker2.exe",
+    "ghidra.exe",
+    "frida.exe",
+    "frida-server.exe",
+    "frida-trace.exe",
+    "mitmproxy.exe",
 }
 
 

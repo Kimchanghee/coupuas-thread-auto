@@ -32,7 +32,11 @@ class AutoUpdater:
         "github-releases.githubusercontent.com",
         "release-assets.githubusercontent.com",
     }
-    EXPECTED_EXE_NAME = "CoupangThreadAuto.exe"
+    INSTALLER_ASSET_NAME = "CoupangThreadAutoSetup.exe"
+    STANDALONE_EXE_NAME = "CoupangThreadAuto.exe"
+    EXPECTED_EXE_NAME = STANDALONE_EXE_NAME
+    PREFERRED_UPDATE_ASSET_NAMES = (INSTALLER_ASSET_NAME, STANDALONE_EXE_NAME)
+    INSTALLER_ARGS = ("/SP-", "/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART")
     REQUIRE_SIGNED_UPDATES = True
     MAX_UPDATE_SIZE_BYTES = 200 * 1024 * 1024
     MINIMUM_SAFE_VERSION = "2.2.3"
@@ -81,6 +85,7 @@ class AutoUpdater:
         self.allow_unsigned_updates = False
 
         self.last_expected_sha256: Optional[str] = None
+        self.last_update_asset_name: str = ""
 
         self.session = requests.Session()
         self.session.headers.update(
@@ -133,6 +138,16 @@ class AutoUpdater:
             for chunk in iter(lambda: f.read(8192), b""):
                 digest.update(chunk)
         return digest.hexdigest().lower()
+
+    @classmethod
+    def _find_release_asset(cls, assets, names):
+        ordered_names = [str(name or "").lower() for name in names if str(name or "").strip()]
+        for wanted_name in ordered_names:
+            for asset in assets:
+                name = str(asset.get("name", ""))
+                if name.lower() == wanted_name:
+                    return asset
+        return None
 
     @staticmethod
     def _secure_update_temp_dir() -> Path:
@@ -260,12 +275,7 @@ class AutoUpdater:
             return None
 
         assets = release_data.get("assets", []) or []
-        exe_asset = None
-        for asset in assets:
-            name = str(asset.get("name", ""))
-            if name.lower() == self.EXPECTED_EXE_NAME.lower():
-                exe_asset = asset
-                break
+        exe_asset = self._find_release_asset(assets, self.PREFERRED_UPDATE_ASSET_NAMES)
 
         if not exe_asset:
             return None
@@ -293,6 +303,11 @@ class AutoUpdater:
             "size_mb": size / (1024 * 1024),
             "size_bytes": size,
             "asset_name": str(exe_asset.get("name", "")),
+            "asset_kind": (
+                "installer"
+                if str(exe_asset.get("name", "")).lower() == self.INSTALLER_ASSET_NAME.lower()
+                else "standalone"
+            ),
             "checksum_asset_name": str(checksum_asset.get("name", "")),
         }
 
@@ -314,6 +329,7 @@ class AutoUpdater:
             if not expected_sha256:
                 raise ValueError("Checksum file does not contain SHA-256 hash")
             self.last_expected_sha256 = expected_sha256
+            self.last_update_asset_name = str(update_info.get("asset_name", "") or "")
             update_info["expected_sha256"] = expected_sha256
 
             with tempfile.NamedTemporaryFile(
@@ -369,7 +385,7 @@ class AutoUpdater:
             print(f"다운로드 오류: {e}")
             return None
 
-    def install_update(self, update_file: str, expected_sha256: str = "") -> bool:
+    def install_update(self, update_file: str, expected_sha256: str = "", asset_name: str = "") -> bool:
         try:
             if not self._verify_authenticode_signature(update_file):
                 print("업데이트 서명 검증에 실패했습니다.")
@@ -384,10 +400,15 @@ class AutoUpdater:
                 print("업데이트 체크섬 검증에 실패했습니다.")
                 return False
 
-            current_exe = sys.executable
             if not getattr(sys, "frozen", False):
                 print("자동 업데이트는 패키징된 실행 파일 모드에서만 지원됩니다.")
                 return False
+
+            update_asset_name = str(asset_name or self.last_update_asset_name or "").strip()
+            if update_asset_name.lower() == self.INSTALLER_ASSET_NAME.lower():
+                return self._run_installer_update(update_file)
+
+            current_exe = sys.executable
 
             backup_exe = current_exe + ".backup"
             if os.path.exists(backup_exe):
@@ -427,6 +448,21 @@ class AutoUpdater:
         except Exception as e:
             print(f"업데이트 설치 오류: {e}")
             return False
+
+    def _run_installer_update(self, installer_path: str) -> bool:
+        if os.name != "nt":
+            print("설치형 업데이트는 Windows에서만 지원됩니다.")
+            return False
+        if not Path(installer_path).exists():
+            print("설치 파일을 찾을 수 없습니다.")
+            return False
+
+        subprocess.Popen(
+            [str(installer_path), *self.INSTALLER_ARGS],
+            shell=False,
+            close_fds=True,
+        )
+        return True
 
     def _create_update_script(self) -> str:
         script_content = """param(

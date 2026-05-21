@@ -2,17 +2,42 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - "v*.*.*"
+    paths:
+      - "src/**"
+      - "main.py"
+      - "login_main.py"
+      - "requirements.lock"
+      - "build_exe.py"
+      - "build_installer.py"
+      - "installer/**"
+      - ".github/workflows/build-release.yml"
+      - ".github/scripts/**"
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g., v2.2.0)"
-        required: true
+        description: "Version to release (optional, e.g., v3.0.3). Empty = auto next version."
+        required: false
         type: string
+      bump:
+        description: "Auto version bump when version is empty"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -24,6 +49,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -42,11 +69,12 @@ jobs:
         id: get_version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
-          else
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          fi
+          VERSION="$(python .github/scripts/next_version.py \
+            --explicit "${{ inputs.version || '' }}" \
+            --ref "${GITHUB_REF}" \
+            --bump "${{ inputs.bump || 'patch' }}")"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release version: ${VERSION}"
 
       - name: Validate release version
         shell: bash
@@ -57,13 +85,13 @@ jobs:
             exit 1
           fi
 
-      - name: Update version in main.py
+      - name: Sync version in source files
         shell: bash
         run: |
           VERSION="${{ steps.get_version.outputs.VERSION }}"
-          sed -i 's/VERSION = ".*"/VERSION = "'$VERSION'"/' main.py
-          echo "Updated version to $VERSION"
+          python .github/scripts/set_version.py "$VERSION"
           grep "VERSION =" main.py
+          grep "VERSION =" login_main.py
 
       - name: Build executable
         env:
@@ -139,6 +167,20 @@ jobs:
           "$hash CoupangThreadAutoSetup.exe" | Out-File -FilePath "dist\\CoupangThreadAutoSetup.exe.sha256" -Encoding ascii
           Write-Host "Installer SHA256: $hash"
 
+      - name: Generate release metadata
+        shell: pwsh
+        run: |
+          $version = "${{ steps.get_version.outputs.VERSION }}"
+          $ownerRepo = "${{ github.repository }}"
+          $metadata = [ordered]@{
+            version = $version
+            installer = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAutoSetup.exe"
+            installer_sha256 = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAutoSetup.exe.sha256"
+            standalone_exe = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAuto.exe"
+            standalone_exe_sha256 = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAuto.exe.sha256"
+          }
+          $metadata | ConvertTo-Json -Depth 3 | Out-File -FilePath "dist\\latest.json" -Encoding utf8
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -148,6 +190,7 @@ jobs:
             dist/CoupangThreadAuto.exe.sha256
             dist/CoupangThreadAutoSetup.exe
             dist/CoupangThreadAutoSetup.exe.sha256
+            dist/latest.json
           retention-days: 30
 
   release:
@@ -166,9 +209,15 @@ jobs:
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           tag_name: ${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: Release ${{ needs.build.outputs.version }}
           body: |
-            새로운 버전이 출시되었습니다.
+            쇼츠스레드메이커 새 버전이 출시되었습니다.
+
+            Windows 사용자는 설치형 파일을 받으면 됩니다.
+            - 설치형: `CoupangThreadAutoSetup.exe`
+            - 단독 실행형: `CoupangThreadAuto.exe`
+            - 각 파일의 SHA-256 체크섬을 함께 제공합니다.
           draft: false
           prerelease: false
           files: |
@@ -176,5 +225,6 @@ jobs:
             dist/CoupangThreadAuto.exe.sha256
             dist/CoupangThreadAutoSetup.exe
             dist/CoupangThreadAutoSetup.exe.sha256
+            dist/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

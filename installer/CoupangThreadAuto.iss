@@ -1,19 +1,28 @@
-﻿#ifndef MyAppVersion
-#define MyAppVersion "2.3.21"
+#ifndef MyAppVersion
+#define MyAppVersion "0.0.0"
 #endif
 
 [Setup]
 AppId={{1E191169-A1B1-4E4F-8AB9-B2D048A76E8C}
-AppName=?쇱툩?ㅻ젅?쒕찓?댁빱
+AppName=Shorts Thread Maker
 AppVersion={#MyAppVersion}
-AppPublisher=??댁뿞
+AppVerName=Shorts Thread Maker {#MyAppVersion}
+AppPublisher=YM
+AppPublisherURL=https://github.com/Kimchanghee/coupuas-thread-auto
+AppSupportURL=https://github.com/Kimchanghee/coupuas-thread-auto/issues
+AppUpdatesURL=https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest
 DefaultDirName={autopf}\CoupangThreadAuto
-DefaultGroupName=?쇱툩?ㅻ젅?쒕찓?댁빱
+DefaultGroupName=Shorts Thread Maker
 DisableProgramGroupPage=yes
 OutputDir=..\dist
 OutputBaseFilename=CoupangThreadAutoSetup
 SetupIconFile=..\images\app_icon.ico
 UninstallDisplayIcon={app}\CoupangThreadAuto.exe
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany=YM
+VersionInfoDescription=Shorts Thread Maker Windows Installer
+VersionInfoProductName=Shorts Thread Maker
+VersionInfoProductVersion={#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -27,6 +36,7 @@ DirExistsWarning=no
 CloseApplications=yes
 CloseApplicationsFilter=CoupangThreadAuto.exe
 RestartApplications=no
+SetupLogging=yes
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
@@ -39,12 +49,12 @@ Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Ad
 Source: "..\dist\CoupangThreadAuto.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\?쇱툩?ㅻ젅?쒕찓?댁빱"; Filename: "{app}\CoupangThreadAuto.exe"
-Name: "{group}\?쇱툩?ㅻ젅?쒕찓?댁빱 ?쒓굅"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\?쇱툩?ㅻ젅?쒕찓?댁빱"; Filename: "{app}\CoupangThreadAuto.exe"; Tasks: desktopicon
+Name: "{group}\Shorts Thread Maker"; Filename: "{app}\CoupangThreadAuto.exe"
+Name: "{group}\Uninstall Shorts Thread Maker"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Shorts Thread Maker"; Filename: "{app}\CoupangThreadAuto.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\CoupangThreadAuto.exe"; Description: "?쇱툩?ㅻ젅?쒕찓?댁빱 ?ㅽ뻾"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\CoupangThreadAuto.exe"; Description: "Launch Shorts Thread Maker"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
@@ -69,6 +79,6 @@ begin
   begin
     Log(Format('Existing installation detected. InstalledVersion=%s, NewVersion=%s', [InstalledVersion, '{#MyAppVersion}']));
     WizardForm.WelcomeLabel2.Caption :=
-      'Existing installation detected. Setup will continue in update mode and keep your current settings.';
+      'Existing installation detected. Setup will update the app and keep your current settings.';
   end;
 end;
