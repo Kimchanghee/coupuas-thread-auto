@@ -2,7 +2,7 @@
 setlocal
 
 echo ====================================
-echo CEO Thread Auto 실행
+echo Coupang Thread Auto 실행
 echo ====================================
 echo.
 
@@ -41,7 +41,7 @@ if errorlevel 1 (
 
 echo 애플리케이션을 실행합니다...
 echo.
-python main.py
+python login_main.py
 
 if errorlevel 1 (
     echo.

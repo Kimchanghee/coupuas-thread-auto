@@ -4,6 +4,8 @@
 Stitch Blue 디자인 - 사이드바 + 스택 페이지 레이아웃
 좌표 기반 배치 (setGeometry), 레이아웃 매니저 없음
 """
+from __future__ import annotations
+
 import re
 import html
 import os
@@ -25,7 +27,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QDesktopServices
 
 from src.config import config
-from src.coupang_uploader import CoupangPartnersPipeline
+from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
 from src.gemini_keys import (
     MAX_GEMINI_API_KEYS,
     normalize_gemini_api_keys,
@@ -1691,6 +1693,7 @@ class MainWindow(QMainWindow):
                 "대기": Colors.TEXT_MUTED,
                 "진행중": Colors.WARNING,
                 "완료": Colors.SUCCESS,
+                "중복": Colors.TEXT_MUTED,
                 "실패": Colors.ERROR,
             }
             status_item.setForeground(QColor(color_map.get(status, Colors.TEXT_MUTED)))
@@ -1823,6 +1826,7 @@ class MainWindow(QMainWindow):
         parse_failed = results.get("parse_failed", 0)
         uploaded = results.get("uploaded", 0)
         failed = results.get("failed", 0)
+        skipped = results.get("skipped", 0)
 
         # Stay on link page to see table results
         self._switch_page(0)
@@ -1836,6 +1840,8 @@ class MainWindow(QMainWindow):
             )
             if parse_failed > 0:
                 msg += f"\n  분석 오류: {parse_failed}"
+            if skipped > 0:
+                msg += f"\n  중복 스킵: {skipped}"
             show_info(self, "취소됨", msg)
         else:
             msg = (
@@ -1845,6 +1851,8 @@ class MainWindow(QMainWindow):
             )
             if parse_failed > 0:
                 msg += f"\n  분석 오류: {parse_failed}"
+            if skipped > 0:
+                msg += f"\n  중복 스킵: {skipped}"
             show_info(self, "완료", msg)
 
     def _update_link_count(self):
@@ -3019,6 +3027,7 @@ class MainWindow(QMainWindow):
             "parse_failed": 0,
             "uploaded": 0,
             "failed": 0,
+            "skipped": 0,
             "cancelled": False,
             "details": [],
         }
@@ -3103,6 +3112,35 @@ class MainWindow(QMainWindow):
                     results["cancelled"] = True
                     break
 
+                processed_count += 1
+                url, keyword = item if isinstance(item, tuple) else (item, None)
+                results["total"] += 1
+
+                log(f"{processed_count}번째 항목 처리 중 (대기열: {self.link_queue.qsize()})")
+
+                # Update progress
+                self.signals.queue_progress.emit(f"전체: {processed_count} / {total_links}")
+
+                try:
+                    already_uploaded = pipeline_ref.link_history.is_uploaded(url)
+                except Exception:
+                    logger.exception("업로드 이력 확인에 실패했습니다.")
+                    already_uploaded = False
+                if already_uploaded:
+                    results["skipped"] += 1
+                    log(f"중복 링크라 건너뜁니다: {str(url)[:40]}...")
+                    self.signals.link_status.emit(url, "중복", "이미 업로드됨")
+                    results["details"].append(
+                        {
+                            "product_title": "(중복)",
+                            "url": url,
+                            "success": False,
+                            "skipped": True,
+                        }
+                    )
+                    self.signals.reset_steps.emit()
+                    continue
+
                 if not quota_bypass:
                     try:
                         from src import auth_client
@@ -3121,15 +3159,6 @@ class MainWindow(QMainWindow):
                         log("작업량 확인 실패로 업로드를 중단합니다.")
                         results["cancelled"] = True
                         break
-
-                processed_count += 1
-                url, keyword = item if isinstance(item, tuple) else (item, None)
-                results["total"] += 1
-
-                log(f"{processed_count}번째 항목 처리 중 (대기열: {self.link_queue.qsize()})")
-
-                # Update progress
-                self.signals.queue_progress.emit(f"전체: {processed_count} / {total_links}")
 
                 # Step 0: Link analysis
                 self.signals.step_update.emit(0, "active")
@@ -3155,6 +3184,11 @@ class MainWindow(QMainWindow):
                     product_name = post_data.get("product_title", "")[:30]
                     log(f"분석 완료: {product_name}")
                     self.signals.step_update.emit(1, "done")
+                except CancelledException:
+                    results["cancelled"] = True
+                    log("사용자 요청으로 작업을 중단합니다.")
+                    self.signals.reset_steps.emit()
+                    break
                 except Exception as exc:
                     results["parse_failed"] += 1
                     log(f"분석 오류: {str(exc)[:80]}")
@@ -3247,7 +3281,7 @@ class MainWindow(QMainWindow):
                                     use_result = auth_client.commit_reserved_work(reserved_work_id)
                                 else:
                                     use_result = auth_client.use_work()
-                                if not isinstance(use_result, dict) or not bool(use_result.get("success")):
+                                if not isinstance(use_result, dict) or not self._is_work_allowed(use_result):
                                     billing_msg = (
                                         use_result.get("message", "알 수 없음")
                                         if isinstance(use_result, dict)
@@ -3284,6 +3318,11 @@ class MainWindow(QMainWindow):
                         log(f"업로드 실패: {product_name}")
                         self.signals.step_update.emit(2, "error")
                         self.signals.link_status.emit(url, "실패", product_name)
+
+                    try:
+                        pipeline_ref.link_history.add_link(url, product_name, success=bool(success))
+                    except Exception:
+                        logger.exception("업로드 이력 저장에 실패했습니다.")
 
                     results["details"].append(
                         {
@@ -3326,7 +3365,8 @@ class MainWindow(QMainWindow):
                 "작업 종료 - "
                 f"성공: {results['uploaded']} / "
                 f"실패: {results['failed']} / "
-                f"분석 실패: {results['parse_failed']}"
+                f"분석 실패: {results['parse_failed']} / "
+                f"중복 스킵: {results['skipped']}"
             )
 
             # 서버에 배치 완료 로그 전송
@@ -3335,7 +3375,8 @@ class MainWindow(QMainWindow):
                 summary = (
                     f"성공: {results['uploaded']}, "
                     f"실패: {results['failed']}, "
-                    f"파싱실패: {results['parse_failed']}"
+                    f"파싱실패: {results['parse_failed']}, "
+                    f"중복스킵: {results['skipped']}"
                 )
                 if results["cancelled"]:
                     auth_client.log_action("batch_cancelled", summary)

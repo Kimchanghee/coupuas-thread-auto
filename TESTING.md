@@ -246,7 +246,7 @@ git push origin v2.3.0
 1. `build_exe.py` 로그 확인
 2. 의존성 설치 확인: `pip install -r requirements.txt`
 3. Playwright 브라우저 설치: `playwright install chromium`
-4. Python 버전 확인: Python 3.8+
+4. Python 버전 확인: Python 3.9+
 
 ### 업데이트 실패
 

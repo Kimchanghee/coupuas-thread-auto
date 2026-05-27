@@ -9,8 +9,10 @@ import requests
 import base64
 import json
 import time
-from typing import Optional, Dict
+from typing import Callable, Optional, Dict
 from urllib.parse import urlparse, parse_qs, urljoin
+
+from src.services.cancellation import check_cancelled, is_cancelled_exception
 
 # Gemini API 재시도 설정
 MAX_RETRIES = 5
@@ -75,7 +77,11 @@ class CoupangParser:
         except Exception:
             return False
 
-    def parse_link(self, url: str) -> Optional[Dict]:
+    def parse_link(
+        self,
+        url: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict]:
         """
         쿠팡 파트너스 링크에서 상품 정보 추출
 
@@ -89,6 +95,7 @@ class CoupangParser:
             상품 정보 딕셔너리 또는 None
         """
         try:
+            check_cancelled(cancel_check)
             url = self._normalize_url(url)
             if not self._is_allowed_coupang_url(url):
                 print("  [!] Invalid or disallowed URL")
@@ -97,7 +104,7 @@ class CoupangParser:
             print(f"  [Parse] Parsing Coupang link...")
 
             # 파서로 정보 추출 시도
-            result = self._parse_with_playwright(url)
+            result = self._parse_with_playwright(url, cancel_check=cancel_check)
             if result:
                 result['original_url'] = url
 
@@ -113,14 +120,21 @@ class CoupangParser:
             return None
 
         except Exception as e:
+            if is_cancelled_exception(e):
+                raise
             print(f"  [!] Parse error: {e}")
             return None
 
-    def _parse_with_playwright(self, url: str) -> Optional[Dict]:
+    def _parse_with_playwright(
+        self,
+        url: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict]:
         """쿠팡 상품 정보를 추출 (Gemini URL Context 사용)"""
         try:
+            check_cancelled(cancel_check)
             # 1. 먼저 리다이렉트로 최종 URL과 product_id 추출
-            final_url = self._follow_redirect(url)
+            final_url = self._follow_redirect(url, cancel_check=cancel_check)
             if not final_url:
                 return None
 
@@ -134,7 +148,10 @@ class CoupangParser:
 
             # 2. Gemini URL Context로 상품 정보 추출 시도
             if self.google_api_key:
-                gemini_result = self._fetch_with_gemini_url_context(final_url)
+                gemini_result = self._fetch_with_gemini_url_context(
+                    final_url,
+                    cancel_check=cancel_check,
+                )
                 if gemini_result:
                     if gemini_result.get('title'):
                         info['title'] = gemini_result['title']
@@ -154,10 +171,16 @@ class CoupangParser:
             return info if info.get('product_id') else None
 
         except Exception as e:
+            if is_cancelled_exception(e):
+                raise
             print(f"  [!] Parse error: {e}")
             return None
 
-    def _fetch_with_gemini_url_context(self, url: str) -> Optional[Dict]:
+    def _fetch_with_gemini_url_context(
+        self,
+        url: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict]:
         """Gemini URL Context API로 웹페이지 내용 가져오기 (재시도 로직 포함)"""
         if not self.google_api_key:
             return None
@@ -166,6 +189,7 @@ class CoupangParser:
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
+                check_cancelled(cancel_check)
                 from google import genai
                 from google.genai.types import GenerateContentConfig
 
@@ -221,8 +245,10 @@ JSON만 출력하세요."""
 
             except ImportError:
                 print(f"  [!] google-genai not installed, trying REST API...")
-                return self._fetch_with_gemini_rest_api(url)
+                return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
             except Exception as e:
+                if is_cancelled_exception(e):
+                    raise
                 last_error = e
                 error_str = str(e).lower()
 
@@ -231,23 +257,30 @@ JSON만 출력하세요."""
                     if attempt < MAX_RETRIES:
                         print(f"  [!] Gemini 서버 오류: {e}")
                         print(f"  [!] {RETRY_DELAY}초 후 재시도합니다...")
-                        time.sleep(RETRY_DELAY)
+                        for _ in range(RETRY_DELAY):
+                            check_cancelled(cancel_check)
+                            time.sleep(1)
                         continue
                 else:
                     # 서버 오류가 아니면 바로 REST API 시도
                     print(f"  [!] Gemini URL Context error: {e}")
-                    return self._fetch_with_gemini_rest_api(url)
+                    return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
 
         # 모든 재시도 실패
         print(f"  [!] Gemini {MAX_RETRIES}회 재시도 모두 실패")
-        return self._fetch_with_gemini_rest_api(url)
+        return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
 
-    def _fetch_with_gemini_rest_api(self, url: str) -> Optional[Dict]:
+    def _fetch_with_gemini_rest_api(
+        self,
+        url: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict]:
         """Gemini REST API로 URL Context 사용 (SDK 없이)"""
         if not self.google_api_key:
             return None
 
         try:
+            check_cancelled(cancel_check)
             print(f"  [Parse] Using Gemini REST API with URL Context...")
 
             api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
@@ -287,6 +320,7 @@ JSON만 출력하세요."""
                 timeout=60,
             )
             response.raise_for_status()
+            check_cancelled(cancel_check)
 
             result = response.json()
             text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
@@ -301,6 +335,8 @@ JSON만 출력하세요."""
             return None
 
         except Exception as e:
+            if is_cancelled_exception(e):
+                raise
             print(f"  [!] Gemini REST API error: {_redact_api_key(e)}")
             return None
 
@@ -368,7 +404,11 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
             print(f"  [!] Gemini Vision error: {_redact_api_key(e)}")
             return None
 
-    def _follow_redirect(self, url: str) -> Optional[str]:
+    def _follow_redirect(
+        self,
+        url: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[str]:
         """리다이렉트를 따라가서 최종 URL 반환"""
         normalized = self._normalize_url(url)
         if not self._is_allowed_coupang_url(normalized):
@@ -377,6 +417,7 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
         current_url = normalized
         try:
             for _ in range(MAX_REDIRECT_HOPS):
+                check_cancelled(cancel_check)
                 response = self.session.head(current_url, allow_redirects=False, timeout=10)
                 status = int(response.status_code or 0)
                 if 300 <= status < 400:
@@ -388,12 +429,19 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
                         return None
                     current_url = next_url
                     continue
+                if status >= 400:
+                    raise RuntimeError(f"HEAD redirect check failed with status {status}")
+                if not re.search(r"/products/\d+", current_url):
+                    raise RuntimeError("HEAD redirect check did not resolve a product page")
                 return current_url if self._is_allowed_coupang_url(current_url) else None
             return None
-        except Exception:
+        except Exception as e:
+            if is_cancelled_exception(e):
+                raise
             try:
                 current_url = normalized
                 for _ in range(MAX_REDIRECT_HOPS):
+                    check_cancelled(cancel_check)
                     response = self.session.get(current_url, allow_redirects=False, timeout=10)
                     status = int(response.status_code or 0)
                     if 300 <= status < 400:
@@ -408,6 +456,8 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
                     return current_url if self._is_allowed_coupang_url(current_url) else None
                 return None
             except Exception as e:
+                if is_cancelled_exception(e):
+                    raise
                 print(f"  [!] Redirect error: {e}")
                 return None
 

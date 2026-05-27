@@ -10,10 +10,12 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 from urllib.parse import quote, urlparse
 
 import requests
+
+from src.services.cancellation import check_cancelled, is_cancelled_exception
 
 
 class ImageSearchService:
@@ -82,7 +84,13 @@ class ImageSearchService:
         except Exception:
             pass
 
-    def _generate_gemini_text(self, prompt: str, api_key: str) -> str:
+    def _generate_gemini_text(
+        self,
+        prompt: str,
+        api_key: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> str:
+        check_cancelled(cancel_check)
         client = self._get_gemini_client(api_key)
         if client is None:
             return ""
@@ -90,6 +98,7 @@ class ImageSearchService:
             model=self._model_name,
             contents=prompt,
         )
+        check_cancelled(cancel_check)
         text = str(getattr(response, "text", "") or "").strip()
         if text:
             return text
@@ -104,8 +113,14 @@ class ImageSearchService:
                     return part_text
         return ""
 
-    def search_product_images(self, product_info: dict, api_key: str = "") -> List[str]:
+    def search_product_images(
+        self,
+        product_info: dict,
+        api_key: str = "",
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> List[str]:
         """Return up to TARGET_IMAGES local image paths for the given product."""
+        check_cancelled(cancel_check)
         title = str(product_info.get("title", "") or "")
         keywords = str(product_info.get("search_keywords", "") or "")
 
@@ -116,13 +131,14 @@ class ImageSearchService:
         images: List[str] = []
         tried_keywords = set()
         retry_count = 0
-        search_variants = self._generate_search_variants(title, keywords, api_key)
+        search_variants = self._generate_search_variants(title, keywords, api_key, cancel_check)
 
         print(
             f"  1688 이미지 검색 시작 (목표: {self.TARGET_IMAGES}개, 최대 {self.MAX_RETRIES}회 시도)"
         )
 
         while len(images) < self.TARGET_IMAGES and retry_count < self.MAX_RETRIES:
+            check_cancelled(cancel_check)
             retry_count += 1
 
             search_term = None
@@ -133,13 +149,20 @@ class ImageSearchService:
                     break
 
             if search_term is None:
-                search_term = self._generate_random_variant(title, keywords, api_key, retry_count)
+                search_term = self._generate_random_variant(
+                    title,
+                    keywords,
+                    api_key,
+                    retry_count,
+                    cancel_check,
+                )
                 tried_keywords.add(search_term)
 
             print(f"  [{retry_count}/{self.MAX_RETRIES}] 검색: {search_term[:30]}...")
-            found_urls = self._search_1688_multiple(search_term)
+            found_urls = self._search_1688_multiple(search_term, cancel_check)
 
             for url in found_urls:
+                check_cancelled(cancel_check)
                 if len(images) >= self.TARGET_IMAGES:
                     break
 
@@ -147,13 +170,19 @@ class ImageSearchService:
                 if any(url_hash in img for img in images):
                     continue
 
-                local_path = self._download_image(url, title)
+                local_path = self._download_image(url, title, cancel_check)
                 if local_path:
                     images.append(local_path)
                     print(f"  이미지 {len(images)}개 확보: {local_path}")
 
             if len(images) < self.TARGET_IMAGES and retry_count < self.MAX_RETRIES:
-                time.sleep(random.uniform(0.5, 1.5))
+                sleep_until = time.monotonic() + random.uniform(0.5, 1.5)
+                while time.monotonic() < sleep_until:
+                    check_cancelled(cancel_check)
+                    remaining_sleep = sleep_until - time.monotonic()
+                    if remaining_sleep <= 0:
+                        break
+                    time.sleep(min(0.2, remaining_sleep))
 
         if images:
             print(f"  1688 이미지 검색 완료: {len(images)}개 확보")
@@ -162,32 +191,43 @@ class ImageSearchService:
 
         return images
 
-    def search_product_image(self, product_info: dict, api_key: str = "") -> Optional[str]:
+    def search_product_image(
+        self,
+        product_info: dict,
+        api_key: str = "",
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[str]:
         """Compatibility helper: return a single image path."""
-        images = self.search_product_images(product_info, api_key)
+        images = self.search_product_images(product_info, api_key, cancel_check)
         return images[0] if images else None
 
-    def _generate_search_variants(self, title: str, keywords: str, api_key: str) -> List[str]:
+    def _generate_search_variants(
+        self,
+        title: str,
+        keywords: str,
+        api_key: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> List[str]:
         """Generate prioritized query variants."""
         variants: List[str] = []
 
-        chinese = self._translate_to_chinese(title or keywords, api_key)
+        chinese = self._translate_to_chinese(title or keywords, api_key, cancel_check)
         if chinese:
             variants.append(chinese)
 
         if keywords and keywords != title:
-            chinese_kw = self._translate_to_chinese(keywords, api_key)
+            chinese_kw = self._translate_to_chinese(keywords, api_key, cancel_check)
             if chinese_kw and chinese_kw not in variants:
                 variants.append(chinese_kw)
 
         words = (title or keywords).split()
         if len(words) > 2:
             core_words = " ".join(words[:3])
-            chinese_core = self._translate_to_chinese(core_words, api_key)
+            chinese_core = self._translate_to_chinese(core_words, api_key, cancel_check)
             if chinese_core and chinese_core not in variants:
                 variants.append(chinese_core)
 
-        english = self._translate_to_english(title or keywords, api_key)
+        english = self._translate_to_english(title or keywords, api_key, cancel_check)
         if english and english not in variants:
             variants.append(english)
 
@@ -198,8 +238,16 @@ class ImageSearchService:
 
         return variants
 
-    def _generate_random_variant(self, title: str, keywords: str, api_key: str, attempt: int) -> str:
+    def _generate_random_variant(
+        self,
+        title: str,
+        keywords: str,
+        api_key: str,
+        attempt: int,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> str:
         """Generate additional variant for retries."""
+        check_cancelled(cancel_check)
         base = (title or keywords or "").strip()
         client = self._get_gemini_client(api_key)
 
@@ -209,10 +257,12 @@ class ImageSearchService:
                     f"Return one short 1688 Chinese search keyword phrase for: {base}. "
                     "Output phrase only."
                 )
-                result = self._generate_gemini_text(prompt, api_key).strip().strip("\"'")
+                result = self._generate_gemini_text(prompt, api_key, cancel_check).strip().strip("\"'")
                 if result:
                     return result
-            except Exception:
+            except Exception as exc:
+                if is_cancelled_exception(exc):
+                    raise
                 pass
 
         words = base.split()
@@ -221,8 +271,14 @@ class ImageSearchService:
             return " ".join(words[: min(3, len(words))])
         return base or "product"
 
-    def _translate_to_chinese(self, text: str, api_key: str) -> Optional[str]:
+    def _translate_to_chinese(
+        self,
+        text: str,
+        api_key: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[str]:
         """Translate product keyword to Chinese for 1688 search."""
+        check_cancelled(cancel_check)
         client = self._get_gemini_client(api_key)
         if not client or not text:
             return None
@@ -232,17 +288,25 @@ class ImageSearchService:
                 f"Translate this into concise Chinese search terms for 1688: {text}. "
                 "Output terms only."
             )
-            result = self._generate_gemini_text(prompt, api_key).strip()
+            result = self._generate_gemini_text(prompt, api_key, cancel_check).strip()
             result = re.sub(r"[\"'\n]", "", result)
             if re.search(r"[\u4e00-\u9fff]", result):
                 return result
             return None
         except Exception as exc:
+            if is_cancelled_exception(exc):
+                raise
             print(f"  번역 오류: {exc}")
             return None
 
-    def _translate_to_english(self, text: str, api_key: str) -> Optional[str]:
+    def _translate_to_english(
+        self,
+        text: str,
+        api_key: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[str]:
         """Translate product keyword to English fallback query."""
+        check_cancelled(cancel_check)
         client = self._get_gemini_client(api_key)
         if not client or not text:
             return None
@@ -252,16 +316,23 @@ class ImageSearchService:
                 f"Translate this into concise English product search terms: {text}. "
                 "Output terms only."
             )
-            result = self._generate_gemini_text(prompt, api_key).strip().strip("\"'")
+            result = self._generate_gemini_text(prompt, api_key, cancel_check).strip().strip("\"'")
             return result if result else None
-        except Exception:
+        except Exception as exc:
+            if is_cancelled_exception(exc):
+                raise
             return None
 
-    def _search_1688_multiple(self, keyword: str) -> List[str]:
+    def _search_1688_multiple(
+        self,
+        keyword: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> List[str]:
         """Search 1688 pages and extract candidate image URLs."""
         urls: List[str] = []
 
         try:
+            check_cancelled(cancel_check)
             encoded_keyword = quote(keyword)
             search_urls = [
                 f"https://s.1688.com/selloffer/offer_search.htm?keywords={encoded_keyword}",
@@ -287,10 +358,12 @@ class ImageSearchService:
             ]
 
             for search_url in search_urls:
+                check_cancelled(cancel_check)
                 if len(urls) >= 5:
                     break
                 try:
                     response = requests.get(search_url, headers=headers, timeout=10)
+                    check_cancelled(cancel_check)
                     response.encoding = "utf-8"
                     text = response.text
                     for pattern in patterns:
@@ -306,9 +379,13 @@ class ImageSearchService:
                                 break
                         if len(urls) >= 10:
                             break
-                except Exception:
+                except Exception as exc:
+                    if is_cancelled_exception(exc):
+                        raise
                     continue
         except Exception as exc:
+            if is_cancelled_exception(exc):
+                raise
             print(f"  1688 검색 오류: {exc}")
 
         return urls
@@ -329,9 +406,15 @@ class ImageSearchService:
         except Exception:
             return False
 
-    def _download_image(self, url: str, product_name: str) -> Optional[str]:
+    def _download_image(
+        self,
+        url: str,
+        product_name: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[str]:
         """Download candidate image to local cache with size/domain checks."""
         try:
+            check_cancelled(cancel_check)
             if not self._is_allowed_image_url(url):
                 return None
             if not self._has_sufficient_disk_space():
@@ -355,6 +438,7 @@ class ImageSearchService:
             response = requests.get(url, headers=headers, timeout=15, stream=True)
             if response.status_code != 200:
                 return None
+            check_cancelled(cancel_check)
 
             if not self._is_allowed_image_url(response.url):
                 return None
@@ -370,6 +454,7 @@ class ImageSearchService:
             total_written = 0
             with open(filepath, "wb") as handle:
                 for chunk in response.iter_content(chunk_size=self.DOWNLOAD_CHUNK_SIZE):
+                    check_cancelled(cancel_check)
                     if not chunk:
                         continue
                     total_written += len(chunk)
@@ -384,12 +469,14 @@ class ImageSearchService:
 
             self._prune_cache()
             return filepath
-        except Exception:
+        except Exception as exc:
             try:
                 if "filepath" in locals() and os.path.exists(filepath):
                     os.remove(filepath)
             except Exception:
                 pass
+            if is_cancelled_exception(exc):
+                raise
             return None
 
 

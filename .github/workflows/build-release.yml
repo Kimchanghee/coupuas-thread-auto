@@ -214,6 +214,12 @@ jobs:
           body: |
             쇼츠스레드메이커 새 버전이 출시되었습니다.
 
+            ### 2026-05-27 버그 수정
+            - 메인 업로드 화면에서 이미 업로드한 쿠팡 링크를 다시 올리지 않도록 중복 스킵을 적용했습니다.
+            - 쿠팡 링크 분석과 1688 이미지 검색 중 중지 버튼 반응을 개선했습니다.
+            - 일부 쿠팡 단축 링크 분석 실패를 줄이기 위해 리다이렉트 처리 방식을 보완했습니다.
+            - 작업량 차감 응답 형식 차이로 업로드 성공이 실패 처리될 수 있는 문제를 수정했습니다.
+
             Windows 사용자는 설치형 파일을 받으면 됩니다.
             - 설치형: `CoupangThreadAutoSetup.exe`
             - 단독 실행형: `CoupangThreadAuto.exe`
@@ -239,6 +245,7 @@ jobs:
             {
               "tag_name": "${{ needs.build.outputs.version }}",
               "release_name": "Release ${{ needs.build.outputs.version }}",
+              "body": "2026-05-27 버그 수정: 중복 업로드 방지, 중지 반응 개선, 쿠팡 단축 링크 분석 안정화, 작업량 동기화 판정 개선",
               "installer_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
               "standalone_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAuto.exe",
               "metadata_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/latest.json"

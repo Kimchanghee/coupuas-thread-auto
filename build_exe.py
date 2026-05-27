@@ -68,6 +68,7 @@ HIDDEN_IMPORTS = [
     "src.services.image_search",
     "src.services.link_history",
     "src.services.coupang_parser",
+    "src.services.cancellation",
 ]
 
 DATAS = [

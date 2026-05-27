@@ -11,6 +11,7 @@ from src.computer_use_agent import ComputerUseAgent
 from src.threads_playwright_helper import ThreadsPlaywrightHelper
 from src.threads_navigation import goto_threads_with_fallback
 from src.config import config
+from src.services.cancellation import OperationCancelled
 
 
 class CancelledException(Exception):
@@ -82,6 +83,9 @@ class CoupangThreadsUploader:
         """취소 여부 확인"""
         if self._cancel_event.is_set():
             raise CancelledException("사용자에 의해 취소됨")
+
+    def _is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
     def upload_product(self, product_post: Dict, agent: Optional[ComputerUseAgent] = None) -> bool:
         """단일 상품 업로드"""
@@ -409,6 +413,9 @@ class CoupangPartnersPipeline:
         if self._cancel_event.is_set():
             raise CancelledException("사용자에 의해 취소됨")
 
+    def _is_cancelled(self) -> bool:
+        return self._cancel_event.is_set()
+
     @property
     def coupang_parser(self):
         if self._coupang_parser is None:
@@ -487,7 +494,13 @@ class CoupangPartnersPipeline:
         print(f"\n  링크 처리 중: {coupang_url[:50]}...")
 
         print("  [1단계] 쿠팡 링크 분석...")
-        product_info = self.coupang_parser.parse_link(coupang_url)
+        try:
+            product_info = self.coupang_parser.parse_link(
+                coupang_url,
+                cancel_check=self._is_cancelled,
+            )
+        except OperationCancelled as exc:
+            raise CancelledException("사용자에 의해 취소됨") from exc
 
         if not product_info:
             print(f"  링크 분석 실패")
@@ -508,10 +521,14 @@ class CoupangPartnersPipeline:
 
         # 미디어 설정: 1688에서 이미지 검색 (최대 10회 재시도)
         print("  [1.5단계] 1688 이미지 검색 (최대 10회 시도)...")
-        images = self.image_search.search_product_images(
-            product_info,
-            self._resolve_google_api_key(),
-        )
+        try:
+            images = self.image_search.search_product_images(
+                product_info,
+                self._resolve_google_api_key(),
+                cancel_check=self._is_cancelled,
+            )
+        except OperationCancelled as exc:
+            raise CancelledException("사용자에 의해 취소됨") from exc
         if images:
             product_info['image_path'] = images[0]
             # 두 번째 이미지가 있으면 저장 (나중에 사용 가능)

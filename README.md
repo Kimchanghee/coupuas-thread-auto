@@ -4,22 +4,16 @@
 
 ## 주요 기능
 
-- **최신 AI 기반 글 변환**: Google Gemini 2.0 Flash Experimental을 사용하여 입력된 글을 쓰레드 형식으로 자동 변환 (5-10배 빠른 속도)
-- **선택적 이미지 생성**: 체크박스로 이미지 생성 on/off 가능, 각 문단마다 Gemini를 활용한 이미지 생성
-- **실시간 이미지 미리보기**: 메인 화면 우측에서 생성된 이미지를 바로 확인하고 개별 재생성 가능
-- **3가지 업로드 방식**:
-  - **자동 (권장)**: Computer Use 시도 → 실패 시 자동으로 Threads API 폴백
-  - **Computer Use 전용**: Gemini AI Vision으로 브라우저 자동 제어 (이미지 업로드 가능, 로그인 세션 자동 저장)
-  - **Threads API 전용**: 빠르고 안정적 (텍스트만 업로드)
-- **세션 저장 시스템**: 한 번 로그인하면 세션이 자동 저장되어 이후 실행 시 로그인 불필요
-- **하이브리드 제어 방식**: Playwright 직접 제어 + AI Vision 보조로 95%+ 성공률
-- **크롬 스타일 3분할 UI**: 구글 크롬 스타일의 깔끔한 UI (입력/변환/이미지 미리보기)
-- **설정 관리**: API 키, 변환 지침, 업로드 간격, 업로드 방식 등을 탭별로 쉽게 설정
+- **AI 기반 상품 분석/문구 생성**: 쿠팡 링크를 분석하고 Threads용 짧은 홍보 문구를 생성
+- **상품 이미지 검색**: 1688 이미지 검색 결과를 캐시에 저장해 첫 번째 게시글에 첨부
+- **브라우저 세션 기반 업로드**: Playwright로 Threads 웹을 제어하고 로그인 세션을 암호화 저장
+- **업로드 이력 관리**: 업로드한 링크를 기록해 중복 업로드를 방지
+- **설정 관리**: Gemini API 키, Threads 사용자명, 업로드 간격 등을 앱에서 설정
 
 ## 시스템 요구사항
 
 - Windows 10 이상
-- Python 3.8 이상
+- Python 3.9 이상
 
 ## 설치 방법
 
@@ -34,12 +28,12 @@
 ### 방법 2: 소스코드 실행
 
 #### 1. Python 설치
-[Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.8 이상을 다운로드하여 설치합니다.
+[Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.9 이상을 다운로드하여 설치합니다.
 
 #### 2. 프로젝트 클론
 ```bash
-git clone https://github.com/yourusername/ceo-thread-auto.git
-cd ceo-thread-auto
+git clone https://github.com/Kimchanghee/coupuas-thread-auto.git
+cd coupuas-thread-auto
 ```
 
 #### 3. 필요한 패키지 설치
@@ -51,7 +45,7 @@ pip install -r requirements.txt
 
 ### 1. 초기 설정 (최초 1회만)
 
-**Instagram 로그인 세션 저장** (Computer Use 사용 시 필요):
+**Threads 로그인 세션 저장**:
 
 ```bash
 # Windows
@@ -65,11 +59,9 @@ python setup_login.py
 1. 브라우저가 자동으로 열립니다
 2. Instagram 계정으로 로그인하세요
 3. 피드가 보이면 터미널에서 Enter를 누르세요
-4. 세션이 자동 저장됩니다 (`.threads_profile/storage_state.json`)
+4. 세션이 사용자 홈의 `.shorts_thread_maker/sessions` 아래에 암호화 저장됩니다
 
 **이후 실행 시 자동으로 로그인 상태가 유지됩니다!** ✅
-
-> 📖 자세한 내용은 [세션저장_가이드.md](세션저장_가이드.md) 참조
 
 ### 2. 애플리케이션 실행
 ```bash
@@ -80,92 +72,57 @@ python login_main.py
 1. 애플리케이션 실행 후 상단의 **⚙️ 설정** 버튼 클릭
 2. **API 키** 탭에서 다음 정보 입력:
    - **Google API 키**: [Google AI Studio](https://makersuite.google.com/app/apikey)에서 발급 (Gemini 사용)
-   - **Threads API 키** (선택사항): [README_API.md](README_API.md) 참조
+   - **Threads 사용자명**: 업로드에 사용할 Threads/Instagram 사용자명
 3. **저장** 버튼 클릭
 
-### 4. 업로드 방식 선택
+### 4. Threads 로그인 준비
 
-메인 화면에서 3가지 방식 중 선택:
+설정 화면에서 **Threads 로그인** 버튼을 눌러 브라우저를 열고 로그인하세요.
+로그인 후 브라우저를 닫으면 세션이 저장되어 다음 실행부터 재사용됩니다.
 
-- **○ 자동 (Computer Use → API)** ⭐ 권장
-  - Computer Use로 시도 (이미지 업로드 가능)
-  - 실패 시 자동으로 Threads API로 폴백
-  - 안정성과 기능성의 균형
+### 5. 업로드 간격 설정
+1. **업로드 설정** 화면에서 시간/분/초를 입력합니다.
+2. 최소 간격은 30초입니다.
+3. **저장** 버튼을 눌러 설정을 반영합니다.
 
-- **○ Computer Use 전용**
-  - Gemini AI Vision으로 브라우저 자동 제어
-  - 이미지 업로드 가능
-  - 세션 저장으로 로그인 자동 유지
-  - 재시도: 5회 (exponential backoff)
-
-- **○ Threads API 전용**
-  - 가장 빠르고 안정적 (95%+ 성공률)
-  - 텍스트만 업로드 (이미지 불가)
-  - API 키 필요 ([README_API.md](README_API.md) 참조)
-
-### 5. 글 변환 지침 설정 (선택사항)
-1. 설정 창의 **글 변환 지침** 탭 선택
-2. 원하는 변환 스타일 지침 입력
-3. **저장** 버튼 클릭
-
-### 6. 글 작성 및 변환
-1. 메인 화면 좌측 **📝 원본 글 입력** 영역에 글 작성
-   - 문단은 빈 줄로 구분
-2. **이미지 자동 생성** 체크박스로 이미지 생성 여부 선택
-   - ✅ 체크: 글 변환 + 이미지 생성
-   - ☐ 체크 해제: 글 변환만 (이미지 생성 안 함)
-3. **🚀 글 변환 및 이미지 생성** (또는 **🚀 글 변환**) 버튼 클릭
-4. 중앙에 변환된 글, **우측에 이미지가 실시간으로 표시**됨
-
-### 7. 이미지 확인 및 재생성
-1. 우측 **🖼️ 이미지 미리보기** 패널에서 생성된 이미지 실시간 확인
-2. 각 이미지 카드마다 **🔄 재생성** 버튼으로 개별 재생성 가능
-3. 스크롤하여 모든 문단의 이미지 확인
-
-### 8. Threads에 업로드
-1. **📤 Threads에 업로드** 버튼 클릭
-2. 확인 대화상자에서 **예** 선택
-3. 자동으로 각 문단이 설정된 간격으로 업로드됨
+### 6. 링크 입력 및 업로드
+1. **링크 입력** 화면에 쿠팡 파트너스 URL을 붙여넣습니다.
+2. **자동화 시작** 버튼을 누릅니다.
+3. 앱이 링크 분석, 이미지 검색, 문구 생성, Threads 업로드를 순서대로 진행합니다.
+4. 이미 업로드된 링크는 이력 기준으로 자동 스킵됩니다.
 
 ## 프로젝트 구조
 
 ```
-ceo-thread-auto/
+coupuas-thread-auto/
 ├── src/
 │   ├── __init__.py
 │   ├── config.py                      # 설정 관리
-│   ├── gemini_service.py              # Gemini API 통합 (2.0 Flash)
-│   ├── threads_service.py             # Threads API 통합
-│   ├── threads_oauth.py               # Threads OAuth 인증
-│   ├── threads_uploader.py            # 통합 업로더 (Computer Use + API)
-│   ├── computer_use_agent.py          # Gemini Computer Use 에이전트 (세션 저장)
+│   ├── auth_client.py                 # 인증/작업량 API 클라이언트
+│   ├── coupang_uploader.py            # 쿠팡 링크 처리 및 업로드 파이프라인
+│   ├── computer_use_agent.py          # 브라우저 세션/Computer Use 에이전트
 │   ├── threads_playwright_helper.py   # Playwright 직접 제어 헬퍼
-│   ├── text_processor.py              # 텍스트 처리
-│   ├── main_window.py                 # 메인 GUI (업로드 방식 선택)
-│   ├── settings_dialog.py             # 설정 다이얼로그
-│   └── image_preview.py               # 이미지 미리보기
-├── images/                            # 생성된 이미지 저장
-├── .threads_profile/                  # 브라우저 세션 저장 (자동 생성)
-│   └── storage_state.json            # Instagram 로그인 세션
+│   ├── threads_navigation.py          # Threads 접속 도메인 폴백
+│   ├── main_window.py                 # 메인 GUI
+│   └── services/
+│       ├── coupang_parser.py          # 쿠팡 링크 분석
+│       ├── image_search.py            # 1688 이미지 검색/캐시
+│       ├── aggro_generator.py         # Threads 문구 생성
+│       └── link_history.py            # 업로드 이력 관리
+├── images/                            # 앱 아이콘 등 정적 이미지
 ├── main.py                            # 개발자 자동 진입 실행 파일 (로그인 우회)
 ├── login_main.py                      # 실제 로그인 시작 실행 파일
 ├── setup_login.py                     # 초기 로그인 설정 스크립트
-├── setup_login.bat                    # Windows용 설정 배치 파일
-├── get_threads_token.py               # Threads API 토큰 생성
-├── test_api_upload.py                 # API 업로드 테스트
 ├── requirements.txt                   # 필요한 패키지
-├── README.md                          # 사용 설명서
-├── README_API.md                      # Threads API 설정 가이드
-├── 세션저장_가이드.md                    # 세션 저장 시스템 가이드
-└── COMPUTER_USE_개선사항.md            # Computer Use 문제 분석
+└── README.md                          # 사용 설명서
 ```
 
 ## 주의사항
 
 - API 키와 계정 정보는 안전하게 보관하세요
-- 생성된 이미지는 `images/` 폴더에 저장됩니다
-- 설정은 사용자 홈 디렉토리의 `.ceo_thread_auto/config.json`에 저장됩니다
-- **세션 파일** (`.threads_profile/storage_state.json`)은 민감한 정보이므로 공유하지 마세요
+- 검색된 상품 이미지는 사용자 홈의 `.shorts_thread_maker/media_cache`에 저장됩니다
+- 설정은 사용자 홈 디렉토리의 `.shorts_thread_maker/config.json`에 저장됩니다
+- **세션 파일**은 사용자 홈의 `.shorts_thread_maker/sessions`에 암호화되어 저장되며 공유하지 마세요
 
 ### Computer Use 사용 시 주의사항
 - **초기 로그인 필수**: `setup_login.py`를 먼저 실행하세요
@@ -173,12 +130,7 @@ ceo-thread-auto/
 - **Chromium 브라우저**: Playwright가 자동으로 설치 및 관리
 - **Instagram OAuth**: Threads는 Instagram 계정으로 로그인합니다
 - **API 제한**: Gemini Computer Use는 Free Tier에서 15 RPM, 1M TPM 제한 있음
-- **성공률**: 하이브리드 방식으로 95%+ 성공률 (이전 20-40% → 대폭 개선)
-
-### Threads API 사용 시
-- [README_API.md](README_API.md) 참조하여 OAuth 토큰 생성 필요
-- 텍스트만 업로드 가능 (이미지는 공개 URL 필요)
-- 가장 안정적이고 빠른 방식 (권장)
+- **중지 처리**: 작업 중 중지를 누르면 현재 네트워크/API 단계가 끝나는 대로 안전하게 중단됩니다
 
 ## API 키 발급 방법
 
@@ -186,12 +138,6 @@ ceo-thread-auto/
 1. [Google AI Studio](https://makersuite.google.com/app/apikey) 접속
 2. Google 계정으로 로그인
 3. "Get API Key" 버튼 클릭
-4. 생성된 API 키 복사
-
-### Threads API 키
-1. [Meta for Developers](https://developers.facebook.com/) 접속
-2. 앱 생성 및 Threads API 활성화
-3. 액세스 토큰 발급
 4. 생성된 API 키 복사
 
 ## 라이선스
@@ -209,41 +155,41 @@ ceo-thread-auto/
 - 인터넷 연결 상태 확인
 - API 사용량 제한을 초과하지 않았는지 확인
 
-### 이미지가 생성되지 않는 경우
+### 이미지가 검색되지 않는 경우
 - Gemini API 키가 올바른지 확인
-- 현재 버전에서는 이미지 설명만 생성됩니다 (실제 이미지 생성은 추가 API 필요)
+- 1688 검색 결과가 없거나 이미지 다운로드가 차단되면 이미지 없이 진행될 수 있습니다
 
 ### Computer Use가 작동하지 않는 경우
 
 **세션 관련:**
 ```bash
-# 세션 파일 확인
-ls .threads_profile/storage_state.json
-
 # 세션이 만료되었으면 재생성
 python setup_login.py
 ```
 
 **API 오버로드:**
 - "API 오버로드" 메시지가 나오면: 5-10분 대기 후 재시도
-- Free Tier 제한 초과 시: "자동" 또는 "API 전용" 모드로 전환
+- Free Tier 제한 초과 시: 잠시 후 다시 시도하거나 다른 Gemini API 키를 등록
 
 **일반적인 문제:**
 - Playwright 설치 확인: `playwright install chromium`
 - Google API 키 확인
 - 방화벽이나 보안 소프트웨어 확인
-- 자세한 내용: [COMPUTER_USE_개선사항.md](COMPUTER_USE_개선사항.md) 참조
 
 ## 최근 업데이트
 
-### v2.0 (2025-01)
-- [x] Gemini 2.0 Flash Experimental로 업그레이드 (5-10배 빠른 속도) ✅
-- [x] Gemini Computer Use API 통합 ✅
-- [x] 세션 저장 시스템 구현 (한 번 로그인 → 영구 사용) ✅
-- [x] 하이브리드 제어 방식 (Playwright + AI Vision) ✅
-- [x] 3가지 업로드 방식 선택 (자동/Computer Use/API) ✅
-- [x] Threads API 통합 (OAuth 인증) ✅
-- [x] 성공률 대폭 개선 (20-40% → 95%+) ✅
+### 2026-05-27 버그 수정
+- 중복 업로드 방지: 메인 업로드 화면에서도 업로드 이력을 확인해 이미 처리한 쿠팡 링크를 건너뜁니다.
+- 중지 반응 개선: 쿠팡 분석, Gemini 재시도 대기, 1688 이미지 검색 중에도 중지 요청을 더 빠르게 반영합니다.
+- 링크 분석 안정화: 일부 쿠팡 단축 링크가 상품 페이지까지 풀리지 않던 리다이렉트 케이스를 보완했습니다.
+- 작업량 동기화 개선: 서버 응답 형식 차이로 성공 업로드가 실패 처리될 수 있는 부분을 수정했습니다.
+- 실행 배치 파일 수정: Windows `run.bat`이 실제 로그인 진입점으로 앱을 실행합니다.
+
+### v3.0
+- [x] 로그인/작업량 서버 연동
+- [x] 암호화된 Threads 세션 저장
+- [x] 쿠팡 링크 분석 및 1688 이미지 검색
+- [x] 업로드 이력 기반 중복 방지
 
 ### v1.0
 - [x] 기본 브라우저 자동화 업로드 ✅
@@ -312,13 +258,13 @@ python build_installer.py
 - [x] GitHub Releases 통합 ✅
 - [ ] 실제 이미지 생성 API 통합 (DALL-E, Stable Diffusion 등)
 - [ ] 예약 업로드 기능
-- [ ] 업로드 기록 저장 및 관리
+- [x] 업로드 기록 저장 및 관리
 - [ ] 다크 모드 지원
 - [ ] 여러 계정 관리
 - [ ] Headless 모드 옵션 (브라우저 숨김)
 
 ## 추가 문서
 
-- [📖 세션저장_가이드.md](세션저장_가이드.md) - 세션 저장 시스템 상세 가이드
-- [📖 README_API.md](README_API.md) - Threads API 설정 가이드
-- [📖 COMPUTER_USE_개선사항.md](COMPUTER_USE_개선사항.md) - Computer Use 문제 분석 및 개선사항
+- [TESTING.md](TESTING.md) - 테스트/배포 검증 체크리스트
+- [AUTO_UPDATE_SETUP.md](AUTO_UPDATE_SETUP.md) - 자동 업데이트 설정
+- [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) - 구현 메모
