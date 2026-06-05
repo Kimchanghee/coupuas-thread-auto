@@ -64,8 +64,9 @@ from PyQt6.QtGui import (
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
+from src.hidpi import configure_high_dpi, center_window
 
-VERSION = "v3.0.2"
+VERSION = "v3.0.18"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -82,6 +83,7 @@ def _create_main_window(login_win, auth_result, main_window_cls=None):
     main_win._login_ref = login_win
     if hasattr(main_win, '_update_account_display'):
         main_win._update_account_display()
+    center_window(main_win)
     main_win.show()
     logger.info("메인 윈도우 표시 완료")
     return main_win
@@ -272,16 +274,9 @@ def main():
     logger.info("애플리케이션을 시작합니다.")
     logger.info("로그 파일 경로: %s", log_file)
 
-    # High-DPI: avoid OS bitmap scaling blur on Windows.
-    if sys.platform == "win32":
-        os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
-        os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
-
-    # 모든 모니터에서 동일한 물리적 크기 보장
-    if hasattr(Qt.ApplicationAttribute, "AA_EnableHighDpiScaling"):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    if hasattr(Qt.ApplicationAttribute, "AA_UseHighDpiPixmaps"):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    # High-DPI + 화면 맞춤 스케일: 어떤 해상도/배율(125·150%)·작은 화면에서도
+    # UI가 동일 비율로 보이고 창이 잘리지 않도록 (QApplication 생성 전에 호출)
+    configure_high_dpi()
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
@@ -355,6 +350,7 @@ def main():
         loading_dialog.show()
         loading_dialog.start(on_finished=_open_main_window)
     login_win.login_success.connect(on_login_success)
+    center_window(login_win)
     login_win.show()
     splash.finish(login_win)
 
