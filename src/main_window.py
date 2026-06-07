@@ -2577,10 +2577,13 @@ class MainWindow(QMainWindow):
                 except Exception:
                     logger.exception("Threads 로그인 시작 전 저장 세션 초기화에 실패했습니다.")
                 agent.start_browser()
-                path_candidates = []
+                # 로그인 플로우는 반드시 로그인 페이지(/login)로 먼저 이동한다.
+                # 로그아웃 상태에서 프로필(/@username)로 가면 페이지는 열리지만(200)
+                # 로그인 UI가 무한 로딩되어 실제 로그인이 되지 않는 문제가 있었다.
+                path_candidates = ["/login"]
                 if username:
                     path_candidates.append(f"/@{username}")
-                path_candidates.extend(["/login", "/"])
+                path_candidates.append("/")
 
                 opened_url = ""
                 last_nav_error = None
