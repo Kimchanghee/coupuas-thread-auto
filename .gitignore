@@ -122,3 +122,4 @@ htmlcov/
 # 테스트용 자동 생성물
 /test_account.json
 /last_gui_user.txt
+.vercel
