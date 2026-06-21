@@ -4,6 +4,7 @@ import threading
 from types import SimpleNamespace
 
 from src.main_window import MainWindow
+from src.services.link_history import LinkHistory
 
 
 class _Emitter:
@@ -123,3 +124,16 @@ def test_upload_queue_skips_links_already_in_history(monkeypatch):
     assert results["failed"] == 0
     assert pipeline.link_history.added == []
     assert ("https://link.coupang.com/a/dup", "중복", "이미 업로드됨") in signals.link_status.calls
+
+
+def test_failed_history_records_do_not_count_as_uploaded(tmp_path):
+    history = LinkHistory(str(tmp_path / "uploaded_links.json"))
+
+    history.add_link("https://example.com/product/1?track=failed", "failed attempt", success=False)
+
+    assert not history.is_uploaded("https://example.com/product/1")
+
+    history.add_link("https://example.com/product/1", "successful upload", success=True)
+
+    assert history.is_uploaded("https://example.com/product/1?other=value")
+    assert history.get_stats() == {"total": 2, "success": 1, "failed": 1}

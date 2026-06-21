@@ -3602,6 +3602,8 @@ class MainWindow(QMainWindow):
                     success = helper.create_thread_direct(posts_data)
                     recorded_success = bool(success)
                     stop_for_billing_sync = False
+                    pause_for_threads_ui = False
+                    helper_error = str(getattr(helper, "last_error", "") or "")
                     if success:
                         self._mark_resume_item(url, "completed", product_name)
                         if quota_bypass:
@@ -3650,14 +3652,30 @@ class MainWindow(QMainWindow):
                                 auth_client.release_reserved_work(reserved_work_id)
                             except Exception:
                                 logger.exception("업로드 실패 후 예약 작업량 해제 실패")
-                        results["failed"] += 1
-                        self._mark_resume_item(url, "failed", product_name, "upload_failed")
-                        log(f"업로드 실패: {product_name}")
-                        self.signals.step_update.emit(2, "error")
-                        self.signals.link_status.emit(url, "실패", product_name)
+                        ui_blocker_tokens = (
+                            "login_prompt",
+                            "login_popup",
+                            "compose_button_not_found",
+                            "textarea_missing",
+                        )
+                        if any(token in helper_error for token in ui_blocker_tokens):
+                            pause_for_threads_ui = True
+                            results["cancelled"] = True
+                            blocker = helper_error or "threads_ui_unavailable"
+                            self._mark_resume_item(url, "pending", product_name, blocker)
+                            log(f"Threads 로그인/작성창 확인 필요: {blocker}. 현재 항목을 보존하고 중단합니다.")
+                            self.signals.step_update.emit(2, "error")
+                            self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
+                        else:
+                            results["failed"] += 1
+                            self._mark_resume_item(url, "failed", product_name, helper_error or "upload_failed")
+                            log(f"업로드 실패: {product_name}")
+                            self.signals.step_update.emit(2, "error")
+                            self.signals.link_status.emit(url, "실패", product_name)
 
                     try:
-                        pipeline_ref.link_history.add_link(url, product_name, success=bool(success))
+                        if success or not pause_for_threads_ui:
+                            pipeline_ref.link_history.add_link(url, product_name, success=bool(success))
                     except Exception:
                         logger.exception("업로드 이력 저장에 실패했습니다.")
 
@@ -3668,7 +3686,7 @@ class MainWindow(QMainWindow):
                             "success": recorded_success,
                         }
                     )
-                    if stop_for_billing_sync:
+                    if stop_for_billing_sync or pause_for_threads_ui:
                         results["cancelled"] = True
                         break
                 except Exception as exc:

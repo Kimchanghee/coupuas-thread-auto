@@ -80,7 +80,7 @@ class LinkHistory:
     def _build_uploaded_set(self) -> Set[str]:
         uploaded = set()
         for item in self._history.get("uploaded_links", []):
-            if isinstance(item, dict):
+            if isinstance(item, dict) and item.get("success") is True:
                 uploaded.add(self._normalize_url(item.get("url", "")))
         return uploaded
 
@@ -111,7 +111,8 @@ class LinkHistory:
                 stats["success"] = int(stats.get("success", 0)) + 1
             else:
                 stats["failed"] = int(stats.get("failed", 0)) + 1
-            self._uploaded_set.add(normalized)
+            if success:
+                self._uploaded_set.add(normalized)
             self._save()
 
     def get_uploaded_urls(self) -> Set[str]:

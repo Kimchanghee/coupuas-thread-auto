@@ -589,12 +589,13 @@ class ThreadsPlaywrightHelper:
             except Exception as text_click_error:
                 print(f"  text fallback 클릭 실패: {text_click_error}")
 
-            self.page.mouse.click(38, 415)
-            time.sleep(2)
-            return True
+            self.last_error = "compose_button_not_found"
+            print("  새 스레드 버튼을 찾지 못해 좌표 클릭 없이 중단")
+            return False
 
         except Exception as e:
             print(f"  새 스레드 버튼 클릭 실패: {e}")
+            self.last_error = str(e)
             return False
 
     def dismiss_login_popup(self) -> bool:
@@ -677,6 +678,7 @@ class ThreadsPlaywrightHelper:
 
             if total_textareas <= index:
                 print(f"      Textarea[{index}] 존재하지 않음 (총 {total_textareas}개)")
+                self.last_error = "textarea_missing"
                 return False
 
             textarea = textareas.nth(index)
@@ -692,6 +694,7 @@ class ThreadsPlaywrightHelper:
 
             if require_empty and trimmed_existing:
                 print(f"      Textarea[{index}]에 기존 내용이 있어 덮어쓰지 않음")
+                self.last_error = "textarea_not_empty"
                 return False
 
             # 클릭 후 입력
@@ -718,6 +721,7 @@ class ThreadsPlaywrightHelper:
 
         except Exception as e:
             print(f"      Textarea[{index}] 입력 실패: {e}")
+            self.last_error = str(e)
             return False
 
     def click_add_to_thread(self) -> bool:
@@ -1110,6 +1114,11 @@ class ThreadsPlaywrightHelper:
             if first_image:
                 print(f"  첫 번째 글에 이미지 첨부 예정: {first_image}")
 
+            if self._has_login_or_continue_prompt():
+                print("  로그인/계속하기 화면 감지, 게시를 중단합니다")
+                self.last_error = "login_prompt"
+                return False
+
             # 1. New thread 버튼 클릭
             if is_timed_out("before_click_new_thread"):
                 return False
@@ -1119,13 +1128,9 @@ class ThreadsPlaywrightHelper:
             # 로그인 팝업 체크
             time.sleep(1)
             if "가입" in self.page.content() or "log in" in self.page.content().lower():
-                print("  로그인 팝업 감지, 닫기 시도")
-                if not self.dismiss_login_popup():
-                    print("  로그인 팝업 닫기 실패")
-                    return False
-                # 다시 New thread 클릭
-                if not self.click_new_thread():
-                    return False
+                print("  로그인 팝업 감지, 게시를 중단합니다")
+                self.last_error = "login_popup"
+                return False
 
             # 2. 첫 번째 문단 입력
             if is_timed_out("before_first_textarea"):
