@@ -6,15 +6,18 @@ Stitch Blue 디자인 - 사이드바 + 스택 페이지 레이아웃
 """
 from __future__ import annotations
 
+import json
 import re
 import html
 import os
+import tempfile
 import time
 import logging
 import threading
 import queue
 import sys
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import unquote, urlparse
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel,
@@ -230,6 +233,11 @@ class MainWindow(QMainWindow):
         self._browser_cancel = threading.Event()
         self._link_url_row_map = {}  # url -> table row index
         self._active_pipeline = None
+        self._resume_state_path = Path(config.config_dir) / "upload_resume_queue.json"
+        self._resume_state_lock = threading.RLock()
+        self._resume_items = []
+        self._resume_interval = max(int(getattr(config, "upload_interval", 60) or 60), 30)
+        self._resume_next_allowed_at = None
         self._session_expiry_notified = False
         self._redirecting_to_login = False
         self._force_close_for_relogin = False
@@ -272,6 +280,7 @@ class MainWindow(QMainWindow):
 
         # Load settings into widgets
         self._load_settings()
+        QTimer.singleShot(1800, self._prompt_resume_queue_if_needed)
         self._bind_ui_activity_logging()
         self._log_user_activity("ui_main_window_opened", f"version={self._app_version}")
 
@@ -1816,6 +1825,7 @@ class MainWindow(QMainWindow):
         self._relayout_header_account_card()
         self._sidebar_status_label.setText("완료")
         self._reset_steps()
+        self._save_resume_state("batch_finished")
 
         while not self.link_queue.empty():
             try:
@@ -1869,6 +1879,292 @@ class MainWindow(QMainWindow):
         links = self.COUPANG_LINK_PATTERN.findall(content)
         unique_links = list(dict.fromkeys(links))
         return [(url, None) for url in unique_links]
+
+    def _normalize_link_data(self, link_data) -> list:
+        normalized = []
+        seen = set()
+        for item in link_data or []:
+            if isinstance(item, tuple):
+                url = str(item[0] or "").strip()
+                keyword = str(item[1] or "").strip() or None
+            elif isinstance(item, dict):
+                url = str(item.get("url") or "").strip()
+                keyword = str(item.get("keyword") or item.get("title") or "").strip() or None
+            else:
+                url = str(item or "").strip()
+                keyword = None
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            normalized.append((url, keyword))
+        return normalized
+
+    @staticmethod
+    def _is_resume_unfinished(status: str) -> bool:
+        return str(status or "").lower() in {"pending", "running"}
+
+    def _load_resume_state_file(self) -> dict:
+        try:
+            if not self._resume_state_path.exists():
+                return {}
+            with self._resume_state_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            logger.exception("저장된 업로드 대기열을 불러오지 못했습니다.")
+            return {}
+
+    def _resume_pending_link_data(self, state: dict) -> list:
+        items = state.get("items", []) if isinstance(state, dict) else []
+        pending = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if not self._is_resume_unfinished(item.get("status")):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url:
+                continue
+            keyword = str(item.get("keyword") or item.get("title") or "").strip() or None
+            pending.append((url, keyword))
+        return self._normalize_link_data(pending)
+
+    def _save_resume_state(self, reason: str = "") -> None:
+        with self._resume_state_lock:
+            items = [dict(item) for item in self._resume_items]
+            unfinished = [item for item in items if self._is_resume_unfinished(item.get("status"))]
+            if not unfinished:
+                try:
+                    self._resume_state_path.unlink(missing_ok=True)
+                except Exception:
+                    logger.debug("완료된 업로드 대기열 파일 삭제 실패", exc_info=True)
+                return
+
+            payload = {
+                "version": 1,
+                "updated_at": datetime.now().astimezone().isoformat(),
+                "reason": str(reason or ""),
+                "interval": int(self._resume_interval or 60),
+                "next_allowed_at": self._resume_next_allowed_at,
+                "items": items,
+            }
+
+            temp_path = None
+            try:
+                self._resume_state_path.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=str(self._resume_state_path.parent),
+                    prefix="upload_resume_queue_",
+                    suffix=".tmp",
+                    delete=False,
+                ) as tmp:
+                    json.dump(payload, tmp, ensure_ascii=False, indent=2)
+                    temp_path = tmp.name
+                os.replace(temp_path, self._resume_state_path)
+            except Exception:
+                logger.exception("업로드 대기열 저장에 실패했습니다.")
+                if temp_path:
+                    try:
+                        Path(temp_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+    def _initialize_resume_state(
+        self,
+        link_data,
+        interval: int,
+        *,
+        source: str = "manual",
+        next_allowed_at=None,
+    ) -> None:
+        normalized = self._normalize_link_data(link_data)
+        now_text = datetime.now().astimezone().isoformat()
+        with self._resume_state_lock:
+            self._resume_interval = max(int(interval or 60), 30)
+            self._resume_next_allowed_at = next_allowed_at
+            self._resume_items = [
+                {
+                    "url": url,
+                    "keyword": keyword or "",
+                    "status": "pending",
+                    "product_title": "",
+                    "updated_at": now_text,
+                    "source": source,
+                }
+                for url, keyword in normalized
+            ]
+        self._save_resume_state(f"{source}_start")
+
+    def _mark_resume_item(self, url: str, status: str, product_title: str = "", error: str = "") -> None:
+        url_text = str(url or "").strip()
+        if not url_text:
+            return
+        with self._resume_state_lock:
+            for item in self._resume_items:
+                if item.get("url") != url_text:
+                    continue
+                item["status"] = str(status or "")
+                item["updated_at"] = datetime.now().astimezone().isoformat()
+                if product_title:
+                    item["product_title"] = str(product_title)
+                if error:
+                    item["last_error"] = str(error)[:300]
+                break
+        self._save_resume_state(f"item_{status}")
+
+    def _set_resume_next_allowed_at(self, value) -> None:
+        with self._resume_state_lock:
+            self._resume_next_allowed_at = value
+        self._save_resume_state("next_allowed_at")
+
+    def _wait_for_resume_interval_if_needed(self, log) -> None:
+        try:
+            wait_until = float(self._resume_next_allowed_at or 0)
+        except (TypeError, ValueError):
+            wait_until = 0
+        remaining = int(wait_until - time.time())
+        if remaining <= 0:
+            self._set_resume_next_allowed_at(None)
+            return
+
+        log(f"저장된 업로드 간격을 이어서 적용합니다. 다음 항목까지 {_format_interval(remaining)} 대기")
+        while remaining > 0 and not self._stop_event.is_set():
+            if remaining % 60 == 0 or remaining < 60:
+                log(f"대기 중... {_format_interval(remaining)} 남음")
+            time.sleep(1)
+            remaining = int(wait_until - time.time())
+        if not self._stop_event.is_set():
+            self._set_resume_next_allowed_at(None)
+
+    def _clear_resume_state(self) -> None:
+        with self._resume_state_lock:
+            self._resume_items = []
+            self._resume_next_allowed_at = None
+        try:
+            self._resume_state_path.unlink(missing_ok=True)
+        except Exception:
+            logger.debug("업로드 대기열 파일 삭제 실패", exc_info=True)
+
+    def _prompt_resume_queue_if_needed(self) -> None:
+        if self.is_running:
+            return
+        state = self._load_resume_state_file()
+        pending = self._resume_pending_link_data(state)
+        if not pending:
+            return
+
+        interval = max(int(state.get("interval") or config.upload_interval or 60), 30)
+        if not ask_yes_no(
+            self,
+            "이어하기",
+            (
+                f"완료되지 않은 업로드 작업 {len(pending)}개가 저장되어 있습니다.\n"
+                f"업로드 간격: {_format_interval(interval)}\n\n"
+                "남은 작업을 이어서 시작할까요?"
+            ),
+        ):
+            self._clear_resume_state()
+            self.signals.log.emit("저장된 미완료 업로드 대기열을 삭제했습니다.")
+            return
+
+        self.start_link_data_batch(
+            pending,
+            interval=interval,
+            source="resume",
+            next_allowed_at=state.get("next_allowed_at"),
+        )
+
+    def start_link_data_batch(
+        self,
+        link_data,
+        *,
+        interval: int | None = None,
+        source: str = "manual",
+        next_allowed_at=None,
+    ) -> bool:
+        link_data = self._normalize_link_data(link_data)
+        if not link_data:
+            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            return False
+        if self.is_running:
+            show_warning(self, "알림", "이미 업로드 작업이 실행 중입니다.")
+            return False
+
+        config.load()
+        interval = max(int(interval or config.upload_interval or 60), 30)
+        api_key = self._resolve_runtime_gemini_api_key(validate=False)
+        if not api_key or len(api_key.strip()) < 10:
+            self._log_user_activity("batch_start_blocked", "reason=invalid_runtime_api_key", level="WARNING")
+            show_error(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
+            return False
+
+        self._log_user_activity("batch_start_confirmed", f"links={len(link_data)}; interval={interval}; source={source}")
+        self.is_running = True
+        self.start_btn.setEnabled(False)
+        self.add_btn.setEnabled(True)
+        self.stop_btn.setEnabled(True)
+        self.status_badge.update_style(Colors.WARNING, "실행중")
+        self._sidebar_status_label.setText("실행중")
+
+        self._sidebar_success_label.setText("성공: 0")
+        self._sidebar_failed_label.setText("실패: 0")
+        self._sidebar_total_label.setText("전체: 0")
+        self._progress_queue_label.setText(f"전체: 0 / {len(link_data)}")
+        self._reset_steps()
+        self._populate_link_table(link_data)
+
+        with self._urls_lock:
+            self.processed_urls.clear()
+            while not self.link_queue.empty():
+                try:
+                    self.link_queue.get_nowait()
+                except queue.Empty:
+                    break
+            for item in link_data:
+                url = item[0]
+                if url not in self.processed_urls:
+                    self.link_queue.put(item)
+                    self.processed_urls.add(url)
+
+        self.links_text.setPlainText("\n".join([item[0] for item in link_data]))
+        self._initialize_resume_state(
+            link_data,
+            interval,
+            source=source,
+            next_allowed_at=next_allowed_at,
+        )
+
+        try:
+            from src import auth_client
+            auth_client.log_action("batch_start", f"링크 {len(link_data)}개, 간격 {interval}초")
+        except Exception:
+            pass
+
+        ig_username = config.instagram_username
+        if ig_username:
+            profile_name = self._sanitize_profile_name(ig_username)
+            profile_dir = f".threads_profile_{profile_name}"
+        else:
+            profile_dir = ".threads_profile"
+        worker_config = {
+            "api_key": api_key,
+            "profile_dir": profile_dir,
+        }
+        self._active_pipeline = self.pipeline
+        thread = threading.Thread(
+            target=self._run_upload_queue,
+            args=(interval, worker_config, self._active_pipeline),
+            daemon=True,
+        )
+        thread.start()
+        self._log_user_activity(
+            "batch_worker_started",
+            f"links={len(link_data)}; interval={interval}; profile_dir={profile_dir}; source={source}",
+        )
+        logger.info("업로드 작업 스레드 시작")
+        return True
 
     # ────────────────────────────────────────────────────────
     #  SETTINGS LOGIC
@@ -2902,6 +3198,9 @@ class MainWindow(QMainWindow):
             logger.info("업로드 시작이 사용자에 의해 취소되었습니다")
             return
 
+        self.start_link_data_batch(link_data, interval=interval, source="manual")
+        return
+
         self._log_user_activity("batch_start_confirmed", f"links={len(link_data)}; interval={interval}")
         self.is_running = True
         self.start_btn.setEnabled(False)
@@ -2978,6 +3277,7 @@ class MainWindow(QMainWindow):
             return
 
         added = 0
+        added_items = []
         with self._urls_lock:
             for item in link_data:
                 url = item[0]
@@ -2985,6 +3285,7 @@ class MainWindow(QMainWindow):
                     self.link_queue.put(item)
                     self.processed_urls.add(url)
                     added += 1
+                    added_items.append(item)
 
                     # Add to table
                     row = self.link_table.rowCount()
@@ -3006,6 +3307,24 @@ class MainWindow(QMainWindow):
                     self._link_url_row_map[url] = row
 
         if added > 0:
+            if added_items:
+                now_text = datetime.now().astimezone().isoformat()
+                with self._resume_state_lock:
+                    known_urls = {entry.get("url") for entry in self._resume_items}
+                    for url, keyword in self._normalize_link_data(added_items):
+                        if url in known_urls:
+                            continue
+                        self._resume_items.append(
+                            {
+                                "url": url,
+                                "keyword": keyword or "",
+                                "status": "pending",
+                                "product_title": "",
+                                "updated_at": now_text,
+                                "source": "manual_add",
+                            }
+                        )
+                self._save_resume_state("queue_add")
             self._log_user_activity(
                 "queue_add_links_success",
                 f"added={added}; queue_size={self.link_queue.qsize()}",
@@ -3079,17 +3398,25 @@ class MainWindow(QMainWindow):
             helper = ThreadsPlaywrightHelper(agent.page)
 
             if not helper.check_login_status():
-                log("로그인이 필요합니다. 60초 안에 로그인해주세요.")
-                for wait_sec in range(20):
+                try:
+                    login_wait_seconds = int(os.getenv("THREAD_AUTO_LOGIN_WAIT_SECONDS", "60") or "60")
+                except ValueError:
+                    login_wait_seconds = 60
+                login_wait_seconds = max(login_wait_seconds, 60)
+                login_wait_steps = max(1, login_wait_seconds // 3)
+                log(f"로그인 대기 시간 설정: {login_wait_seconds}초")
+                log(f"로그인이 필요합니다. {login_wait_seconds}초 안에 로그인해주세요.")
+                for wait_sec in range(login_wait_steps):
                     time.sleep(3)
-                    remaining = 60 - (wait_sec * 3)
+                    remaining = max(0, login_wait_seconds - (wait_sec * 3))
                     if wait_sec % 3 == 0:
                         log(f"로그인 대기 중... {remaining}초 남음")
                     if helper.check_login_status():
                         log("로그인 확인됨")
                         break
                 else:
-                    log("60초 내 로그인되지 않아 업로드를 취소합니다.")
+                    log(f"{login_wait_seconds}초 내 로그인되지 않아 업로드를 취소합니다.")
+                    log(f"로그인 대기 시간 초과: {login_wait_seconds}초")
                     results["cancelled"] = True
                     self.signals.finished.emit(results)
                     return
@@ -3098,6 +3425,7 @@ class MainWindow(QMainWindow):
 
             processed_count = 0
             empty_count = 0
+            self._wait_for_resume_interval_if_needed(log)
 
             while not self._stop_event.is_set():
                 try:
@@ -3118,6 +3446,7 @@ class MainWindow(QMainWindow):
                 processed_count += 1
                 url, keyword = item if isinstance(item, tuple) else (item, None)
                 results["total"] += 1
+                self._mark_resume_item(url, "running")
 
                 log(f"{processed_count}번째 항목 처리 중 (대기열: {self.link_queue.qsize()})")
 
@@ -3131,6 +3460,7 @@ class MainWindow(QMainWindow):
                     already_uploaded = False
                 if already_uploaded:
                     results["skipped"] += 1
+                    self._mark_resume_item(url, "skipped", "(중복)")
                     log(f"중복 링크라 건너뜁니다: {str(url)[:40]}...")
                     self.signals.link_status.emit(url, "중복", "이미 업로드됨")
                     results["details"].append(
@@ -3177,6 +3507,7 @@ class MainWindow(QMainWindow):
                     post_data = pipeline_ref.process_link(url, user_keywords=keyword)
                     if not post_data:
                         results["parse_failed"] += 1
+                        self._mark_resume_item(url, "parse_failed", error="parse_failed")
                         log("분석 실패로 이 항목을 건너뜁니다.")
                         self.signals.step_update.emit(1, "error")
                         self.signals.link_status.emit(url, "실패", "분석 실패")
@@ -3194,6 +3525,7 @@ class MainWindow(QMainWindow):
                     break
                 except Exception as exc:
                     results["parse_failed"] += 1
+                    self._mark_resume_item(url, "parse_failed", error=str(exc))
                     log(f"분석 오류: {str(exc)[:80]}")
                     self.signals.step_update.emit(1, "error")
                     self.signals.link_status.emit(url, "실패", "오류")
@@ -3271,6 +3603,7 @@ class MainWindow(QMainWindow):
                     recorded_success = bool(success)
                     stop_for_billing_sync = False
                     if success:
+                        self._mark_resume_item(url, "completed", product_name)
                         if quota_bypass:
                             results["uploaded"] += 1
                             log(f"업로드 성공: {product_name}")
@@ -3318,6 +3651,7 @@ class MainWindow(QMainWindow):
                             except Exception:
                                 logger.exception("업로드 실패 후 예약 작업량 해제 실패")
                         results["failed"] += 1
+                        self._mark_resume_item(url, "failed", product_name, "upload_failed")
                         log(f"업로드 실패: {product_name}")
                         self.signals.step_update.emit(2, "error")
                         self.signals.link_status.emit(url, "실패", product_name)
@@ -3345,6 +3679,7 @@ class MainWindow(QMainWindow):
                         except Exception:
                             logger.exception("업로드 예외 처리 중 예약 작업량 해제 실패")
                     results["failed"] += 1
+                    self._mark_resume_item(url, "failed", product_name, str(exc))
                     log(f"업로드 오류: {str(exc)[:80]}")
                     self.signals.step_update.emit(2, "error")
                     self.signals.link_status.emit(url, "실패", product_name)
@@ -3352,7 +3687,8 @@ class MainWindow(QMainWindow):
                 self.signals.results.emit(results["uploaded"], results["failed"])
                 self.signals.reset_steps.emit()
 
-                if not self._stop_event.is_set():
+                if not self._stop_event.is_set() and not self.link_queue.empty():
+                    self._set_resume_next_allowed_at(time.time() + interval)
                     log(f"다음 항목까지 {_format_interval(interval)} 대기")
                     for sec in range(interval):
                         if self._stop_event.is_set():
@@ -3362,6 +3698,8 @@ class MainWindow(QMainWindow):
                         if remaining % 60 == 0 and remaining > 0:
                             log(f"대기 중... {_format_interval(remaining)} 남음")
                         time.sleep(1)
+                if not self._stop_event.is_set():
+                    self._set_resume_next_allowed_at(None)
 
             log("=" * 40)
             log(
@@ -3421,6 +3759,7 @@ class MainWindow(QMainWindow):
             self.status_badge.update_style(Colors.WARNING, "중지중")
             self._relayout_header_account_card()
             self._sidebar_status_label.setText("중지중...")
+            self._save_resume_state("user_stop")
             self.is_running = False
             pipeline = self._active_pipeline or self.pipeline
             if pipeline is not None:
@@ -3675,6 +4014,7 @@ class MainWindow(QMainWindow):
             self.stop_upload()
         elif self.is_running and forced_relogin:
             self.stop_upload()
+        self._save_resume_state("window_close")
         self._closed = True
         self._browser_cancel.set()
         try:

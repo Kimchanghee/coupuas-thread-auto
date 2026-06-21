@@ -120,6 +120,25 @@ class ThreadsPlaywrightHelper:
                 return True
         return False
 
+    def _has_login_or_continue_prompt(self) -> bool:
+        """Return True when Threads is showing a login/continue gate."""
+        try:
+            prompt_patterns = (
+                "Threads에서 소통해보세요",
+                "Instagram으로 계속하기",
+                "사용자 이름으로 로그인",
+                "Continue with Instagram",
+                "Log in with Instagram",
+            )
+            for text in prompt_patterns:
+                if self.page.get_by_text(text).count() > 0:
+                    return True
+            if self.page.locator('a[href*="/login"], input[name="username"], input[type="password"]').count() > 0:
+                return True
+        except Exception:
+            return False
+        return False
+
     def check_login_status(self) -> bool:
         """Check login status with retries to reduce false negatives."""
         try:
@@ -128,6 +147,10 @@ class ThreadsPlaywrightHelper:
                     self.page.wait_for_load_state("domcontentloaded", timeout=3000)
                 except Exception:
                     pass
+
+                if self._has_login_or_continue_prompt():
+                    print("  not logged in (login/continue prompt detected)")
+                    return False
 
                 if self._has_auth_cookie():
                     print("  로그인 확인 (세션 쿠키 감지)")
@@ -155,6 +178,9 @@ class ThreadsPlaywrightHelper:
                     time.sleep(1.2)
 
             if self._has_auth_cookie():
+                if self._has_login_or_continue_prompt():
+                    print("  not logged in (login/continue prompt detected)")
+                    return False
                 print("  로그인 확인 (재시도 후 쿠키 감지)")
                 return True
 
@@ -524,6 +550,10 @@ class ThreadsPlaywrightHelper:
                 'a[aria-label*="New"]',
                 'a[href*="compose"]',
                 'button[aria-label*="New"]',
+                'div[aria-label*="Create"]',
+                'div[aria-label*="만들기"]',
+                'button[aria-label*="Create"]',
+                'button[aria-label*="만들기"]',
                 'a[role="link"]:has-text("+")',
                 # 좌표 기반 fallback (왼쪽 사이드바 중간쯤)
             ]
@@ -538,7 +568,28 @@ class ThreadsPlaywrightHelper:
 
             # Fallback: 좌표 클릭 (x=30, y=460 normalized)
             print("  선택자 실패, 좌표로 시도...")
-            self.page.mouse.click(30, 460)
+            try:
+                clicked = self.page.evaluate(
+                    """() => {
+                        const labels = ['만들기', 'Create', 'New thread', '새 스레드'];
+                        const elements = Array.from(document.querySelectorAll('div[role="button"], button, a'));
+                        const target = elements.find((el) => {
+                            const text = `${el.innerText || ''} ${el.getAttribute('aria-label') || ''}`.trim();
+                            return labels.some((label) => text.includes(label));
+                        });
+                        if (!target) return false;
+                        target.click();
+                        return true;
+                    }"""
+                )
+                if clicked:
+                    print("  새 스레드 버튼 클릭 완료 (text fallback)")
+                    time.sleep(2)
+                    return True
+            except Exception as text_click_error:
+                print(f"  text fallback 클릭 실패: {text_click_error}")
+
+            self.page.mouse.click(38, 415)
             time.sleep(2)
             return True
 

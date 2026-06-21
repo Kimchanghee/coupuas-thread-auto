@@ -1,3 +1,4 @@
+import json
 import queue
 import threading
 from types import SimpleNamespace
@@ -108,6 +109,9 @@ def test_upload_queue_skips_links_already_in_history(monkeypatch):
         _log_user_activity=lambda *args, **kwargs: None,
         _is_dev_quota_bypass_enabled=lambda: True,
         _is_work_allowed=MainWindow._is_work_allowed,
+        _wait_for_resume_interval_if_needed=lambda log: None,
+        _mark_resume_item=lambda *args, **kwargs: None,
+        _set_resume_next_allowed_at=lambda *args, **kwargs: None,
     )
 
     MainWindow._run_upload_queue(fake_self, 30, {"api_key": "", "profile_dir": "test"}, pipeline)
