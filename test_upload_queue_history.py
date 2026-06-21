@@ -137,3 +137,14 @@ def test_failed_history_records_do_not_count_as_uploaded(tmp_path):
 
     assert history.is_uploaded("https://example.com/product/1?other=value")
     assert history.get_stats() == {"total": 2, "success": 1, "failed": 1}
+
+
+def test_validated_api_key_resolution_does_not_fallback_to_failed_key(monkeypatch):
+    import src.main_window as main_window
+
+    monkeypatch.setattr(main_window, "select_working_gemini_api_key", lambda validate=True: "")
+    monkeypatch.setattr(main_window.config, "get_gemini_api_keys", lambda: ["expired-key-value"], raising=False)
+    monkeypatch.setattr(main_window.config, "gemini_api_key", "legacy-expired-key", raising=False)
+
+    assert MainWindow._resolve_runtime_gemini_api_key(object(), validate=True) == ""
+    assert MainWindow._resolve_runtime_gemini_api_key(object(), validate=False) == "expired-key-value"

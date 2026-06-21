@@ -2094,10 +2094,10 @@ class MainWindow(QMainWindow):
 
         config.load()
         interval = max(int(interval or config.upload_interval or 60), 30)
-        api_key = self._resolve_runtime_gemini_api_key(validate=False)
+        api_key = self._resolve_runtime_gemini_api_key(validate=True)
         if not api_key or len(api_key.strip()) < 10:
             self._log_user_activity("batch_start_blocked", "reason=invalid_runtime_api_key", level="WARNING")
-            show_error(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
+            show_error(self, "설정 필요", "Gemini API 키가 없거나 만료되었습니다. 설정에서 유효한 키를 저장한 뒤 다시 시작하세요.")
             return False
 
         self._log_user_activity("batch_start_confirmed", f"links={len(link_data)}; interval={interval}; source={source}")
@@ -2224,6 +2224,8 @@ class MainWindow(QMainWindow):
         key = str(select_working_gemini_api_key(validate=validate) or "").strip()
         if key:
             return key
+        if validate:
+            return ""
         keys = []
         if hasattr(config, "get_gemini_api_keys"):
             try:
@@ -3143,11 +3145,11 @@ class MainWindow(QMainWindow):
             show_warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
             return
 
-        api_key = self._resolve_runtime_gemini_api_key(validate=False)
+        api_key = self._resolve_runtime_gemini_api_key(validate=True)
         if not api_key or len(api_key.strip()) < 10:
             self._log_user_activity("batch_start_blocked", "reason=invalid_runtime_api_key", level="WARNING")
             logger.warning("업로드 시작 차단: API 키가 유효하지 않습니다")
-            show_error(self, "설정 필요", "설정에서 유효한 Gemini API 키를 설정하세요.")
+            show_error(self, "설정 필요", "Gemini API 키가 없거나 만료되었습니다. 설정에서 유효한 키를 저장한 뒤 다시 시작하세요.")
             return
 
         link_data = self._extract_links(content)
@@ -3696,9 +3698,23 @@ class MainWindow(QMainWindow):
                             auth_client.release_reserved_work(reserved_work_id)
                         except Exception:
                             logger.exception("업로드 예외 처리 중 예약 작업량 해제 실패")
+                    exc_text = str(exc)
+                    browser_blocker_tokens = (
+                        "Target page, context or browser has been closed",
+                        "Threads 접속 실패",
+                        "browser has been closed",
+                        "context has been closed",
+                    )
+                    if any(token in exc_text for token in browser_blocker_tokens):
+                        results["cancelled"] = True
+                        self._mark_resume_item(url, "pending", product_name, exc_text)
+                        log(f"Threads 브라우저 상태 확인 필요: {exc_text[:120]}. 현재 항목을 보존하고 중단합니다.")
+                        self.signals.step_update.emit(2, "error")
+                        self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
+                        break
                     results["failed"] += 1
-                    self._mark_resume_item(url, "failed", product_name, str(exc))
-                    log(f"업로드 오류: {str(exc)[:80]}")
+                    self._mark_resume_item(url, "failed", product_name, exc_text)
+                    log(f"업로드 오류: {exc_text[:80]}")
                     self.signals.step_update.emit(2, "error")
                     self.signals.link_status.emit(url, "실패", product_name)
 
