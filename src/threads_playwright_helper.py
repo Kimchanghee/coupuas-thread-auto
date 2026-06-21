@@ -537,6 +537,49 @@ class ThreadsPlaywrightHelper:
 
     # ========== 쓰레드 작성 ==========
 
+    def _compose_editor_available(self) -> bool:
+        """Return True when a Threads compose editor is visible."""
+        try:
+            if self.page.locator('textarea, div[contenteditable="true"]').count() > 0:
+                return True
+
+            post_button = self.page.locator(
+                'div[role="button"]:has-text("게시"), '
+                'div[role="button"]:has-text("Post"), '
+                'button:has-text("게시"), '
+                'button:has-text("Post")'
+            ).count()
+            dialog = self.page.locator('div[role="dialog"], form').count()
+            return post_button > 0 and dialog > 0
+        except Exception:
+            return False
+
+    def _open_compose_directly(self) -> bool:
+        """Open the Threads compose surface through stable direct routes."""
+        route_paths = ("/intent/post", "/compose")
+        for path in route_paths:
+            try:
+                goto_threads_with_fallback(
+                    self.page,
+                    path=path,
+                    timeout=15000,
+                    retries_per_url=1,
+                )
+                time.sleep(2)
+
+                if self._has_login_or_continue_prompt():
+                    print(f"  직접 작성 경로 로그인 화면 감지 ({path})")
+                    self.last_error = "login_prompt"
+                    return False
+
+                if self._compose_editor_available():
+                    print(f"  새 스레드 작성창 열림 (direct {path})")
+                    return True
+            except Exception as exc:
+                print(f"  직접 작성 경로 실패 ({path}): {str(exc)[:120]}")
+
+        return False
+
     def click_new_thread(self) -> bool:
         """
         New thread 버튼 클릭
@@ -554,6 +597,16 @@ class ThreadsPlaywrightHelper:
                 'div[aria-label*="만들기"]',
                 'button[aria-label*="Create"]',
                 'button[aria-label*="만들기"]',
+                'a[aria-label*="Create"]',
+                'a[aria-label*="만들기"]',
+                'a[aria-label*="Write"]',
+                'a[aria-label*="작성"]',
+                'a[aria-label*="새"]',
+                'div[aria-label*="작성"]',
+                'button[aria-label*="작성"]',
+                'div[aria-label*="새"]',
+                'button[aria-label*="새"]',
+                'a[href*="intent/post"]',
                 'a[role="link"]:has-text("+")',
                 # 좌표 기반 fallback (왼쪽 사이드바 중간쯤)
             ]
@@ -588,6 +641,10 @@ class ThreadsPlaywrightHelper:
                     return True
             except Exception as text_click_error:
                 print(f"  text fallback 클릭 실패: {text_click_error}")
+
+            print("  직접 작성 경로로 전환...")
+            if self._open_compose_directly():
+                return True
 
             self.last_error = "compose_button_not_found"
             print("  새 스레드 버튼을 찾지 못해 좌표 클릭 없이 중단")
