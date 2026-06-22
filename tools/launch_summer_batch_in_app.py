@@ -16,6 +16,10 @@ from PyQt6.QtWidgets import QApplication
 
 os.environ.setdefault("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "1")
 os.environ.setdefault("THREAD_AUTO_LOGIN_WAIT_SECONDS", str(24 * 60 * 60))
+os.environ.setdefault("THREAD_AUTO_DISABLE_ACTIVITY_LOGS", "1")
+os.environ.setdefault("THREAD_AUTO_DISABLE_AUTO_UPDATE", "1")
+os.environ.setdefault("THREAD_AUTO_DISABLE_HEARTBEAT", "1")
+os.environ.setdefault("THREAD_AUTO_STDERR_PRINTS_INFO", "1")
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -30,6 +34,7 @@ from src.theme import Colors, Typography, resolve_fonts  # noqa: E402
 
 logger = logging.getLogger(__name__)
 QUEUE_PATH = Path.home() / ".shorts_thread_maker" / "summer_coupang_thread_queue_20260622.json"
+RESUME_PATH = Path.home() / ".shorts_thread_maker" / "upload_resume_queue.json"
 INTERVAL_SECONDS = 4 * 60 * 60
 
 
@@ -49,6 +54,49 @@ def _load_pending_items() -> list[tuple[str, str]]:
     return items
 
 
+def _load_resume_items() -> tuple[list[tuple[str, str]], int, float | None]:
+    if not RESUME_PATH.exists():
+        return [], INTERVAL_SECONDS, None
+
+    try:
+        payload = json.loads(RESUME_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("저장된 업로드 대기열을 읽지 못했습니다.")
+        return [], INTERVAL_SECONDS, None
+
+    pending: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for raw_item in payload.get("items", []):
+        if not isinstance(raw_item, dict):
+            continue
+        status = str(raw_item.get("status") or "").strip().lower()
+        if status not in {"pending", "running"}:
+            continue
+        url = str(raw_item.get("url") or "").strip()
+        if not url or url in seen:
+            continue
+        title = str(
+            raw_item.get("keyword")
+            or raw_item.get("title")
+            or raw_item.get("product_title")
+            or "여름 추천 상품"
+        ).strip()
+        pending.append((url, title))
+        seen.add(url)
+
+    try:
+        interval = max(int(payload.get("interval") or INTERVAL_SECONDS), 30)
+    except (TypeError, ValueError):
+        interval = INTERVAL_SECONDS
+
+    try:
+        next_allowed_at = float(payload.get("next_allowed_at")) if payload.get("next_allowed_at") else None
+    except (TypeError, ValueError):
+        next_allowed_at = None
+
+    return pending, interval, next_allowed_at
+
+
 def _clear_queue(window: MainWindow) -> None:
     while True:
         try:
@@ -63,10 +111,21 @@ def _start_prepared_batch(window: MainWindow) -> None:
     config.save()
     window._load_settings()
 
-    link_data = _load_pending_items()
-    if len(link_data) != 50:
-        window.signals.log.emit(f"준비된 여름 상품 대기열이 50개가 아닙니다: {len(link_data)}개")
-        return
+    resume_items, resume_interval, resume_next_allowed_at = _load_resume_items()
+    if resume_items:
+        link_data = resume_items
+        interval = resume_interval
+        next_allowed_at = resume_next_allowed_at
+        source = "summer_batch_resume_launcher"
+        window.signals.log.emit(f"저장된 여름 상품 대기열 {len(link_data)}개를 이어서 시작합니다.")
+    else:
+        link_data = _load_pending_items()
+        interval = INTERVAL_SECONDS
+        next_allowed_at = None
+        source = "summer_batch_launcher"
+        if len(link_data) != 50:
+            window.signals.log.emit(f"준비된 여름 상품 대기열이 50개가 아닙니다: {len(link_data)}개")
+            return
 
     window._switch_page(0)
     try:
@@ -75,13 +134,14 @@ def _start_prepared_batch(window: MainWindow) -> None:
         pass
     if window.start_link_data_batch(
         link_data,
-        interval=INTERVAL_SECONDS,
-        source="summer_batch_launcher",
+        interval=interval,
+        source=source,
+        next_allowed_at=next_allowed_at,
     ):
-        window.signals.log.emit(f"여름 상품 50개 대기열 시작됨 - 업로드 간격 {INTERVAL_SECONDS}초")
+        window.signals.log.emit(f"여름 상품 {len(link_data)}개 대기열 시작됨 - 업로드 간격 {interval}초")
         window._log_user_activity(
             "summer_batch_launcher_started",
-            f"links={len(link_data)}; interval={INTERVAL_SECONDS}",
+            f"links={len(link_data)}; interval={interval}; source={source}",
         )
     return
 

@@ -3812,6 +3812,19 @@ class MainWindow(QMainWindow):
         """Send heartbeat and reflect server connectivity in the UI."""
         logger.debug("하트비트 실행; is_running=%s", self.is_running)
         try:
+            if os.getenv("THREAD_AUTO_DISABLE_HEARTBEAT", "").strip() == "1":
+                self._online_dot.setStyleSheet(
+                    f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
+                )
+                self._connection_label.setText("로컬 실행")
+                self._connection_label.setStyleSheet(
+                    f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
+                )
+                self._server_label.setText("서버 연결: 로컬 모드")
+                if not self.is_running:
+                    self.status_label.setText("로컬 실행")
+                return
+
             from src import auth_client
 
             if not auth_client.is_logged_in():
@@ -3948,6 +3961,9 @@ class MainWindow(QMainWindow):
 
     def _check_for_updates_silent(self):
         """백그라운드 자동 업데이트 체크 (알림만 표시)."""
+        if os.getenv("THREAD_AUTO_DISABLE_AUTO_UPDATE", "").strip() == "1":
+            logger.info("백그라운드 업데이트 확인 건너뜀: THREAD_AUTO_DISABLE_AUTO_UPDATE=1")
+            return
         logger.info("백그라운드 업데이트 확인 시작")
         try:
             from src.auto_updater import AutoUpdater

@@ -88,6 +88,10 @@ _TOKEN_TTL_DEFAULT_SECONDS = 43200
 _TOKEN_TTL_MIN_SECONDS = 300
 _TOKEN_TTL_MAX_SECONDS = 604800
 _DEFAULT_TLS_PIN_SHA256 = set()
+_LOG_ACTION_FAILURE_LOCK = threading.Lock()
+_LOG_ACTION_FAILURE_SUPPRESS_UNTIL = 0.0
+_LOG_ACTION_FAILURE_COUNT = 0
+_LOG_ACTION_FAILURE_SUPPRESS_SECONDS = 300.0
 
 
 def _resolve_token_ttl_seconds() -> int:
@@ -1609,21 +1613,44 @@ def refresh_account_state(current_task: str = "", app_version: str = "") -> Dict
 
 
 def log_action(action: str, content: str = None, level: str = "INFO") -> None:
+    if os.getenv("THREAD_AUTO_DISABLE_ACTIVITY_LOGS", "").strip() == "1":
+        return
     if _check_api_url():
         return
     _, token = _get_session_user_and_token()
     if not token:
         return
 
+    global _LOG_ACTION_FAILURE_COUNT
+    global _LOG_ACTION_FAILURE_SUPPRESS_UNTIL
+
+    now = time.monotonic()
+    with _LOG_ACTION_FAILURE_LOCK:
+        if now < _LOG_ACTION_FAILURE_SUPPRESS_UNTIL:
+            return
+
     try:
-        _session.post(
+        resp = _session.post(
             f"{API_SERVER_URL}/user/logs",
             json={"level": level, "action": action, "content": content},
             headers={"Authorization": f"Bearer {token}"},
             timeout=2.0,
         )
+        if getattr(resp, "status_code", 200) < 500:
+            with _LOG_ACTION_FAILURE_LOCK:
+                _LOG_ACTION_FAILURE_COUNT = 0
+                _LOG_ACTION_FAILURE_SUPPRESS_UNTIL = 0.0
     except Exception as e:
-        logger.debug("활동 로그 전송에 실패했습니다: %s", e)
+        with _LOG_ACTION_FAILURE_LOCK:
+            _LOG_ACTION_FAILURE_COUNT += 1
+            _LOG_ACTION_FAILURE_SUPPRESS_UNTIL = time.monotonic() + _LOG_ACTION_FAILURE_SUPPRESS_SECONDS
+            count = _LOG_ACTION_FAILURE_COUNT
+        logger.debug(
+            "활동 로그 전송에 실패했습니다(%s회). %.0f초 동안 재시도를 줄입니다: %s",
+            count,
+            _LOG_ACTION_FAILURE_SUPPRESS_SECONDS,
+            e,
+        )
 
 
 def get_saved_credentials() -> Optional[Dict[str, str]]:

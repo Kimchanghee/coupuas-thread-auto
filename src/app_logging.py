@@ -245,7 +245,10 @@ def _install_print_hook() -> None:
         try:
             if text:
                 if target in (sys.stderr, sys.__stderr__):
-                    stderr_logger.error(text)
+                    if os.getenv("THREAD_AUTO_STDERR_PRINTS_INFO", "").strip() == "1":
+                        stderr_logger.info(text)
+                    else:
+                        stderr_logger.error(text)
                 elif target in (None, sys.stdout, sys.__stdout__):
                     stdout_logger.info(text)
         except Exception:

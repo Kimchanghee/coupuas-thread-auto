@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import time
 
 import requests
 
@@ -215,6 +216,37 @@ def test_register_payload_supports_news_opt_in(monkeypatch):
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
     assert payload["ym_news_opt_in"] is True
+
+
+def test_log_action_can_be_disabled_by_environment(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "user-1"
+    auth_client._auth_state["token"] = "token-1"
+    auth_client._auth_state["token_issued_at"] = time.time()
+    session = _FakeSession(_FakeResponse(200, {}))
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setenv("THREAD_AUTO_DISABLE_ACTIVITY_LOGS", "1")
+
+    auth_client.log_action("test", "content")
+
+    assert session.calls == []
+
+
+def test_log_action_suppresses_retries_after_timeout(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "user-1"
+    auth_client._auth_state["token"] = "token-1"
+    auth_client._auth_state["token_issued_at"] = time.time()
+    auth_client._LOG_ACTION_FAILURE_COUNT = 0
+    auth_client._LOG_ACTION_FAILURE_SUPPRESS_UNTIL = 0.0
+    session = _SequenceSession([requests.Timeout("boom"), _FakeResponse(200, {})])
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.delenv("THREAD_AUTO_DISABLE_ACTIVITY_LOGS", raising=False)
+
+    auth_client.log_action("test", "first")
+    auth_client.log_action("test", "second")
+
+    assert len(session.calls) == 1
 
 
 def test_register_200_failure_with_error_object_returns_message(monkeypatch):
