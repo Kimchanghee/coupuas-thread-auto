@@ -19,6 +19,7 @@ os.environ.setdefault("THREAD_AUTO_LOGIN_WAIT_SECONDS", str(24 * 60 * 60))
 os.environ.setdefault("THREAD_AUTO_DISABLE_ACTIVITY_LOGS", "1")
 os.environ.setdefault("THREAD_AUTO_DISABLE_AUTO_UPDATE", "1")
 os.environ.setdefault("THREAD_AUTO_DISABLE_HEARTBEAT", "1")
+os.environ.setdefault("THREAD_AUTO_DISABLE_RESUME_PROMPT", "1")
 os.environ.setdefault("THREAD_AUTO_FORCE_SINGLE_POST", "1")
 os.environ.setdefault("THREAD_AUTO_STDERR_PRINTS_INFO", "1")
 

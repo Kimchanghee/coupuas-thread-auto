@@ -2048,6 +2048,8 @@ class MainWindow(QMainWindow):
             logger.debug("업로드 대기열 파일 삭제 실패", exc_info=True)
 
     def _prompt_resume_queue_if_needed(self) -> None:
+        if os.getenv("THREAD_AUTO_DISABLE_RESUME_PROMPT", "").strip() == "1":
+            return
         if self.is_running:
             return
         state = self._load_resume_state_file()
