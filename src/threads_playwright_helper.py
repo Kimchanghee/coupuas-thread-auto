@@ -754,27 +754,96 @@ class ThreadsPlaywrightHelper:
                 self.last_error = "textarea_not_empty"
                 return False
 
-            # 클릭 후 입력
-            textarea.click()
-            time.sleep(0.5)
+            def read_text() -> str:
+                try:
+                    return str(
+                        textarea.evaluate(
+                            """el => {
+                                if ('value' in el && el.value !== undefined && el.value !== null) {
+                                    return el.value;
+                                }
+                                return el.innerText || el.textContent || '';
+                            }"""
+                        )
+                        or ""
+                    )
+                except Exception:
+                    return ""
 
-            # 기존 내용 지우기
-            if trimmed_existing or not require_empty:
+            def content_matches(actual: str) -> bool:
+                expected = str(text or "").strip()
+                observed = str(actual or "").strip()
+                if not expected:
+                    return True
+                if observed == expected:
+                    return True
+                expected_compact = " ".join(expected.split())
+                observed_compact = " ".join(observed.split())
+                if expected_compact and expected_compact in observed_compact:
+                    return True
+                min_chars = max(8, int(len(expected_compact) * 0.8))
+                return len(observed_compact) >= min_chars
+
+            def clear_existing() -> None:
+                textarea.click()
+                time.sleep(0.2)
                 self.page.keyboard.press("Control+A")
                 self.page.keyboard.press("Backspace")
+                time.sleep(0.2)
 
-            # 텍스트 입력
+            # 1차: Playwright fill
+            clear_existing()
             textarea.fill(text)
             time.sleep(0.5)
+            after_text = read_text()
+            print(f"      Textarea[{index}] fill 후 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
+            if content_matches(after_text):
+                return True
 
-            # 입력 후 확인
+            # 2차: 실제 키보드 입력 경로. Threads contenteditable에서 fill 이벤트가
+            # React 상태에 반영되지 않는 경우가 있어 사용자 입력에 가까운 경로로 재시도한다.
+            print(f"      Textarea[{index}] fill 검증 실패, keyboard.insert_text 재시도")
+            clear_existing()
+            self.page.keyboard.insert_text(text)
+            time.sleep(0.8)
+            after_text = read_text()
+            print(f"      Textarea[{index}] insert_text 후 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
+            if content_matches(after_text):
+                return True
+
+            # 3차: DOM 입력 이벤트 fallback.
+            print(f"      Textarea[{index}] keyboard 입력 검증 실패, DOM input 이벤트 재시도")
             try:
-                after_text = textarea.evaluate("el => el.value || el.innerText || ''")
-                print(f"      Textarea[{index}]에 입력 완료 (입력 {len(text)}자, 현재 {len(str(after_text or ''))}자)")
-            except Exception:
-                print(f"      Textarea[{index}]에 입력 완료 ({len(text)}자)")
+                textarea.evaluate(
+                    """(el, value) => {
+                        el.focus();
+                        if ('value' in el && el.value !== undefined) {
+                            el.value = value;
+                        } else {
+                            el.textContent = value;
+                        }
+                        el.dispatchEvent(new InputEvent('input', {
+                            bubbles: true,
+                            cancelable: true,
+                            inputType: 'insertText',
+                            data: value
+                        }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }""",
+                    text,
+                )
+                time.sleep(0.8)
+            except Exception as js_error:
+                print(f"      Textarea[{index}] DOM 입력 이벤트 실패: {js_error}")
 
-            return True
+            after_text = read_text()
+            print(f"      Textarea[{index}] 최종 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
+            if content_matches(after_text):
+                return True
+
+            self.last_error = "textarea_input_not_applied"
+            print(f"      Textarea[{index}] 입력 검증 실패")
+            return False
 
         except Exception as e:
             print(f"      Textarea[{index}] 입력 실패: {e}")
@@ -1165,6 +1234,16 @@ class ThreadsPlaywrightHelper:
                 # 새 방식: dict 리스트
                 paragraphs = [post.get('text', '') for post in posts_data]
                 first_image = posts_data[0].get('image_path') if posts_data else None
+
+            paragraphs = [str(paragraph or "").strip() for paragraph in paragraphs if str(paragraph or "").strip()]
+            if not paragraphs:
+                print("  게시할 문단이 없습니다")
+                self.last_error = "empty_post_text"
+                return False
+
+            if os.getenv("THREAD_AUTO_FORCE_SINGLE_POST", "").strip() == "1" and len(paragraphs) > 1:
+                print(f"  단일 게시글 모드: {len(paragraphs)}개 문단을 하나로 합칩니다")
+                paragraphs = ["\n\n".join(paragraphs)]
 
             total = len(paragraphs)
             print(f"\n  Playwright로 {total}개 문단 스레드 작성 시작")
