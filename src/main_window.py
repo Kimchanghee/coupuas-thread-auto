@@ -1741,10 +1741,18 @@ class MainWindow(QMainWindow):
             color = Colors.SUCCESS
             tag = "성공"
             tag_color = Colors.SUCCESS
-        elif any(kw in lower_msg for kw in ("warn", "wait", "running", "start", "경고", "대기", "시작", "진행")):
+        elif any(kw in lower_msg for kw in ("warn", "warning", "경고", "주의")):
             color = Colors.WARNING
             tag = "경고"
             tag_color = Colors.WARNING
+        elif any(kw in lower_msg for kw in ("wait", "waiting", "대기")):
+            color = Colors.TEXT_SECONDARY
+            tag = "상태"
+            tag_color = Colors.INFO
+        elif any(kw in lower_msg for kw in ("running", "start", "progress", "processing", "시작", "진행", "처리")):
+            color = Colors.TEXT_SECONDARY
+            tag = "진행"
+            tag_color = Colors.INFO
 
         self.log_text.append(
             f'<span style="color:{Colors.TEXT_MUTED}">[{timestamp}]</span> '
