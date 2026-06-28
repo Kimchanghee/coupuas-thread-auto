@@ -44,12 +44,30 @@ for _env_path in _env_paths:
     if _env_path.exists() and not _env_path.is_symlink():
         load_dotenv(_env_path, override=False)
 
-_DEFAULT_API_SERVER_URL = "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app"
-API_SERVER_URL = (
+_DEFAULT_API_SERVER_URL = "https://project-user-dashboard-api.vercel.app"
+_DEPRECATED_API_SERVER_URLS = {
+    "https://13-124-7-65.nip.io",
+    "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
+    "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
+}
+_DEPRECATED_API_SERVER_HOSTS = {
+    (urlparse(url).hostname or "").lower()
+    for url in _DEPRECATED_API_SERVER_URLS
+}
+
+
+def _normalize_api_server_url(raw: str) -> str:
+    url = (raw or "").strip().rstrip("/")
+    if not url or url in _DEPRECATED_API_SERVER_URLS:
+        return _DEFAULT_API_SERVER_URL
+    return url
+
+
+API_SERVER_URL = _normalize_api_server_url(
     os.getenv("USER_DASHBOARD_API_URL")
     or os.getenv("API_SERVER_URL", "")
     or _DEFAULT_API_SERVER_URL
-).rstrip("/")
+)
 PROGRAM_TYPE = "stmaker"
 _DEFAULT_FREE_TRIAL_WORK_COUNT = 5
 _FIXED_PAYAPP_PLAN_ID = "stmaker_business_month"
@@ -199,7 +217,7 @@ def _read_api_host_lock() -> str:
         raw = _API_HOST_LOCK_FILE.read_text(encoding="utf-8").strip()
         if not raw:
             return ""
-        if raw.startswith("dpapi:"):
+        if raw.startswith(("dpapi:", "fernet:")):
             plain = _unprotect_secret(raw).strip().lower()
             if plain:
                 return plain
@@ -268,6 +286,13 @@ def _check_api_host_lock(parsed) -> Optional[str]:
             logger.warning("API 호스트 잠금 파일이 손상되어 기본 호스트 기준으로 자동 복구했습니다.")
             return None
         return "무결성 검증에 실패한 API 호스트 잠금 파일을 차단했습니다."
+
+    default_host = (urlparse(_DEFAULT_API_SERVER_URL).hostname or "").lower()
+    if locked_host in _DEPRECATED_API_SERVER_HOSTS and host == default_host:
+        if _write_api_host_lock(host):
+            logger.warning("기존 API 호스트 잠금 파일을 운영 Vercel 호스트로 자동 갱신했습니다.")
+            return None
+        return "API 호스트 잠금 정보 저장에 실패했습니다."
 
     if locked_host and locked_host != host:
         return "보안 정책으로 API 호스트 변경을 차단했습니다."
@@ -375,13 +400,15 @@ def _safe_json(resp: requests.Response) -> Dict[str, Any]:
 
 def _normalize_password_for_backend(password: str) -> str:
     """
-    일부 기존 계정 호환을 위해 짧은 비밀번호는 백엔드 형식으로 확장합니다.
+    Send the user's password as typed.
+
+    The shared dashboard backend owns password hashing. Older STMaker builds
+    sent SHA-256 text; the backend accepts that legacy storage shape as a
+    fallback so new clients can follow the same contract as SSMaker.
     """
     if not isinstance(password, str):
         password = str(password or "")
-    if re.fullmatch(r"[a-fA-F0-9]{64}", password):
-        return password.lower()
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return password
 
 
 def _localize_message(message: str) -> str:
