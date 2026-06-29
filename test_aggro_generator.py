@@ -1,4 +1,12 @@
 from src.services.aggro_generator import AggroGenerator
+from src.services.post_concepts import (
+    CONCEPT_BUYING_GUIDE,
+    CONCEPT_PROBLEM_SOLUTION,
+    CONCEPT_TODAY_ISSUE,
+    DEFAULT_POST_CONCEPT_ID,
+    get_post_concept,
+    normalize_concept_id,
+)
 
 
 def test_first_post_fallback_is_product_specific_and_link_free():
@@ -80,3 +88,51 @@ def test_awkward_copy_is_rejected():
     )
 
     assert cleaned == ""
+
+
+def test_post_concept_ids_are_normalized():
+    assert normalize_concept_id("2") == CONCEPT_TODAY_ISSUE
+    assert normalize_concept_id("3") == CONCEPT_PROBLEM_SOLUTION
+    assert normalize_concept_id("4") == CONCEPT_BUYING_GUIDE
+    assert normalize_concept_id("unknown") == DEFAULT_POST_CONCEPT_ID
+    assert get_post_concept("2").number == 2
+
+
+def test_today_issue_concept_fallback_uses_current_headline(monkeypatch):
+    monkeypatch.setattr(
+        "src.services.aggro_generator.fetch_korean_issue_headlines",
+        lambda: ["폭염 위기경보가 확대된다는 뉴스"],
+    )
+    generator = AggroGenerator()
+
+    text = generator.generate_aggro_text(
+        "휴대용 선풍기",
+        "휴대용 선풍기",
+        concept_id=CONCEPT_TODAY_ISSUE,
+    )
+
+    assert "폭염" in text
+    assert "http" not in text
+    assert len([line for line in text.splitlines() if line.strip()]) == 2
+
+
+def test_product_post_records_selected_concept(monkeypatch):
+    monkeypatch.setattr(
+        "src.services.aggro_generator.fetch_korean_issue_headlines",
+        lambda: ["장마와 폭염이 번갈아 온다는 뉴스"],
+    )
+    generator = AggroGenerator()
+
+    result = generator.generate_product_post(
+        {
+            "title": "여름 쿨매트",
+            "search_keywords": "여름 쿨매트",
+            "original_url": "https://link.coupang.com/a/test",
+            "image_path": None,
+        },
+        concept_id=CONCEPT_TODAY_ISSUE,
+    )
+
+    assert result["post_concept"] == CONCEPT_TODAY_ISSUE
+    assert "https://link.coupang.com/a/test" not in result["first_post"]["text"]
+    assert "https://link.coupang.com/a/test" in result["second_post"]["text"]

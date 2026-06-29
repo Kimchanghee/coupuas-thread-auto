@@ -4,16 +4,23 @@ from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
 
 class _FakeLocator:
-    def __init__(self, count: int = 0):
+    def __init__(self, count: int = 0, visible: bool = True):
         self._count = count
+        self._visible = visible
         self.clicked = False
 
     @property
     def first(self):
         return self
 
+    def nth(self, index: int):
+        return self
+
     def count(self) -> int:
         return self._count
+
+    def is_visible(self, timeout=None) -> bool:
+        return self._visible and self._count > 0
 
     def click(self):
         self.clicked = True
@@ -44,6 +51,9 @@ class _FakePage:
         self.url = url
         return None
 
+    def content(self):
+        return "hidden footer: 가입 / log in"
+
 
 def test_click_new_thread_falls_back_to_direct_intent_route(monkeypatch):
     monkeypatch.setenv("THREAD_AUTO_THREADS_BASE_URL", "https://www.threads.net")
@@ -54,3 +64,29 @@ def test_click_new_thread_falls_back_to_direct_intent_route(monkeypatch):
 
     assert helper.click_new_thread() is True
     assert page.goto_calls[0] == "https://www.threads.net/intent/post"
+
+
+class _PostingHelper(ThreadsPlaywrightHelper):
+    def click_new_thread(self) -> bool:
+        self.page.compose_open = True
+        return True
+
+    def type_in_textarea(self, text, index=0, require_empty=False) -> bool:
+        return True
+
+    def click_post_button(self) -> bool:
+        return True
+
+    def verify_post_success(self, first_paragraph: str = "") -> bool:
+        return True
+
+
+def test_create_thread_ignores_hidden_login_text_when_compose_is_open(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_PLAYWRIGHT_TOTAL_TIMEOUT_SEC", "30")
+    monkeypatch.setenv("THREAD_AUTO_FORCE_SINGLE_POST", "1")
+
+    page = _FakePage()
+    helper = _PostingHelper(page)
+
+    assert helper.create_thread_direct(["first post", "second post"]) is True
+    assert helper.last_error is None

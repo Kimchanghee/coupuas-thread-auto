@@ -12,6 +12,7 @@ from src.threads_playwright_helper import ThreadsPlaywrightHelper
 from src.threads_navigation import goto_threads_with_fallback
 from src.config import config
 from src.services.cancellation import OperationCancelled
+from src.services.post_concepts import normalize_concept_id
 
 
 class CancelledException(Exception):
@@ -545,9 +546,11 @@ class CoupangPartnersPipeline:
         self._check_cancelled()
 
         print("  [2단계] 게시글 문구 생성...")
+        post_concept = normalize_concept_id(getattr(config, "post_concept", ""))
         post_data = self.aggro_generator.generate_product_post(
             product_info,
             api_key=self._resolve_google_api_key(),
+            concept_id=post_concept,
         )
         post_data = self._normalize_second_post_disclosure(post_data)
         print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")

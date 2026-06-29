@@ -22,7 +22,7 @@ from urllib.parse import unquote, urlparse
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel,
     QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
-    QLineEdit, QSpinBox, QCheckBox, QButtonGroup,
+    QLineEdit, QSpinBox, QCheckBox, QButtonGroup, QComboBox,
     QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
     QScrollArea
 )
@@ -37,6 +37,7 @@ from src.gemini_keys import (
     save_configured_gemini_api_keys,
     select_working_gemini_api_key,
 )
+from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.theme import (Colors, Typography, Radius, Gradients,
                        global_stylesheet, badge_style, stat_card_style,
                        terminal_text_style,
@@ -1056,7 +1057,7 @@ class MainWindow(QMainWindow):
 
         # ── Upload Options Section ─────────────────────────
         sec2 = SectionFrame(page)
-        sec2.setGeometry(28, cy + 156, 944, 90)
+        sec2.setGeometry(28, cy + 156, 944, 150)
 
         sec2_title = QLabel("업로드 옵션", sec2)
         sec2_title.setGeometry(24, 16, 200, 22)
@@ -1065,9 +1066,33 @@ class MainWindow(QMainWindow):
         self.video_check = QCheckBox("이미지보다 영상 업로드 우선", sec2)
         self.video_check.setGeometry(24, 48, 400, 24)
 
+        concept_label = QLabel("글 작성 컨셉", sec2)
+        concept_label.setGeometry(24, 82, 120, 22)
+        concept_label.setStyleSheet(_field_lbl_style)
+
+        self.post_concept_combo = QComboBox(sec2)
+        self.post_concept_combo.setGeometry(144, 78, 250, 36)
+        for concept in POST_CONCEPTS:
+            self.post_concept_combo.addItem(concept.display_label, concept.id)
+        self.post_concept_combo.setStyleSheet(
+            f"QComboBox {{"
+            f"  background-color: {Colors.BG_INPUT};"
+            f"  color: {Colors.TEXT_PRIMARY};"
+            f"  border: 1px solid {Colors.BORDER};"
+            f"  border-radius: {Radius.MD};"
+            f"  padding: 7px 10px;"
+            f"  font-size: 10pt;"
+            f"}}"
+            f"QComboBox:focus {{ border-color: {Colors.ACCENT}; }}"
+        )
+
+        concept_hint = QLabel("선택한 컨셉으로 상품별 첫 번째 글 문구가 생성됩니다", sec2)
+        concept_hint.setGeometry(410, 85, 460, 18)
+        concept_hint.setStyleSheet(hint_text_style())
+
         # ── Save Button ────────────────────────────────────
         self._upload_save_btn = QPushButton("저장", page)
-        self._upload_save_btn.setGeometry(832, cy + 268, 140, 42)
+        self._upload_save_btn.setGeometry(832, cy + 328, 140, 42)
         self._upload_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._upload_save_btn.clicked.connect(self._save_settings)
 
@@ -2372,6 +2397,10 @@ class MainWindow(QMainWindow):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
+        if hasattr(self, "post_concept_combo"):
+            selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
+            index = self.post_concept_combo.findData(selected_concept)
+            self.post_concept_combo.setCurrentIndex(max(index, 0))
         self.username_edit.setText(config.instagram_username)
 
         # Keep top-right user status chips visually aligned with the reference app.
@@ -2508,6 +2537,8 @@ class MainWindow(QMainWindow):
 
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
+        if hasattr(self, "post_concept_combo"):
+            config.post_concept = normalize_concept_id(self.post_concept_combo.currentData())
         config.instagram_username = self.username_edit.text().strip()
         config.save()
 
@@ -2529,6 +2560,7 @@ class MainWindow(QMainWindow):
             "settings_saved",
             (
                 f"upload_interval={interval}; prefer_video={bool(config.prefer_video)}; "
+                f"post_concept={normalize_concept_id(getattr(config, 'post_concept', ''))}; "
                 f"username_set={bool(config.instagram_username)}; gemini_keys={len(key_values)}"
             ),
         )
@@ -3378,6 +3410,7 @@ class MainWindow(QMainWindow):
             self._log_user_activity("batch_runtime_log", message_text)
 
         agent = None
+        helper = None
         try:
             log(f"업로드 시작 (대기열: {self.link_queue.qsize()})")
             if quota_bypass:
@@ -3387,53 +3420,73 @@ class MainWindow(QMainWindow):
             api_key = str((worker_config or {}).get("api_key") or "")
             profile_dir = str((worker_config or {}).get("profile_dir") or ".threads_profile")
 
-            log("브라우저 시작 중...")
-            agent = ComputerUseAgent(
-                api_key=api_key,
-                headless=False,
-                profile_dir=profile_dir,
-            )
-            agent.start_browser()
-
-            try:
-                goto_threads_with_fallback(
-                    agent.page,
-                    path="/",
-                    timeout=15000,
-                    retries_per_url=1,
-                    logger=logger,
-                )
-                time.sleep(3)
-            except Exception:
-                logger.exception("Threads 초기 페이지 이동 실패")
-
-            helper = ThreadsPlaywrightHelper(agent.page)
-
-            if not helper.check_login_status():
-                try:
-                    login_wait_seconds = int(os.getenv("THREAD_AUTO_LOGIN_WAIT_SECONDS", "60") or "60")
-                except ValueError:
-                    login_wait_seconds = 60
-                login_wait_seconds = max(login_wait_seconds, 60)
-                login_wait_steps = max(1, login_wait_seconds // 3)
-                log(f"로그인 대기 시간 설정: {login_wait_seconds}초")
-                log(f"로그인이 필요합니다. {login_wait_seconds}초 안에 로그인해주세요.")
-                for wait_sec in range(login_wait_steps):
-                    time.sleep(3)
-                    remaining = max(0, login_wait_seconds - (wait_sec * 3))
-                    if wait_sec % 3 == 0:
-                        log(f"로그인 대기 중... {remaining}초 남음")
-                    if helper.check_login_status():
-                        log("로그인 확인됨")
-                        break
-                else:
-                    log(f"{login_wait_seconds}초 내 로그인되지 않아 업로드를 취소합니다.")
-                    log(f"로그인 대기 시간 초과: {login_wait_seconds}초")
-                    results["cancelled"] = True
-                    self.signals.finished.emit(results)
+            def close_agent_for_wait():
+                nonlocal agent, helper
+                if agent is None:
                     return
+                try:
+                    agent.save_session()
+                except Exception:
+                    logger.debug("대기 전 Threads 세션 저장 실패", exc_info=True)
+                try:
+                    agent.close()
+                except Exception:
+                    logger.debug("대기 전 Threads 브라우저 종료 실패", exc_info=True)
+                agent = None
+                helper = None
 
-            log("Threads 로그인 상태 확인 완료")
+            def ensure_threads_ready() -> bool:
+                nonlocal agent, helper
+                if agent is not None and helper is not None:
+                    return True
+
+                log("브라우저 시작 중...")
+                agent = ComputerUseAgent(
+                    api_key=api_key,
+                    headless=False,
+                    profile_dir=profile_dir,
+                )
+                agent.start_browser()
+
+                try:
+                    goto_threads_with_fallback(
+                        agent.page,
+                        path="/",
+                        timeout=15000,
+                        retries_per_url=1,
+                        logger=logger,
+                    )
+                    time.sleep(3)
+                except Exception:
+                    logger.exception("Threads 초기 페이지 이동 실패")
+
+                helper = ThreadsPlaywrightHelper(agent.page)
+
+                if not helper.check_login_status():
+                    try:
+                        login_wait_seconds = int(os.getenv("THREAD_AUTO_LOGIN_WAIT_SECONDS", "60") or "60")
+                    except ValueError:
+                        login_wait_seconds = 60
+                    login_wait_seconds = max(login_wait_seconds, 60)
+                    login_wait_steps = max(1, login_wait_seconds // 3)
+                    log(f"로그인 대기 시간 설정: {login_wait_seconds}초")
+                    log(f"로그인이 필요합니다. {login_wait_seconds}초 안에 로그인해주세요.")
+                    for wait_sec in range(login_wait_steps):
+                        time.sleep(3)
+                        remaining = max(0, login_wait_seconds - (wait_sec * 3))
+                        if wait_sec % 3 == 0:
+                            log(f"로그인 대기 중... {remaining}초 남음")
+                        if helper.check_login_status():
+                            log("로그인 확인됨")
+                            break
+                    else:
+                        log(f"{login_wait_seconds}초 내 로그인되지 않아 업로드를 취소합니다.")
+                        log(f"로그인 대기 시간 초과: {login_wait_seconds}초")
+                        close_agent_for_wait()
+                        return False
+
+                log("Threads 로그인 상태 확인 완료")
+                return True
 
             processed_count = 0
             empty_count = 0
@@ -3551,6 +3604,13 @@ class MainWindow(QMainWindow):
                 reservation_supported = False
 
                 try:
+                    if not ensure_threads_ready():
+                        results["cancelled"] = True
+                        self._mark_resume_item(url, "pending", product_name, "threads_login_required")
+                        self.signals.step_update.emit(2, "error")
+                        self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
+                        break
+
                     goto_threads_with_fallback(
                         agent.page,
                         path="/",
@@ -3733,6 +3793,7 @@ class MainWindow(QMainWindow):
 
                 if not self._stop_event.is_set() and not self.link_queue.empty():
                     self._set_resume_next_allowed_at(time.time() + interval)
+                    close_agent_for_wait()
                     log(f"다음 항목까지 {_format_interval(interval)} 대기")
                     for sec in range(interval):
                         if self._stop_event.is_set():

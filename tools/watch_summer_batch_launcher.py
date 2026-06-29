@@ -24,6 +24,20 @@ DEFAULT_CHECK_INTERVAL_SECONDS = 60
 LOGGER = logging.getLogger("summer_batch_watchdog")
 
 
+def _hidden_subprocess_kwargs() -> dict[str, Any]:
+    """Return subprocess options that keep helper probes off the desktop."""
+    if os.name != "nt":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        "startupinfo": startupinfo,
+    }
+
+
 def load_resume_payload(path: Path = RESUME_PATH) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -57,6 +71,7 @@ def _run_powershell(script: str) -> str:
         text=True,
         encoding="utf-8",
         errors="replace",
+        **_hidden_subprocess_kwargs(),
     )
     if result.returncode != 0:
         LOGGER.warning("PowerShell probe failed: %s", result.stderr.strip())
@@ -101,7 +116,7 @@ def _launcher_env() -> dict[str, str]:
 def start_launcher() -> subprocess.Popen[Any]:
     creationflags = 0
     if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
     return subprocess.Popen(
         [str(_pythonw_executable()), str(LAUNCHER_PATH)],
         cwd=str(ROOT),

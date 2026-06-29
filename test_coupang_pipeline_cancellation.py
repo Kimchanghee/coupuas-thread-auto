@@ -33,9 +33,10 @@ class _ImageSearch:
 class _AggroGenerator:
     COUPANG_DISCLOSURE = "[파트너스 활동]"
 
-    def generate_product_post(self, product_info, api_key=""):
+    def generate_product_post(self, product_info, api_key="", concept_id=None):
         assert product_info["title"] == "테스트 상품"
         assert api_key == "test-key"
+        assert concept_id
         return {
             "first_post": {"text": "첫 번째 게시글"},
             "second_post": {"text": "두 번째 게시글"},

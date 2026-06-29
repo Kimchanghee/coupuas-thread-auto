@@ -9,6 +9,7 @@ from pathlib import Path
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
+from src.services.post_concepts import DEFAULT_POST_CONCEPT_ID, normalize_concept_id
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,7 @@ class Config:
         self.prefer_video = bool(data.get("prefer_video", True))
         self.allow_ai_fallback = bool(data.get("allow_ai_fallback", False))
         self.instruction = str(data.get("instruction", "") or "")
+        self.post_concept = normalize_concept_id(data.get("post_concept"))
         self.tutorial_shown = bool(data.get("tutorial_shown", False))
 
     def _set_defaults(self):
@@ -97,6 +99,7 @@ class Config:
         self.prefer_video = True
         self.allow_ai_fallback = False
         self.instruction = ""
+        self.post_concept = DEFAULT_POST_CONCEPT_ID
         self.tutorial_shown = False
 
     def _load_secrets(self):
@@ -193,6 +196,7 @@ class Config:
                 "prefer_video": self.prefer_video,
                 "allow_ai_fallback": self.allow_ai_fallback,
                 "instruction": self.instruction,
+                "post_concept": normalize_concept_id(getattr(self, "post_concept", "")),
                 "tutorial_shown": self.tutorial_shown,
             }
             try:

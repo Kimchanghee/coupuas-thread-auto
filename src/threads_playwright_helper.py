@@ -120,6 +120,32 @@ class ThreadsPlaywrightHelper:
                 return True
         return False
 
+    def _locator_has_visible_match(self, locator, max_matches: int = 5) -> bool:
+        """Return True when a Playwright locator has at least one visible match."""
+        try:
+            count = locator.count()
+        except Exception:
+            return False
+
+        for index in range(min(count, max_matches)):
+            try:
+                item = locator.nth(index)
+            except Exception:
+                item = locator
+
+            try:
+                if item.is_visible(timeout=500):
+                    return True
+            except TypeError:
+                try:
+                    if item.is_visible():
+                        return True
+                except Exception:
+                    continue
+            except Exception:
+                continue
+        return False
+
     def _has_login_or_continue_prompt(self) -> bool:
         """Return True when Threads is showing a login/continue gate."""
         try:
@@ -131,9 +157,32 @@ class ThreadsPlaywrightHelper:
                 "Log in with Instagram",
             )
             for text in prompt_patterns:
-                if self.page.get_by_text(text).count() > 0:
+                if self._locator_has_visible_match(self.page.get_by_text(text)):
                     return True
-            if self.page.locator('a[href*="/login"], input[name="username"], input[type="password"]').count() > 0:
+
+            login_inputs = self.page.locator(
+                'input[name="username"], input[type="password"], input[autocomplete*="username"]'
+            )
+            if self._locator_has_visible_match(login_inputs):
+                return True
+
+            url = str(self.page.url or "").lower()
+            if "login" in url or "/accounts/" in url:
+                login_actions = self.page.locator(
+                    'a[href*="/login"], button:has-text("Log in"), button:has-text("로그인"), '
+                    'div[role="button"]:has-text("Log in"), div[role="button"]:has-text("로그인")'
+                )
+                if self._locator_has_visible_match(login_actions):
+                    return True
+
+            dialog_login_actions = self.page.locator(
+                'div[role="dialog"] a[href*="/login"], '
+                'div[role="dialog"] button:has-text("Log in"), '
+                'div[role="dialog"] button:has-text("로그인"), '
+                'div[role="dialog"] div[role="button"]:has-text("Log in"), '
+                'div[role="dialog"] div[role="button"]:has-text("로그인")'
+            )
+            if self._locator_has_visible_match(dialog_login_actions):
                 return True
         except Exception:
             return False
@@ -1261,12 +1310,17 @@ class ThreadsPlaywrightHelper:
             if not self.click_new_thread():
                 return False
 
-            # 로그인 팝업 체크
+            # 로그인 팝업 체크. 전체 HTML 문자열에는 로그인된 화면에서도 가입/로그인
+            # 문구가 남을 수 있으므로 실제 작성창과 보이는 게이트만 확인한다.
             time.sleep(1)
-            if "가입" in self.page.content() or "log in" in self.page.content().lower():
-                print("  로그인 팝업 감지, 게시를 중단합니다")
-                self.last_error = "login_popup"
-                return False
+            if not self._compose_editor_available() and self._has_login_or_continue_prompt():
+                print("  로그인 팝업 감지, 닫기 후 작성창을 다시 확인합니다")
+                self.dismiss_login_popup()
+                time.sleep(1)
+                if not self._compose_editor_available():
+                    print("  로그인 팝업 감지, 게시를 중단합니다")
+                    self.last_error = "login_popup"
+                    return False
 
             # 2. 첫 번째 문단 입력
             if is_timed_out("before_first_textarea"):

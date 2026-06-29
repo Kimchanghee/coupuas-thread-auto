@@ -32,6 +32,7 @@ from src.app_logging import setup_logging  # noqa: E402
 from src.config import config  # noqa: E402
 from src.hidpi import center_window, configure_high_dpi  # noqa: E402
 from src.main_window import MainWindow  # noqa: E402
+from src.services.post_concepts import CONCEPT_TODAY_ISSUE  # noqa: E402
 from src.theme import Colors, Typography, resolve_fonts  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,7 @@ def _clear_queue(window: MainWindow) -> None:
 def _start_prepared_batch(window: MainWindow) -> None:
     config.load()
     config.upload_interval = INTERVAL_SECONDS
+    config.post_concept = CONCEPT_TODAY_ISSUE
     config.save()
     window._load_settings()
 

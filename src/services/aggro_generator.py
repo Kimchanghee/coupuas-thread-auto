@@ -7,6 +7,17 @@ import os
 import re
 from typing import Dict, List, Optional
 
+from src.services.post_concepts import (
+    CONCEPT_BUYING_GUIDE,
+    CONCEPT_PROBLEM_SOLUTION,
+    CONCEPT_TODAY_ISSUE,
+    DEFAULT_POST_CONCEPT_ID,
+    format_current_issue_context,
+    get_post_concept,
+    normalize_concept_id,
+)
+from src.services.trending_news import fetch_korean_issue_headlines
+
 
 class AggroGenerator:
     """Create ad-like short copy and multi-post payloads."""
@@ -150,8 +161,30 @@ class AggroGenerator:
         return candidates[0][:16]
 
     @classmethod
-    def _build_fallback_first_post(cls, title: str, keywords: str) -> str:
+    def _build_fallback_first_post(
+        cls,
+        title: str,
+        keywords: str,
+        concept_id: str | None = None,
+        issue_headlines: Optional[List[str]] = None,
+    ) -> str:
         token = cls._select_core_keyword(title, keywords)
+        concept_id = normalize_concept_id(concept_id or DEFAULT_POST_CONCEPT_ID)
+        if concept_id == CONCEPT_TODAY_ISSUE:
+            issue_hint = "오늘 이슈"
+            if issue_headlines:
+                issue_hint = " ".join(str(issue_headlines[0]).split())[:20]
+            hook = f"오늘 {issue_hint} 보다가 {token} 생각난 사람 꽤 있을 듯"
+            support = "뉴스보다 내 생활에 바로 닿는 쪽이라 더 눈에 들어옵니다"
+            return f"{cls._trim_line(hook, cls.MAX_HOOK_LENGTH)}\n{cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)}"
+        if concept_id == CONCEPT_PROBLEM_SOLUTION:
+            hook = f"{token}, 막상 필요할 때 없으면 제일 귀찮은 쪽"
+            support = "작은 불편 하나 줄이려는 사람한테 먼저 보이는 제품입니다"
+            return f"{cls._trim_line(hook, cls.MAX_HOOK_LENGTH)}\n{cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)}"
+        if concept_id == CONCEPT_BUYING_GUIDE:
+            hook = f"{token} 고를 때 은근히 놓치는 기준 하나"
+            support = "예쁜지보다 실제로 자주 쓰게 될지가 먼저 보입니다"
+            return f"{cls._trim_line(hook, cls.MAX_HOOK_LENGTH)}\n{cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)}"
         hook_templates = [
             f"🚗 에어컨을 켜도 차 안이 묘하게 답답할 때 있죠?",
             f"🌀 {token} 찾다 보면 색깔 때문에 망설여질 때도 있죠",
@@ -242,22 +275,47 @@ class AggroGenerator:
         return merged
 
     def generate_aggro_text(
-        self, product_title: str, product_keywords: str = "", api_key: str = ""
+        self,
+        product_title: str,
+        product_keywords: str = "",
+        api_key: str = "",
+        concept_id: str | None = None,
     ) -> str:
         """Generate engagement-oriented first post copy for Threads."""
         if api_key:
             self.set_api_key(api_key)
+
+        concept = get_post_concept(concept_id)
+        issue_headlines = (
+            fetch_korean_issue_headlines()
+            if concept.uses_current_issues
+            else []
+        )
+        issue_context = (
+            format_current_issue_context(issue_headlines)
+            if concept.uses_current_issues
+            else ""
+        )
 
         seed_text = str(product_title or product_keywords or "").strip()
         if not seed_text:
             seed_text = "추천 상품"
 
         if self._client is None:
-            return self._build_fallback_first_post(product_title, product_keywords)
+            return self._build_fallback_first_post(
+                product_title,
+                product_keywords,
+                concept.id,
+                issue_headlines,
+            )
 
         try:
             prompt = (
                 f"상품명: {seed_text}\n\n"
+                f"작성 컨셉: {concept.display_label} ({concept.short_label})\n"
+                f"{concept.description}\n"
+                f"{concept.prompt}\n\n"
+                f"{issue_context}\n\n"
                 "Threads 첫 번째 글에 들어갈 초강력 호기심 유발 문구 2줄을 작성해줘.\n"
                 "규칙:\n"
                 "- 이 글은 첫 번째 글이다. URL, 쿠팡 링크, 구매 링크, 광고 고지 문구는 절대 넣지 마\n"
@@ -289,7 +347,12 @@ class AggroGenerator:
             return merged
         except Exception as exc:
             print(f"  애그로 문구 생성 오류: {exc}")
-            return self._build_fallback_first_post(product_title, product_keywords)
+            return self._build_fallback_first_post(
+                product_title,
+                product_keywords,
+                concept.id,
+                issue_headlines,
+            )
 
     @classmethod
     def _build_second_post_text(cls, original_url: str, title: str, keywords: str) -> str:
@@ -302,7 +365,12 @@ class AggroGenerator:
         ]
         return "\n".join(lines)
 
-    def generate_product_post(self, product_info: dict, api_key: str = "") -> Dict[str, object]:
+    def generate_product_post(
+        self,
+        product_info: dict,
+        api_key: str = "",
+        concept_id: str | None = None,
+    ) -> Dict[str, object]:
         """Build 3-part post payload with media metadata."""
         title = str(product_info.get("title", "") or "")
         keywords = str(product_info.get("search_keywords", "") or "")
@@ -310,7 +378,15 @@ class AggroGenerator:
         image_path: Optional[str] = product_info.get("image_path")
         video_path: Optional[str] = product_info.get("video_path")
 
-        aggro_text = self.generate_aggro_text(title, keywords, api_key=api_key)
+        selected_concept_id = normalize_concept_id(
+            concept_id or product_info.get("post_concept") or DEFAULT_POST_CONCEPT_ID
+        )
+        aggro_text = self.generate_aggro_text(
+            title,
+            keywords,
+            api_key=api_key,
+            concept_id=selected_concept_id,
+        )
         media_path = video_path if video_path else image_path
 
         second_text = self._build_second_post_text(original_url, title, keywords)
@@ -333,6 +409,7 @@ class AggroGenerator:
             },
             "product_title": title,
             "original_url": original_url,
+            "post_concept": selected_concept_id,
         }
 
     def generate_batch(self, products: list, api_key: str = "") -> List[Dict[str, object]]:
