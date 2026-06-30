@@ -1071,6 +1071,7 @@ class MainWindow(QMainWindow):
         concept_label.setStyleSheet(_field_lbl_style)
 
         self.post_concept_combo = QComboBox(sec2)
+        self.post_concept_combo.setObjectName("uploadPostConceptCombo")
         self.post_concept_combo.setGeometry(144, 78, 250, 36)
         for concept in POST_CONCEPTS:
             self.post_concept_combo.addItem(concept.display_label, concept.id)
@@ -1084,6 +1085,9 @@ class MainWindow(QMainWindow):
             f"  font-size: 10pt;"
             f"}}"
             f"QComboBox:focus {{ border-color: {Colors.ACCENT}; }}"
+        )
+        self.post_concept_combo.currentIndexChanged.connect(
+            lambda _idx: self._sync_post_concept_combos(self.post_concept_combo)
         )
 
         concept_hint = QLabel("선택한 컨셉으로 상품별 첫 번째 글 문구가 생성됩니다", sec2)
@@ -1132,6 +1136,30 @@ class MainWindow(QMainWindow):
             "}"
             "QLineEdit:focus {"
             " border: 1px solid #E31639;"
+            "}"
+        )
+        _combo_style = (
+            "QComboBox {"
+            " background-color: #1A1A1A;"
+            " color: #FFFFFF;"
+            " border: 1px solid rgba(255, 255, 255, 0.05);"
+            " border-radius: 8px;"
+            " padding: 8px 12px;"
+            " font-size: 12px;"
+            " font-weight: 600;"
+            "}"
+            "QComboBox:focus {"
+            " border: 1px solid #E31639;"
+            "}"
+            "QComboBox::drop-down {"
+            " border: none;"
+            " width: 28px;"
+            "}"
+            "QComboBox QAbstractItemView {"
+            " background-color: #1A1A1A;"
+            " color: #FFFFFF;"
+            " border: 1px solid rgba(255, 255, 255, 0.08);"
+            " selection-background-color: #E31639;"
             "}"
         )
         _primary_btn_style = (
@@ -1348,7 +1376,40 @@ class MainWindow(QMainWindow):
 
         sy += 266
 
-        # ── Section 3: Gemini API 설정 (다중 키) ────────────
+        # ── Section 3: 글 작성 컨셉 ─────────────────────────
+        concept_sec = QFrame(content)
+        concept_sec.setGeometry(24, sy, 952, 132)
+        concept_sec.setFrameShape(QFrame.Shape.NoFrame)
+        concept_sec.setStyleSheet(_section_style)
+
+        concept_title = QLabel("글 작성 컨셉", concept_sec)
+        concept_title.setGeometry(24, 14, 220, 24)
+        concept_title.setStyleSheet(_section_title_style)
+
+        concept_label = QLabel("컨셉 선택", concept_sec)
+        concept_label.setGeometry(24, 48, 120, 20)
+        concept_label.setStyleSheet(_field_lbl_style)
+
+        self.settings_post_concept_combo = QComboBox(concept_sec)
+        self.settings_post_concept_combo.setObjectName("settingsPostConceptCombo")
+        self.settings_post_concept_combo.setGeometry(24, 72, 320, _control_h)
+        for concept in POST_CONCEPTS:
+            self.settings_post_concept_combo.addItem(concept.display_label, concept.id)
+        self.settings_post_concept_combo.setStyleSheet(_combo_style)
+        self.settings_post_concept_combo.currentIndexChanged.connect(
+            lambda _idx: self._sync_post_concept_combos(self.settings_post_concept_combo)
+        )
+
+        concept_desc = QLabel(
+            "선택한 컨셉으로 상품별 첫 번째 글 문구가 생성됩니다. 2번은 현재 이슈와 상품을 연결합니다.",
+            concept_sec,
+        )
+        concept_desc.setGeometry(368, 82, 540, 20)
+        concept_desc.setStyleSheet(_hint_lbl_style)
+
+        sy += 156
+
+        # ── Section 4: Gemini API 설정 (다중 키) ────────────
         self._settings_content = content
         self._settings_flow_start_y = sy
         self._settings_gap = 24
@@ -2368,6 +2429,20 @@ class MainWindow(QMainWindow):
 
         self._settings_content.setFixedHeight(sy + 24)
 
+    def _set_post_concept_combo_value(self, combo, concept_id):
+        selected_concept = normalize_concept_id(concept_id)
+        index = combo.findData(selected_concept)
+        previous_blocked = combo.blockSignals(True)
+        combo.setCurrentIndex(max(index, 0))
+        combo.blockSignals(previous_blocked)
+
+    def _sync_post_concept_combos(self, source_combo):
+        selected_concept = normalize_concept_id(source_combo.currentData())
+        for attr_name in ("post_concept_combo", "settings_post_concept_combo"):
+            combo = getattr(self, attr_name, None)
+            if combo is not None and combo is not source_combo:
+                self._set_post_concept_combo_value(combo, selected_concept)
+
     def _load_settings(self):
         """Load config values into widgets."""
         keys = []
@@ -2397,10 +2472,11 @@ class MainWindow(QMainWindow):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
-        if hasattr(self, "post_concept_combo"):
-            selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
-            index = self.post_concept_combo.findData(selected_concept)
-            self.post_concept_combo.setCurrentIndex(max(index, 0))
+        selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
+        for attr_name in ("post_concept_combo", "settings_post_concept_combo"):
+            combo = getattr(self, attr_name, None)
+            if combo is not None:
+                self._set_post_concept_combo_value(combo, selected_concept)
         self.username_edit.setText(config.instagram_username)
 
         # Keep top-right user status chips visually aligned with the reference app.
@@ -2537,8 +2613,9 @@ class MainWindow(QMainWindow):
 
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
-        if hasattr(self, "post_concept_combo"):
-            config.post_concept = normalize_concept_id(self.post_concept_combo.currentData())
+        concept_combo = getattr(self, "settings_post_concept_combo", None) or getattr(self, "post_concept_combo", None)
+        if concept_combo is not None:
+            config.post_concept = normalize_concept_id(concept_combo.currentData())
         config.instagram_username = self.username_edit.text().strip()
         config.save()
 

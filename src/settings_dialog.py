@@ -7,7 +7,7 @@ import re
 import threading
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QFrame, QSpinBox,
+    QPushButton, QCheckBox, QFrame, QSpinBox, QComboBox,
     QScrollArea, QWidget
 )
 from PyQt6.QtCore import Qt, QEvent
@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
 from src.app_icon import apply_window_icon
+from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.theme import (
     Colors, Radius, Spacing, Gradients, Typography,
     section_title_style, section_icon_style, header_title_style,
@@ -265,6 +266,18 @@ class SettingsDialog(QDialog):
         self.video_check = QCheckBox("이미지보다 영상 업로드 우선")
         layout.addWidget(self.video_check)
 
+        self.post_concept_combo = QComboBox()
+        self.post_concept_combo.setObjectName("settingsDialogPostConceptCombo")
+        for concept in POST_CONCEPTS:
+            self.post_concept_combo.addItem(concept.display_label, concept.id)
+        layout.addWidget(
+            FormField(
+                "글 작성 컨셉",
+                self.post_concept_combo,
+                "선택한 컨셉으로 상품별 첫 번째 글 문구를 생성합니다",
+            )
+        )
+
         self.content_layout.addWidget(section)
 
     def _build_threads_section(self):
@@ -333,6 +346,9 @@ class SettingsDialog(QDialog):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
+        selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
+        index = self.post_concept_combo.findData(selected_concept)
+        self.post_concept_combo.setCurrentIndex(max(index, 0))
         self.username_edit.setText(config.instagram_username)
 
     def _save_settings(self):
@@ -348,6 +364,7 @@ class SettingsDialog(QDialog):
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
+        config.post_concept = normalize_concept_id(self.post_concept_combo.currentData())
         config.instagram_username = self.username_edit.text().strip()
 
         config.save()
