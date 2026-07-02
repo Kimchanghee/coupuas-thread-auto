@@ -208,16 +208,18 @@ def _start_prepared_batch(window: MainWindow) -> None:
     )
 
 
-def _show_settings_for_verification(window: MainWindow) -> None:
+def _show_queue_for_verification(window: MainWindow) -> None:
     try:
-        config.load()
-        window._load_settings()
-        window._switch_page(2, source="summer_batch_show_settings")
+        window._switch_page(0, source="summer_batch_show_queue")
+        try:
+            window._sidebar_buttons[0].setChecked(True)
+        except Exception:
+            pass
         window.raise_()
         window.activateWindow()
-        logger.info("Settings page opened for visible concept verification.")
+        logger.info("Queue page opened for visible progress verification.")
     except Exception:
-        logger.exception("Failed to open settings page for verification.")
+        logger.exception("Failed to open queue page for verification.")
 
 
 def _configure_app() -> QApplication:
@@ -264,7 +266,7 @@ def main() -> int:
     app._main_window = window
 
     QTimer.singleShot(1500, lambda: _start_prepared_batch(window))
-    QTimer.singleShot(6500, lambda: _show_settings_for_verification(window))
+    QTimer.singleShot(6500, lambda: _show_queue_for_verification(window))
     return app.exec()
 
 

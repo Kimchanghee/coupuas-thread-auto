@@ -85,6 +85,7 @@ class Signals(QObject):
     log = pyqtSignal(str)
     status = pyqtSignal(str)
     progress = pyqtSignal(str)
+    run_state = pyqtSignal(dict)
     results = pyqtSignal(int, int)
     product = pyqtSignal(str, bool)
     finished = pyqtSignal(dict)
@@ -242,6 +243,7 @@ class MainWindow(QMainWindow):
         self._session_expiry_notified = False
         self._redirecting_to_login = False
         self._force_close_for_relogin = False
+        self._latest_run_state = {}
         self._init_activity_logger()
         logger.info("메인 윈도우 초기화 완료")
 
@@ -249,6 +251,7 @@ class MainWindow(QMainWindow):
         self.signals.log.connect(self._append_log)
         self.signals.status.connect(self._set_status)
         self.signals.progress.connect(self._set_progress)
+        self.signals.run_state.connect(self._set_run_state)
         self.signals.results.connect(self._set_results)
         self.signals.product.connect(self._add_product)
         self.signals.finished.connect(self._on_finished)
@@ -966,15 +969,57 @@ class MainWindow(QMainWindow):
         self.stop_btn.setProperty("class", "outline-danger")
         self.stop_btn.clicked.connect(self.stop_upload)
 
+        # ── Live Run State Banner ───────────────────────────
+        state_y = btn_y + 56
+        self._run_state_frame = QFrame(page)
+        self._run_state_frame.setGeometry(28, state_y, 944, 78)
+        self._run_state_frame.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {Colors.INFO_BG};"
+            f"  border: 1px solid {Colors.INFO_BORDER};"
+            f"  border-radius: {Radius.LG};"
+            f"}}"
+        )
+
+        self._run_state_title = QLabel("자동화 대기", self._run_state_frame)
+        self._run_state_title.setGeometry(18, 12, 160, 20)
+        self._run_state_title.setStyleSheet(
+            f"color: {Colors.INFO}; font-size: 9pt; font-weight: 800;"
+            " background: transparent;"
+        )
+
+        self._run_state_main = QLabel("아직 실행 중인 대기열이 없습니다.", self._run_state_frame)
+        self._run_state_main.setGeometry(18, 36, 420, 24)
+        self._run_state_main.setStyleSheet(
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 12pt; font-weight: 800;"
+            " background: transparent;"
+        )
+
+        self._run_state_detail = QLabel("링크를 넣고 자동화 시작을 누르면 현재 상태가 여기에 표시됩니다.", self._run_state_frame)
+        self._run_state_detail.setGeometry(456, 14, 456, 20)
+        self._run_state_detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._run_state_detail.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            " background: transparent;"
+        )
+
+        self._run_state_next = QLabel("다음 작업: --", self._run_state_frame)
+        self._run_state_next.setGeometry(456, 42, 456, 20)
+        self._run_state_next.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._run_state_next.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
+            " background: transparent;"
+        )
+
         # ── Status Table ───────────────────────────────────
         table_label = QLabel("작업 현황", page)
-        table_label.setGeometry(28, btn_y + 54, 200, 20)
+        table_label.setGeometry(28, state_y + 88, 200, 20)
         table_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
             " letter-spacing: 1px; background: transparent;"
         )
 
-        table_y = btn_y + 78
+        table_y = state_y + 112
         table_h = CONTENT_H - table_y - 16
 
         self.link_table = QTableWidget(page)
@@ -1827,14 +1872,14 @@ class MainWindow(QMainWindow):
             color = Colors.SUCCESS
             tag = "성공"
             tag_color = Colors.SUCCESS
-        elif any(kw in lower_msg for kw in ("warn", "warning", "경고", "주의")):
-            color = Colors.WARNING
-            tag = "경고"
-            tag_color = Colors.WARNING
         elif any(kw in lower_msg for kw in ("wait", "waiting", "대기")):
             color = Colors.TEXT_SECONDARY
             tag = "상태"
             tag_color = Colors.INFO
+        elif any(kw in lower_msg for kw in ("warn", "warning", "경고", "주의")):
+            color = Colors.WARNING
+            tag = "경고"
+            tag_color = Colors.WARNING
         elif any(kw in lower_msg for kw in ("running", "start", "progress", "processing", "시작", "진행", "처리")):
             color = Colors.TEXT_SECONDARY
             tag = "진행"
@@ -1876,6 +1921,146 @@ class MainWindow(QMainWindow):
                 min_interval_sec=0.1,
                 dedupe_key=f"progress:{message_text}",
             )
+
+    @staticmethod
+    def _safe_int(value, default=0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_clock(value) -> str:
+        timestamp = MainWindow._safe_float(value)
+        if timestamp is None or timestamp <= 0:
+            return "--"
+        try:
+            return datetime.fromtimestamp(timestamp).astimezone().strftime("%H:%M:%S")
+        except Exception:
+            return "--"
+
+    def _set_run_state(self, state: dict):
+        payload = dict(state or {})
+        self._latest_run_state = payload
+
+        phase = str(payload.get("phase") or "idle")
+        message = str(payload.get("message") or "").strip()
+        current_item = str(payload.get("current_item") or "").strip()
+        pending = self._safe_int(payload.get("pending"), 0)
+        total = self._safe_int(payload.get("total"), pending)
+        completed = self._safe_int(payload.get("completed"), max(total - pending, 0))
+        failed = self._safe_int(payload.get("failed"), 0)
+        next_allowed_at = payload.get("next_allowed_at")
+        remaining = self._safe_int(payload.get("remaining"), 0)
+        if remaining <= 0:
+            next_timestamp = self._safe_float(next_allowed_at)
+            if next_timestamp:
+                remaining = max(0, int(next_timestamp - time.time()))
+
+        if phase == "waiting":
+            title = "예약 대기 중"
+            main = f"다음 업로드까지 {_format_interval(remaining)}"
+            detail = f"남은 작업 {pending}개"
+            color = Colors.INFO
+            bg = Colors.INFO_BG
+            border = Colors.INFO_BORDER
+            sidebar_status = f"예약 대기 · {pending}개 남음"
+            progress_text = f"다음 {self._format_clock(next_allowed_at)}"
+        elif phase in {"processing", "uploading"}:
+            title = "현재 업로드 중"
+            main = current_item[:42] if current_item else (message or "항목 처리 중")
+            detail = message or f"대기열 {pending}개 남음"
+            color = Colors.WARNING
+            bg = Colors.WARNING_BG
+            border = Colors.WARNING_BORDER
+            sidebar_status = f"처리 중 · {pending}개 남음"
+            progress_text = "업로드 중"
+        elif phase == "running":
+            title = "자동화 실행 중"
+            main = message or f"대기열 {pending}개 준비"
+            detail = f"총 {total}개 · 4시간 간격"
+            color = Colors.WARNING
+            bg = Colors.WARNING_BG
+            border = Colors.WARNING_BORDER
+            sidebar_status = f"실행중 · {pending}개 대기"
+            progress_text = "실행중"
+        elif phase == "finished":
+            title = "작업 완료"
+            main = message or "대기열 작업이 종료되었습니다."
+            detail = f"성공 {completed} · 실패 {failed}"
+            color = Colors.SUCCESS
+            bg = Colors.SUCCESS_BG
+            border = Colors.SUCCESS_BORDER
+            sidebar_status = "완료"
+            progress_text = "완료"
+        elif phase in {"blocked", "error"}:
+            title = "확인 필요"
+            main = message or "자동화가 멈췄습니다."
+            detail = current_item[:48] if current_item else "로그를 확인하세요"
+            color = Colors.ERROR
+            bg = Colors.ERROR_BG
+            border = Colors.ERROR_BORDER
+            sidebar_status = "확인 필요"
+            progress_text = "확인 필요"
+        else:
+            title = "자동화 대기"
+            main = message or "아직 실행 중인 대기열이 없습니다."
+            detail = "링크를 넣고 자동화 시작을 누르면 현재 상태가 여기에 표시됩니다."
+            color = Colors.INFO
+            bg = Colors.INFO_BG
+            border = Colors.INFO_BORDER
+            sidebar_status = "대기중"
+            progress_text = ""
+
+        next_text = "다음 작업: --"
+        if phase == "waiting":
+            next_text = f"다음 작업: {self._format_clock(next_allowed_at)} · {_format_interval(remaining)} 남음"
+        elif current_item and phase in {"processing", "uploading"}:
+            next_text = f"현재 항목: {current_item[:52]}"
+        elif pending:
+            next_text = f"남은 작업: {pending}개"
+
+        self._run_state_frame.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {bg};"
+            f"  border: 1px solid {border};"
+            f"  border-radius: {Radius.LG};"
+            f"}}"
+        )
+        self._run_state_title.setText(title)
+        self._run_state_title.setStyleSheet(
+            f"color: {color}; font-size: 9pt; font-weight: 800; background: transparent;"
+        )
+        self._run_state_main.setText(main)
+        self._run_state_detail.setText(detail)
+        self._run_state_next.setText(next_text)
+
+        if total or pending:
+            self._progress_queue_label.setText(f"완료 {completed} / 총 {max(total, completed + pending)} · 남음 {pending}")
+        self._sidebar_status_label.setText(sidebar_status)
+        self.progress_label.setText(progress_text)
+        self.progress_label.setVisible(bool(progress_text))
+        self._statusbar_dot.setStyleSheet(
+            f"background-color: {color}; border-radius: 5px;"
+            f" border: 2px solid {border};"
+        )
+
+        self._log_user_activity(
+            "ui_run_state",
+            (
+                f"phase={phase}; pending={pending}; total={total}; "
+                f"next={next_allowed_at}; message={message[:120]}"
+            ),
+            min_interval_sec=0.5,
+            dedupe_key=f"run-state:{phase}:{pending}:{remaining // 60}:{message[:40]}",
+        )
 
     def _set_results(self, success, failed):
         total = success + failed
@@ -2117,7 +2302,7 @@ class MainWindow(QMainWindow):
             self._resume_next_allowed_at = value
         self._save_resume_state("next_allowed_at")
 
-    def _wait_for_resume_interval_if_needed(self, log) -> None:
+    def _wait_for_resume_interval_if_needed(self, log, total_links: int | None = None) -> None:
         try:
             wait_until = float(self._resume_next_allowed_at or 0)
         except (TypeError, ValueError):
@@ -2127,12 +2312,30 @@ class MainWindow(QMainWindow):
             self._set_resume_next_allowed_at(None)
             return
 
+        def emit_wait_state(seconds_left: int) -> None:
+            pending = self.link_queue.qsize()
+            total = max(int(total_links or 0), pending)
+            self.signals.run_state.emit(
+                {
+                    "phase": "waiting",
+                    "message": "저장된 예약 시간을 이어서 대기 중입니다.",
+                    "pending": pending,
+                    "total": total,
+                    "completed": max(total - pending, 0),
+                    "next_allowed_at": wait_until,
+                    "remaining": max(0, seconds_left),
+                }
+            )
+
         log(f"저장된 업로드 간격을 이어서 적용합니다. 다음 항목까지 {_format_interval(remaining)} 대기")
+        emit_wait_state(remaining)
         while remaining > 0 and not self._stop_event.is_set():
             if remaining % 60 == 0 or remaining < 60:
                 log(f"대기 중... {_format_interval(remaining)} 남음")
             time.sleep(1)
             remaining = int(wait_until - time.time())
+            if remaining > 0:
+                emit_wait_state(remaining)
         if not self._stop_event.is_set():
             self._set_resume_next_allowed_at(None)
 
@@ -2212,6 +2415,18 @@ class MainWindow(QMainWindow):
         self._sidebar_failed_label.setText("실패: 0")
         self._sidebar_total_label.setText("전체: 0")
         self._progress_queue_label.setText(f"전체: 0 / {len(link_data)}")
+        next_timestamp = self._safe_float(next_allowed_at)
+        self.signals.run_state.emit(
+            {
+                "phase": "running",
+                "message": f"대기열 {len(link_data)}개 준비됨 · {_format_interval(interval)} 간격",
+                "pending": len(link_data),
+                "total": len(link_data),
+                "completed": 0,
+                "next_allowed_at": next_timestamp,
+                "remaining": max(0, int(next_timestamp - time.time())) if next_timestamp else 0,
+            }
+        )
         self._reset_steps()
         self._populate_link_table(link_data)
 
@@ -3572,7 +3787,45 @@ class MainWindow(QMainWindow):
 
             processed_count = 0
             empty_count = 0
-            self._wait_for_resume_interval_if_needed(log)
+
+            def emit_run_state(
+                phase: str,
+                message: str = "",
+                current_item: str = "",
+                *,
+                pending: int | None = None,
+                completed: int | None = None,
+                next_allowed_at=None,
+                remaining: int = 0,
+            ) -> None:
+                pending_count = self.link_queue.qsize() if pending is None else max(0, int(pending))
+                total_count = max(total_links, pending_count + max(processed_count - 1, 0))
+                completed_count = (
+                    max(0, int(completed))
+                    if completed is not None
+                    else max(0, total_count - pending_count)
+                )
+                self.signals.run_state.emit(
+                    {
+                        "phase": phase,
+                        "message": message,
+                        "current_item": current_item,
+                        "pending": pending_count,
+                        "total": total_count,
+                        "completed": completed_count,
+                        "failed": results["failed"] + results["parse_failed"],
+                        "next_allowed_at": next_allowed_at,
+                        "remaining": remaining,
+                    }
+                )
+
+            emit_run_state(
+                "running",
+                f"대기열 {self.link_queue.qsize()}개 실행 중 · {_format_interval(interval)} 간격",
+                pending=self.link_queue.qsize(),
+                completed=0,
+            )
+            self._wait_for_resume_interval_if_needed(log, total_links=total_links)
 
             while not self._stop_event.is_set():
                 try:
@@ -3599,6 +3852,14 @@ class MainWindow(QMainWindow):
 
                 # Update progress
                 self.signals.queue_progress.emit(f"전체: {processed_count} / {total_links}")
+                current_label = str(keyword or url or "").strip()
+                emit_run_state(
+                    "processing",
+                    "상품 정보 분석 중입니다.",
+                    current_label,
+                    pending=self.link_queue.qsize() + 1,
+                    completed=max(processed_count - 1, 0),
+                )
 
                 try:
                     already_uploaded = pipeline_ref.link_history.is_uploaded(url)
@@ -3632,11 +3893,25 @@ class MainWindow(QMainWindow):
                                 else "작업량 확인에 실패했습니다."
                             )
                             log(f"작업량 확인 실패: {quota_message}")
+                            emit_run_state(
+                                "blocked",
+                                f"작업량 확인 필요: {quota_message}",
+                                current_label,
+                                pending=self.link_queue.qsize() + 1,
+                                completed=max(processed_count - 1, 0),
+                            )
                             results["cancelled"] = True
                             break
                     except Exception:
                         logger.exception("업로드 루프에서 작업량 확인 실패")
                         log("작업량 확인 실패로 업로드를 중단합니다.")
+                        emit_run_state(
+                            "blocked",
+                            "작업량 확인 실패로 업로드를 중단했습니다.",
+                            current_label,
+                            pending=self.link_queue.qsize() + 1,
+                            completed=max(processed_count - 1, 0),
+                        )
                         results["cancelled"] = True
                         break
 
@@ -3682,6 +3957,13 @@ class MainWindow(QMainWindow):
                 # Step 2: Upload to Threads
                 self.signals.step_update.emit(2, "active")
                 log("Threads 게시글 업로드 중...")
+                emit_run_state(
+                    "uploading",
+                    "Threads 게시글 업로드 중입니다.",
+                    str(keyword or url or "").strip(),
+                    pending=self.link_queue.qsize() + 1,
+                    completed=max(processed_count - 1, 0),
+                )
                 reserved_work_id = None
                 reservation_supported = False
 
@@ -3689,6 +3971,13 @@ class MainWindow(QMainWindow):
                     if not ensure_threads_ready():
                         results["cancelled"] = True
                         self._mark_resume_item(url, "pending", product_name, "threads_login_required")
+                        emit_run_state(
+                            "blocked",
+                            "Threads 로그인 확인이 필요합니다. 현재 항목은 저장했습니다.",
+                            product_name or current_label,
+                            pending=self.link_queue.qsize() + 1,
+                            completed=max(processed_count - 1, 0),
+                        )
                         self.signals.step_update.emit(2, "error")
                         self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
                         break
@@ -3745,11 +4034,25 @@ class MainWindow(QMainWindow):
                                 )
                                 if not reserved_work_id:
                                     log("작업 예약 ID가 없어 안전상 업로드를 중단합니다.")
+                                    emit_run_state(
+                                        "blocked",
+                                        "작업 예약 ID가 없어 안전상 중단했습니다.",
+                                        product_name or current_label,
+                                        pending=self.link_queue.qsize() + 1,
+                                        completed=max(processed_count - 1, 0),
+                                    )
                                     results["cancelled"] = True
                                     break
                         except Exception:
                             logger.exception("업로드 루프에서 작업량 예약 실패")
                             log("작업 예약 실패로 업로드를 중단합니다.")
+                            emit_run_state(
+                                "blocked",
+                                "작업 예약 실패로 업로드를 중단했습니다.",
+                                product_name or current_label,
+                                pending=self.link_queue.qsize() + 1,
+                                completed=max(processed_count - 1, 0),
+                            )
                             results["cancelled"] = True
                             break
 
@@ -3783,6 +4086,13 @@ class MainWindow(QMainWindow):
                                     stop_for_billing_sync = True
                                     results["failed"] += 1
                                     log(f"작업량 동기화 실패: {billing_msg}. 안전상 업로드를 중단합니다.")
+                                    emit_run_state(
+                                        "blocked",
+                                        f"작업량 동기화 실패: {billing_msg}",
+                                        product_name or current_label,
+                                        pending=self.link_queue.qsize() + 1,
+                                        completed=max(processed_count - 1, 0),
+                                    )
                                     self.signals.step_update.emit(3, "error")
                                     self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
                                 else:
@@ -3797,6 +4107,13 @@ class MainWindow(QMainWindow):
                                 stop_for_billing_sync = True
                                 results["failed"] += 1
                                 log("작업량 동기화 실패로 안전상 업로드를 중단합니다.")
+                                emit_run_state(
+                                    "blocked",
+                                    "작업량 동기화 실패로 안전상 중단했습니다.",
+                                    product_name or current_label,
+                                    pending=self.link_queue.qsize() + 1,
+                                    completed=max(processed_count - 1, 0),
+                                )
                                 self.signals.step_update.emit(3, "error")
                                 self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
                     else:
@@ -3818,6 +4135,13 @@ class MainWindow(QMainWindow):
                             blocker = helper_error or "threads_ui_unavailable"
                             self._mark_resume_item(url, "pending", product_name, blocker)
                             log(f"Threads 로그인/작성창 확인 필요: {blocker}. 현재 항목을 보존하고 중단합니다.")
+                            emit_run_state(
+                                "blocked",
+                                f"Threads 로그인/작성창 확인 필요: {blocker}",
+                                product_name or current_label,
+                                pending=self.link_queue.qsize() + 1,
+                                completed=max(processed_count - 1, 0),
+                            )
                             self.signals.step_update.emit(2, "error")
                             self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
                         else:
@@ -3861,6 +4185,13 @@ class MainWindow(QMainWindow):
                         results["cancelled"] = True
                         self._mark_resume_item(url, "pending", product_name, exc_text)
                         log(f"Threads 브라우저 상태 확인 필요: {exc_text[:120]}. 현재 항목을 보존하고 중단합니다.")
+                        emit_run_state(
+                            "blocked",
+                            f"Threads 브라우저 상태 확인 필요: {exc_text[:120]}",
+                            product_name or current_label,
+                            pending=self.link_queue.qsize() + 1,
+                            completed=max(processed_count - 1, 0),
+                        )
                         self.signals.step_update.emit(2, "error")
                         self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
                         break
@@ -3874,7 +4205,8 @@ class MainWindow(QMainWindow):
                 self.signals.reset_steps.emit()
 
                 if not self._stop_event.is_set() and not self.link_queue.empty():
-                    self._set_resume_next_allowed_at(time.time() + interval)
+                    next_allowed_at = time.time() + interval
+                    self._set_resume_next_allowed_at(next_allowed_at)
                     close_agent_for_wait()
                     log(f"다음 항목까지 {_format_interval(interval)} 대기")
                     for sec in range(interval):
@@ -3882,6 +4214,15 @@ class MainWindow(QMainWindow):
                             results["cancelled"] = True
                             break
                         remaining = interval - sec
+                        emit_run_state(
+                            "waiting",
+                            "다음 예약 업로드까지 대기 중입니다.",
+                            "",
+                            pending=self.link_queue.qsize(),
+                            completed=max(total_links - self.link_queue.qsize(), 0),
+                            next_allowed_at=next_allowed_at,
+                            remaining=remaining,
+                        )
                         if remaining % 60 == 0 and remaining > 0:
                             log(f"대기 중... {_format_interval(remaining)} 남음")
                         time.sleep(1)
@@ -3915,8 +4256,22 @@ class MainWindow(QMainWindow):
 
             if results["cancelled"]:
                 self.signals.status.emit("취소됨")
+                emit_run_state(
+                    "blocked" if self.link_queue.qsize() else "finished",
+                    "작업이 중단되었습니다. 남은 작업은 저장되어 다음 실행 때 이어갈 수 있습니다."
+                    if self.link_queue.qsize()
+                    else "작업이 취소되었습니다.",
+                    pending=self.link_queue.qsize(),
+                    completed=max(total_links - self.link_queue.qsize(), 0),
+                )
             else:
                 self.signals.status.emit("완료")
+                emit_run_state(
+                    "finished",
+                    "대기열 작업이 완료되었습니다.",
+                    pending=0,
+                    completed=total_links,
+                )
 
             self.signals.finished.emit(results)
 
@@ -3924,6 +4279,16 @@ class MainWindow(QMainWindow):
             logger.exception("_run_upload_queue에서 치명적 오류 발생")
             log(f"치명적 오류: {exc}")
             self.signals.status.emit("오류")
+            self.signals.run_state.emit(
+                {
+                    "phase": "error",
+                    "message": f"치명적 오류: {str(exc)[:120]}",
+                    "pending": self.link_queue.qsize(),
+                    "total": total_links,
+                    "completed": max(total_links - self.link_queue.qsize(), 0),
+                    "failed": results["failed"] + results["parse_failed"],
+                }
+            )
             self.signals.finished.emit(results)
             try:
                 from src import auth_client
