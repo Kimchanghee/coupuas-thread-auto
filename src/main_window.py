@@ -200,7 +200,7 @@ class MainWindow(QMainWindow):
     MAX_LOG_LINES = 2000
 
     COUPANG_LINK_PATTERN = re.compile(
-        r'https?://(?:link\.coupang\.com|www\.coupang\.com)[^\s<>"\']*',
+        r'https?://link\.coupang\.com/[^\s<>"\']*',
         re.IGNORECASE
     )
 
@@ -1989,6 +1989,10 @@ class MainWindow(QMainWindow):
                 keyword = None
             if not url or url in seen:
                 continue
+            parsed = urlparse(url)
+            if (parsed.hostname or "").strip().lower() != "link.coupang.com":
+                logger.warning("파트너스 단축 링크가 아닌 URL을 건너뜁니다: %s", url[:80])
+                continue
             seen.add(url)
             normalized.append((url, keyword))
         return normalized
@@ -2182,7 +2186,7 @@ class MainWindow(QMainWindow):
     ) -> bool:
         link_data = self._normalize_link_data(link_data)
         if not link_data:
-            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
             return False
         if self.is_running:
             show_warning(self, "알림", "이미 업로드 작업이 실행 중입니다.")
@@ -2192,9 +2196,9 @@ class MainWindow(QMainWindow):
         interval = max(int(interval or config.upload_interval or 60), 30)
         api_key = self._resolve_runtime_gemini_api_key(validate=True)
         if not api_key or len(api_key.strip()) < 10:
-            self._log_user_activity("batch_start_blocked", "reason=invalid_runtime_api_key", level="WARNING")
-            show_error(self, "설정 필요", "Gemini API 키가 없거나 만료되었습니다. 설정에서 유효한 키를 저장한 뒤 다시 시작하세요.")
-            return False
+            self._log_user_activity("batch_start_key_fallback", "reason=invalid_runtime_api_key", level="WARNING")
+            logger.warning("Gemini API 키 검증 실패: 제목 기반 fallback 문구로 계속 진행합니다.")
+            api_key = ""
 
         self._log_user_activity("batch_start_confirmed", f"links={len(link_data)}; interval={interval}; source={source}")
         self.is_running = True
@@ -2248,6 +2252,8 @@ class MainWindow(QMainWindow):
             "api_key": api_key,
             "profile_dir": profile_dir,
         }
+        if hasattr(self.pipeline, "set_google_api_key"):
+            self.pipeline.set_google_api_key(api_key)
         self._active_pipeline = self.pipeline
         thread = threading.Thread(
             target=self._run_upload_queue,
@@ -3266,16 +3272,15 @@ class MainWindow(QMainWindow):
 
         api_key = self._resolve_runtime_gemini_api_key(validate=True)
         if not api_key or len(api_key.strip()) < 10:
-            self._log_user_activity("batch_start_blocked", "reason=invalid_runtime_api_key", level="WARNING")
-            logger.warning("업로드 시작 차단: API 키가 유효하지 않습니다")
-            show_error(self, "설정 필요", "Gemini API 키가 없거나 만료되었습니다. 설정에서 유효한 키를 저장한 뒤 다시 시작하세요.")
-            return
+            self._log_user_activity("batch_start_key_fallback", "reason=invalid_runtime_api_key", level="WARNING")
+            logger.warning("Gemini API 키 검증 실패: 제목 기반 fallback 문구로 계속 진행합니다.")
+            api_key = ""
 
         link_data = self._extract_links(content)
         if not link_data:
             self._log_user_activity("batch_start_blocked", "reason=no_valid_links", level="WARNING")
             logger.warning("업로드 시작 차단: 유효한 링크가 없습니다")
-            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
             return
 
         config.load()
@@ -3394,7 +3399,7 @@ class MainWindow(QMainWindow):
         if not link_data:
             self._log_user_activity("queue_add_links_blocked", "reason=no_valid_links", level="WARNING")
             logger.warning("링크 큐 추가 차단: 유효한 링크가 없습니다")
-            show_warning(self, "알림", "유효한 쿠팡 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
             return
 
         added = 0

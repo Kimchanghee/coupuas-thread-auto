@@ -87,13 +87,12 @@ TUTORIAL_PAGES = [
             "\n"
             "  \u2022 [링크 입력] 페이지에서 링크를 붙여넣기\n"
             "  \u2022 한 줄에 하나씩 입력하세요\n"
-            "  \u2022 유효한 링크만 자동 인식됩니다\n"
-            "    (link.coupang.com 또는 www.coupang.com)\n"
+            "  \u2022 유효한 파트너스 단축 링크만 자동 인식됩니다\n"
+            "    (link.coupang.com)\n"
             "\n"
             "  지원 형식\n"
             "\n"
-            "  \u2022 https://link.coupang.com/a/xxxxx\n"
-            "  \u2022 https://www.coupang.com/vp/products/xxxxx"
+            "  \u2022 https://link.coupang.com/a/xxxxx"
         ),
     },
     {

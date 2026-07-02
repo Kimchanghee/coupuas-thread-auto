@@ -49,3 +49,22 @@ def test_follow_redirect_obeys_cancel_check_before_network_request():
             "https://link.coupang.com/a/example",
             cancel_check=lambda: True,
         )
+
+
+def test_validate_link_accepts_only_partner_short_links():
+    parser = CoupangParser()
+
+    assert parser.validate_link("https://link.coupang.com/a/abc123")
+    assert not parser.validate_link("https://www.coupang.com/vp/products/123456")
+    assert not parser.validate_link("https://coupang.com/vp/products/123456")
+
+
+def test_extract_links_from_text_ignores_raw_product_urls():
+    parser = CoupangParser()
+
+    links = parser.extract_links_from_text(
+        "원본 https://www.coupang.com/vp/products/123456 "
+        "파트너스 https://link.coupang.com/a/abc123"
+    )
+
+    assert links == ["https://link.coupang.com/a/abc123"]

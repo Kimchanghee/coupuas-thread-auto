@@ -32,22 +32,22 @@ def test_resume_state_persists_only_unfinished_items(tmp_path):
 
     fake._initialize_resume_state(
         [
-            ("https://www.coupang.com/vp/products/1", "summer fan"),
-            ("https://www.coupang.com/vp/products/2", "cool mat"),
+            ("https://link.coupang.com/a/item1", "summer fan"),
+            ("https://link.coupang.com/a/item2", "cool mat"),
         ],
         14400,
         source="test",
     )
-    fake._mark_resume_item("https://www.coupang.com/vp/products/1", "completed", "done")
-    fake._mark_resume_item("https://www.coupang.com/vp/products/2", "running", "active")
+    fake._mark_resume_item("https://link.coupang.com/a/item1", "completed", "done")
+    fake._mark_resume_item("https://link.coupang.com/a/item2", "running", "active")
     fake._set_resume_next_allowed_at(12345.0)
 
     payload = json.loads(fake._resume_state_path.read_text(encoding="utf-8"))
     assert payload["interval"] == 14400
     assert payload["next_allowed_at"] == 12345.0
     assert fake._resume_pending_link_data(payload) == [
-        ("https://www.coupang.com/vp/products/2", "cool mat")
+        ("https://link.coupang.com/a/item2", "cool mat")
     ]
 
-    fake._mark_resume_item("https://www.coupang.com/vp/products/2", "failed", "active")
+    fake._mark_resume_item("https://link.coupang.com/a/item2", "failed", "active")
     assert not fake._resume_state_path.exists()

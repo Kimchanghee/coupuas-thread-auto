@@ -1,4 +1,4 @@
-"""Launch the PyQt app with the prepared 50-item summer queue already running."""
+"""Launch the PyQt app with the prepared 60-item summer partner queue already running."""
 
 from __future__ import annotations
 
@@ -32,13 +32,14 @@ from src.app_logging import setup_logging  # noqa: E402
 from src.config import config  # noqa: E402
 from src.hidpi import center_window, configure_high_dpi  # noqa: E402
 from src.main_window import MainWindow  # noqa: E402
-from src.services.post_concepts import CONCEPT_TODAY_ISSUE  # noqa: E402
+from src.services.post_concepts import CONCEPT_PROBLEM_SOLUTION  # noqa: E402
 from src.theme import Colors, Typography, resolve_fonts  # noqa: E402
 
 logger = logging.getLogger(__name__)
 QUEUE_PATH = Path.home() / ".shorts_thread_maker" / "summer_coupang_thread_queue_20260622.json"
 RESUME_PATH = Path.home() / ".shorts_thread_maker" / "upload_resume_queue.json"
 INTERVAL_SECONDS = 4 * 60 * 60
+EXPECTED_QUEUE_SIZE = 60
 
 
 def _load_pending_items() -> list[tuple[str, str]]:
@@ -111,7 +112,7 @@ def _clear_queue(window: MainWindow) -> None:
 def _start_prepared_batch(window: MainWindow) -> None:
     config.load()
     config.upload_interval = INTERVAL_SECONDS
-    config.post_concept = CONCEPT_TODAY_ISSUE
+    config.post_concept = CONCEPT_PROBLEM_SOLUTION
     config.save()
     window._load_settings()
 
@@ -127,8 +128,10 @@ def _start_prepared_batch(window: MainWindow) -> None:
         interval = INTERVAL_SECONDS
         next_allowed_at = None
         source = "summer_batch_launcher"
-        if len(link_data) != 50:
-            window.signals.log.emit(f"준비된 여름 상품 대기열이 50개가 아닙니다: {len(link_data)}개")
+        if len(link_data) != EXPECTED_QUEUE_SIZE:
+            window.signals.log.emit(
+                f"준비된 여름 상품 대기열이 {EXPECTED_QUEUE_SIZE}개가 아닙니다: {len(link_data)}개"
+            )
             return
 
     window._switch_page(0)
@@ -198,7 +201,7 @@ def _start_prepared_batch(window: MainWindow) -> None:
         name="summer-batch-app-worker",
     )
     worker.start()
-    window.signals.log.emit(f"여름 상품 50개 대기열 시작됨 - 업로드 간격 {interval}초")
+    window.signals.log.emit(f"여름 상품 {len(link_data)}개 대기열 시작됨 - 업로드 간격 {interval}초")
     window._log_user_activity(
         "summer_batch_launcher_started",
         f"links={len(link_data)}; interval={interval}; profile_dir={profile_dir}",
@@ -255,7 +258,7 @@ def main() -> int:
     window._login_ref = None
     if hasattr(window, "_update_account_display"):
         window._update_account_display()
-    window.setWindowTitle("Coupang Partners Thread Automation - Summer 50 Running")
+    window.setWindowTitle("Coupang Partners Thread Automation - Summer 60 Running")
     center_window(window)
     window.show()
     app._main_window = window

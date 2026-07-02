@@ -403,6 +403,16 @@ class CoupangPartnersPipeline:
     def _resolve_google_api_key(self) -> str:
         return self._google_api_key
 
+    def set_google_api_key(self, google_api_key: str = "") -> None:
+        """Update the runtime Gemini key and reset clients that captured it."""
+        resolved_key = str(google_api_key or "").strip()
+        if resolved_key == self._google_api_key:
+            return
+        self._google_api_key = resolved_key
+        self._coupang_parser = None
+        if self._aggro_generator is not None:
+            self._aggro_generator.set_api_key(resolved_key)
+
     def cancel(self):
         """파이프라인 취소"""
         self._cancel_event.set()

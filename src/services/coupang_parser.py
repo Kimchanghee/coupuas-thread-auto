@@ -17,6 +17,7 @@ from src.services.cancellation import check_cancelled, is_cancelled_exception
 # Gemini API 재시도 설정
 MAX_RETRIES = 5
 RETRY_DELAY = 60  # 1분
+PARTNER_LINK_HOST = "link.coupang.com"
 ALLOWED_COUPANG_DOMAINS = ("coupang.com",)
 MAX_REDIRECT_HOPS = 5
 
@@ -77,6 +78,18 @@ class CoupangParser:
         except Exception:
             return False
 
+    @classmethod
+    def _is_partner_link_url(cls, url: str) -> bool:
+        try:
+            parsed = urlparse(cls._normalize_url(url))
+            if parsed.scheme != "https":
+                return False
+            if (parsed.hostname or "").strip().lower() != PARTNER_LINK_HOST:
+                return False
+            return bool(re.match(r"^/a/[A-Za-z0-9]+/?$", parsed.path or ""))
+        except Exception:
+            return False
+
     def parse_link(
         self,
         url: str,
@@ -97,8 +110,8 @@ class CoupangParser:
         try:
             check_cancelled(cancel_check)
             url = self._normalize_url(url)
-            if not self._is_allowed_coupang_url(url):
-                print("  [!] Invalid or disallowed URL")
+            if not self._is_partner_link_url(url):
+                print("  [!] Invalid or non-partner Coupang URL")
                 return None
 
             print(f"  [Parse] Parsing Coupang link...")
@@ -479,18 +492,16 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
     def validate_link(self, url: str) -> bool:
         """쿠팡 파트너스 링크 유효성 검사"""
         try:
-            return self._is_allowed_coupang_url(url)
+            return self._is_partner_link_url(url)
         except Exception:
             return False
 
     def extract_links_from_text(self, text: str) -> list:
         """텍스트에서 쿠팡 링크 추출"""
         pattern1 = r'https://link\.coupang\.com/[^\s<>\"\']+'
-        pattern2 = r'https://(?:www\.)?coupang\.com/vp/products/\d+[^\s<>\"\']+'
 
         links = []
         links.extend(re.findall(pattern1, text))
-        links.extend(re.findall(pattern2, text))
 
         return list(dict.fromkeys(links))
 
