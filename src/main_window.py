@@ -2098,7 +2098,9 @@ class MainWindow(QMainWindow):
         self._active_pipeline = None
         self.is_running = False
         self.start_btn.setEnabled(True)
-        self.add_btn.setEnabled(False)
+        # Keep accepting links after a completed/cancelled batch.  Those links
+        # are persisted as pending work and can be started as the next batch.
+        self.add_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_badge.update_style(Colors.SUCCESS, "준비")
         self._relayout_header_account_card()
@@ -3671,6 +3673,7 @@ class MainWindow(QMainWindow):
                 f"added={added}; queue_size={self.link_queue.qsize()}",
             )
             logger.info("링크 큐 추가 결과: added=%d queue=%d", added, self.link_queue.qsize())
+            self._progress_queue_label.setText(f"대기열: {self.link_queue.qsize()}개 준비됨")
             self.signals.log.emit(f"{added}개 새 링크 추가됨 (대기열: {self.link_queue.qsize()})")
             clean_links = "\n".join([item[0] for item in link_data])
             self.links_text.setPlainText(clean_links)
