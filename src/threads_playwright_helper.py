@@ -803,10 +803,13 @@ class ThreadsPlaywrightHelper:
                 self.last_error = "textarea_not_empty"
                 return False
 
+            def current_textarea():
+                return self.page.locator('textarea, div[contenteditable="true"]').nth(index)
+
             def read_text() -> str:
                 try:
                     return str(
-                        textarea.evaluate(
+                        current_textarea().evaluate(
                             """el => {
                                 if ('value' in el && el.value !== undefined && el.value !== null) {
                                     return el.value;
@@ -833,37 +836,46 @@ class ThreadsPlaywrightHelper:
                 min_chars = max(8, int(len(expected_compact) * 0.8))
                 return len(observed_compact) >= min_chars
 
-            def clear_existing() -> None:
-                textarea.click()
+            def focus_target() -> None:
+                current_textarea().click(timeout=5000)
                 time.sleep(0.2)
+
+            def clear_existing() -> None:
+                focus_target()
                 self.page.keyboard.press("Control+A")
                 self.page.keyboard.press("Backspace")
                 time.sleep(0.2)
 
             # 1차: Playwright fill
-            clear_existing()
-            textarea.fill(text)
-            time.sleep(0.5)
-            after_text = read_text()
-            print(f"      Textarea[{index}] fill 후 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
-            if content_matches(after_text):
-                return True
+            try:
+                clear_existing()
+                current_textarea().fill(text, timeout=5000)
+                time.sleep(0.5)
+                after_text = read_text()
+                print(f"      Textarea[{index}] fill 후 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
+                if content_matches(after_text):
+                    return True
+            except Exception as fill_error:
+                print(f"      Textarea[{index}] fill 실패, keyboard 입력으로 재시도: {fill_error}")
 
             # 2차: 실제 키보드 입력 경로. Threads contenteditable에서 fill 이벤트가
             # React 상태에 반영되지 않는 경우가 있어 사용자 입력에 가까운 경로로 재시도한다.
             print(f"      Textarea[{index}] fill 검증 실패, keyboard.insert_text 재시도")
-            clear_existing()
-            self.page.keyboard.insert_text(text)
-            time.sleep(0.8)
-            after_text = read_text()
-            print(f"      Textarea[{index}] insert_text 후 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
-            if content_matches(after_text):
-                return True
+            try:
+                clear_existing()
+                self.page.keyboard.insert_text(text)
+                time.sleep(0.8)
+                after_text = read_text()
+                print(f"      Textarea[{index}] insert_text 후 확인 (입력 {len(text)}자, 현재 {len(after_text)}자)")
+                if content_matches(after_text):
+                    return True
+            except Exception as keyboard_error:
+                print(f"      Textarea[{index}] keyboard 입력 실패, DOM 입력으로 재시도: {keyboard_error}")
 
             # 3차: DOM 입력 이벤트 fallback.
             print(f"      Textarea[{index}] keyboard 입력 검증 실패, DOM input 이벤트 재시도")
             try:
-                textarea.evaluate(
+                current_textarea().evaluate(
                     """(el, value) => {
                         el.focus();
                         if ('value' in el && el.value !== undefined) {
