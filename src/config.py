@@ -84,6 +84,7 @@ class Config:
         self.media_download_dir = str(data.get("media_download_dir", "media") or "media")
         self.prefer_video = bool(data.get("prefer_video", True))
         self.allow_ai_fallback = bool(data.get("allow_ai_fallback", False))
+        self.auto_start_enabled = bool(data.get("auto_start_enabled", True))
         self.instruction = str(data.get("instruction", "") or "")
         self.post_concept = normalize_concept_id(data.get("post_concept"))
         self.tutorial_shown = bool(data.get("tutorial_shown", False))
@@ -98,6 +99,7 @@ class Config:
         self.media_download_dir = "media"
         self.prefer_video = True
         self.allow_ai_fallback = False
+        self.auto_start_enabled = True
         self.instruction = ""
         self.post_concept = DEFAULT_POST_CONCEPT_ID
         self.tutorial_shown = False
@@ -195,6 +197,7 @@ class Config:
                 "media_download_dir": self.media_download_dir,
                 "prefer_video": self.prefer_video,
                 "allow_ai_fallback": self.allow_ai_fallback,
+                "auto_start_enabled": self.auto_start_enabled,
                 "instruction": self.instruction,
                 "post_concept": normalize_concept_id(getattr(self, "post_concept", "")),
                 "tutorial_shown": self.tutorial_shown,

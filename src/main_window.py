@@ -45,6 +45,7 @@ from src.theme import (Colors, Typography, Radius, Gradients,
                        hint_text_style, section_title_style)
 from src.ui_messages import ask_yes_no, show_error, show_info, show_warning
 from src.events import LoginStatusEvent
+from src.autostart import sync_auto_start
 from src.threads_navigation import (
     goto_threads_with_fallback,
     friendly_threads_navigation_error,
@@ -1576,7 +1577,23 @@ class MainWindow(QMainWindow):
         self._pay_hint_label.setGeometry(24, 116, 540, 20)
         self._pay_hint_label.setStyleSheet(_hint_lbl_style)
 
-        # ── Section 6: 튜토리얼 ────────────────────────────
+        # ── Section 6: 실행 설정 ────────────────────────────
+        self._settings_startup_sec = QFrame(content)
+        self._settings_startup_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_startup_sec.setStyleSheet(_section_style)
+
+        startup_title = QLabel("실행 설정", self._settings_startup_sec)
+        startup_title.setGeometry(24, 14, 200, 22)
+        startup_title.setStyleSheet(_section_title_style)
+
+        self._auto_start_check = QCheckBox("Windows 시작 시 자동 실행", self._settings_startup_sec)
+        self._auto_start_check.setGeometry(24, 44, 260, 24)
+
+        startup_desc = QLabel("컴퓨터가 꺼졌다 켜져도 로그인 후 프로그램을 다시 실행합니다.", self._settings_startup_sec)
+        startup_desc.setGeometry(304, 46, 560, 20)
+        startup_desc.setStyleSheet(_hint_lbl_style)
+
+        # ── Section 7: 튜토리얼 ────────────────────────────
         self._settings_tutorial_sec = QFrame(content)
         self._settings_tutorial_sec.setFrameShape(QFrame.Shape.NoFrame)
         self._settings_tutorial_sec.setStyleSheet(_section_style)
@@ -1590,7 +1607,7 @@ class MainWindow(QMainWindow):
         self._tutorial_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tutorial_settings_btn.clicked.connect(self.open_tutorial)
 
-        # ── Section 7: 문의하기 ────────────────────────────
+        # ── Section 8: 문의하기 ────────────────────────────
         self._settings_contact_sec = QFrame(content)
         self._settings_contact_sec.setFrameShape(QFrame.Shape.NoFrame)
         self._settings_contact_sec.setStyleSheet(_section_style)
@@ -2641,6 +2658,9 @@ class MainWindow(QMainWindow):
         self._settings_payment_sec.setGeometry(x, sy, w, 164)
         sy += 164 + gap
 
+        self._settings_startup_sec.setGeometry(x, sy, w, 96)
+        sy += 96 + gap
+
         self._settings_tutorial_sec.setGeometry(x, sy, w, 104)
         sy += 104 + gap
 
@@ -2695,6 +2715,8 @@ class MainWindow(QMainWindow):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
+        if hasattr(self, "_auto_start_check"):
+            self._auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", True)))
         selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
         for attr_name in ("post_concept_combo", "settings_post_concept_combo"):
             combo = getattr(self, attr_name, None)
@@ -2836,11 +2858,17 @@ class MainWindow(QMainWindow):
 
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
+        config.auto_start_enabled = (
+            self._auto_start_check.isChecked()
+            if hasattr(self, "_auto_start_check")
+            else bool(getattr(config, "auto_start_enabled", True))
+        )
         concept_combo = getattr(self, "settings_post_concept_combo", None) or getattr(self, "post_concept_combo", None)
         if concept_combo is not None:
             config.post_concept = normalize_concept_id(concept_combo.currentData())
         config.instagram_username = self.username_edit.text().strip()
         config.save()
+        auto_start_synced = sync_auto_start(bool(config.auto_start_enabled))
 
         active_key = self._resolve_runtime_gemini_api_key(validate=False)
 
@@ -2856,10 +2884,13 @@ class MainWindow(QMainWindow):
             top_right_style_fn()
 
         show_info(self, "저장 완료", "설정이 저장되었습니다.")
+        if bool(config.auto_start_enabled) and not auto_start_synced:
+            show_warning(self, "자동 실행", "Windows 자동 실행 등록에 실패했습니다. 로그를 확인해주세요.")
         self._log_user_activity(
             "settings_saved",
             (
                 f"upload_interval={interval}; prefer_video={bool(config.prefer_video)}; "
+                f"auto_start_enabled={bool(config.auto_start_enabled)}; "
                 f"post_concept={normalize_concept_id(getattr(config, 'post_concept', ''))}; "
                 f"username_set={bool(config.instagram_username)}; gemini_keys={len(key_values)}"
             ),

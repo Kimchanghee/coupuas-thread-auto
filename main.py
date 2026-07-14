@@ -76,6 +76,16 @@ logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
 
+def _sync_auto_start_setting() -> None:
+    try:
+        from src.autostart import sync_auto_start
+        from src.config import config
+
+        sync_auto_start(bool(getattr(config, "auto_start_enabled", True)))
+    except Exception:
+        logger.exception("자동 실행 설정을 반영하지 못했습니다.")
+
+
 def _create_main_window(login_win, auth_result, main_window_cls=None):
     """Create/show MainWindow and attach auth/login references for session continuity."""
     logger.info("메인 윈도우를 생성합니다.")
@@ -372,6 +382,7 @@ def main():
     log_file = setup_logging(capture_print=True)
     logger.info("애플리케이션을 시작합니다.")
     logger.info("로그 파일 경로: %s", log_file)
+    _sync_auto_start_setting()
 
     # High-DPI + 화면 맞춤 스케일: 어떤 해상도/배율(125·150%)·작은 화면에서도
     # UI가 동일 비율로 보이고 창이 잘리지 않도록 (QApplication 생성 전에 호출)

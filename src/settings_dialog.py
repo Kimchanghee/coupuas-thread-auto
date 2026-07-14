@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
+from src.autostart import sync_auto_start
 from src.app_icon import apply_window_icon
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.theme import (
@@ -189,6 +190,7 @@ class SettingsDialog(QDialog):
 
         self._build_api_section()
         self._build_upload_section()
+        self._build_startup_section()
         self._build_threads_section()
 
         self.content_layout.addStretch()
@@ -280,6 +282,19 @@ class SettingsDialog(QDialog):
 
         self.content_layout.addWidget(section)
 
+    def _build_startup_section(self):
+        section = SectionCard("실행 설정", "*")
+        layout = section.content_layout()
+
+        self.auto_start_check = QCheckBox("Windows 시작 시 자동 실행")
+        layout.addWidget(self.auto_start_check)
+
+        hint = QLabel("컴퓨터가 꺼졌다 켜져도 로그인 후 프로그램을 다시 실행합니다.")
+        hint.setStyleSheet(hint_text_style())
+        layout.addWidget(hint)
+
+        self.content_layout.addWidget(section)
+
     def _build_threads_section(self):
         section = SectionCard("Threads 계정", "*")
         layout = section.content_layout()
@@ -346,6 +361,7 @@ class SettingsDialog(QDialog):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
+        self.auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", True)))
         selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
         index = self.post_concept_combo.findData(selected_concept)
         self.post_concept_combo.setCurrentIndex(max(index, 0))
@@ -364,10 +380,12 @@ class SettingsDialog(QDialog):
         config.gemini_api_key = self.gemini_key_edit.text().strip()
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
+        config.auto_start_enabled = self.auto_start_check.isChecked()
         config.post_concept = normalize_concept_id(self.post_concept_combo.currentData())
         config.instagram_username = self.username_edit.text().strip()
 
         config.save()
+        sync_auto_start(bool(config.auto_start_enabled))
 
         show_info(self, "저장 완료", "설정이 저장되었습니다.")
         self.accept()
