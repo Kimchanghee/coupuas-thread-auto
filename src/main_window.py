@@ -2209,7 +2209,7 @@ class MainWindow(QMainWindow):
         try:
             if not self._resume_state_path.exists():
                 return {}
-            with self._resume_state_path.open("r", encoding="utf-8") as handle:
+            with self._resume_state_path.open("r", encoding="utf-8-sig") as handle:
                 payload = json.load(handle)
             return payload if isinstance(payload, dict) else {}
         except Exception:

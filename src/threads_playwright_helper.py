@@ -777,7 +777,8 @@ class ThreadsPlaywrightHelper:
             True: 성공, False: 실패
         """
         try:
-            textareas = self.page.locator('textarea, div[contenteditable="true"]')
+            textarea_selector = 'textarea, div[contenteditable="true"]'
+            textareas = self.page.locator(textarea_selector)
             total_textareas = textareas.count()
 
             print(f"      [type_in_textarea] 전체 textarea 개수: {total_textareas}, 입력할 index: {index}")
@@ -787,7 +788,19 @@ class ThreadsPlaywrightHelper:
                 self.last_error = "textarea_missing"
                 return False
 
-            textarea = textareas.nth(index)
+            def textarea_handles():
+                try:
+                    return list(self.page.locator(textarea_selector).element_handles())
+                except Exception:
+                    return []
+
+            handles = textarea_handles()
+            if len(handles) <= index:
+                print(f"      Textarea[{index}] element handle 없음 (현재 {len(handles)}개)")
+                self.last_error = "textarea_missing"
+                return False
+
+            textarea = handles[index]
 
             # 디버그: textarea 정보 출력
             try:
@@ -804,7 +817,16 @@ class ThreadsPlaywrightHelper:
                 return False
 
             def current_textarea():
-                return self.page.locator('textarea, div[contenteditable="true"]').nth(index)
+                nonlocal textarea
+                try:
+                    if textarea.evaluate("el => !!el.isConnected"):
+                        return textarea
+                    raise RuntimeError("textarea handle detached")
+                except Exception:
+                    handles_now = textarea_handles()
+                    if len(handles_now) > index:
+                        textarea = handles_now[index]
+                    return textarea
 
             def read_text() -> str:
                 try:
