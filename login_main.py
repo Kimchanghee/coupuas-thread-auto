@@ -66,9 +66,20 @@ from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
 
-VERSION = "v3.0.44"
+VERSION = "v3.0.45"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
+
+
+def _exit_if_already_running():
+    from src.single_instance import acquire_single_instance_guard
+
+    guard = acquire_single_instance_guard()
+    if guard.already_running:
+        guard.activate_existing_window()
+        print("프로그램이 이미 실행 중입니다.")
+        return None
+    return guard
 
 
 def _sync_auto_start_setting() -> None:
@@ -280,6 +291,10 @@ class SplashScreen(QSplashScreen):
 
 
 def main():
+    single_instance_guard = _exit_if_already_running()
+    if single_instance_guard is None:
+        return
+
     log_file = setup_logging(capture_print=True)
     logger.info("애플리케이션을 시작합니다.")
     logger.info("로그 파일 경로: %s", log_file)
