@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 setlocal
 
 echo ====================================
@@ -17,6 +17,15 @@ if errorlevel 1 (
 
 echo Python 확인 완료
 echo.
+
+set "PYTHON_GUI="
+for /f "delims=" %%P in ('where pythonw.exe 2^>nul') do if not defined PYTHON_GUI set "PYTHON_GUI=%%P"
+if not defined PYTHON_GUI for /f "delims=" %%P in ('where python.exe 2^>nul') do if not defined PYTHON_GUI set "PYTHON_GUI=%%P"
+if not defined PYTHON_GUI (
+    echo [오류] Python 실행 파일을 찾을 수 없습니다.
+    pause
+    exit /b 1
+)
 
 REM 보안상 자동 패키지 설치 금지
 pip show google-genai >nul 2>&1
@@ -41,7 +50,7 @@ if errorlevel 1 (
 
 echo 애플리케이션을 실행합니다...
 echo.
-python login_main.py
+start "" "%PYTHON_GUI%" "%~dp0login_main.py"
 
 if errorlevel 1 (
     echo.
@@ -50,4 +59,4 @@ if errorlevel 1 (
     exit /b 1
 )
 
-pause
+exit /b 0

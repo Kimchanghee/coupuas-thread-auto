@@ -21,6 +21,15 @@ def _quote(value: str) -> str:
     return f'"{escaped}"'
 
 
+def _resolve_gui_python_executable() -> Path:
+    executable = Path(sys.executable).resolve()
+    if executable.name.lower() == "python.exe":
+        pythonw = executable.with_name("pythonw.exe")
+        if pythonw.exists():
+            return pythonw
+    return executable
+
+
 def build_launch_command() -> str:
     """Return the command Windows should run at user login."""
     if getattr(sys, "frozen", False):
@@ -28,7 +37,7 @@ def build_launch_command() -> str:
 
     project_root = Path(__file__).resolve().parents[1]
     entrypoint = project_root / "login_main.py"
-    return f"{_quote(str(Path(sys.executable).resolve()))} {_quote(str(entrypoint))}"
+    return f"{_quote(str(_resolve_gui_python_executable()))} {_quote(str(entrypoint))}"
 
 
 def _open_run_key(access: int):
