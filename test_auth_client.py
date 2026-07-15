@@ -681,6 +681,45 @@ def test_remember_login_credentials_persists_username_and_password(monkeypatch):
     }
 
 
+def test_remember_login_credentials_persists_auto_login_opt_in(monkeypatch):
+    captured = {}
+
+    def _fake_save(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(auth_client, "_load_cred", lambda: {})
+    monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
+    auth_client.remember_login_credentials("Test_User", "SamplePass123", auto_login=True)
+
+    assert captured["payload"] == {
+        "username": "test_user",
+        "saved_password": "SamplePass123",
+        "auto_login": True,
+    }
+
+
+def test_remember_login_credentials_clears_auto_login_without_password(monkeypatch):
+    captured = {}
+
+    def _fake_save(payload):
+        captured["payload"] = payload
+
+    monkeypatch.setattr(
+        auth_client,
+        "_load_cred",
+        lambda: {
+            "username": "test_user",
+            "saved_password": "SamplePass123",
+            "auto_login": True,
+            "token": "token-1",
+        },
+    )
+    monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
+    auth_client.remember_login_credentials("Test_User", "")
+
+    assert captured["payload"] == {"username": "test_user", "token": "token-1"}
+
+
 def test_remember_username_empty_clears_saved_value(monkeypatch):
     captured = {}
 
@@ -723,6 +762,45 @@ def test_get_saved_credentials_returns_password_when_present(monkeypatch):
     result = auth_client.get_saved_credentials()
 
     assert result == {"username": "test_user", "password": "SamplePass123"}
+
+
+def test_get_saved_credentials_returns_auto_login_when_password_present(monkeypatch):
+    monkeypatch.setattr(
+        auth_client,
+        "_load_cred",
+        lambda: {
+            "username": "test_user",
+            "saved_password": "SamplePass123",
+            "auto_login": True,
+        },
+    )
+
+    result = auth_client.get_saved_credentials()
+
+    assert result == {
+        "username": "test_user",
+        "password": "SamplePass123",
+        "auto_login": True,
+    }
+
+
+def test_get_saved_credentials_clears_auto_login_without_password(monkeypatch):
+    state = {}
+    monkeypatch.setattr(
+        auth_client,
+        "_load_cred",
+        lambda: {"username": "test_user", "auto_login": True},
+    )
+
+    def _fake_save(payload):
+        state["saved"] = payload
+
+    monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
+
+    result = auth_client.get_saved_credentials()
+
+    assert result == {"username": "test_user"}
+    assert state["saved"] == {"username": "test_user"}
 
 
 def test_get_saved_credentials_rejects_invalid_username(monkeypatch):

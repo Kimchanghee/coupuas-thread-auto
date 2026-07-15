@@ -71,7 +71,7 @@ from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
 
-VERSION = "v3.0.23"
+VERSION = "v3.0.44"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 

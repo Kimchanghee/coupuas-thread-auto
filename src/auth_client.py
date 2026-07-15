@@ -94,6 +94,7 @@ _CRED_FILE = _CRED_DIR / "auth.json"
 _API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
 _SAVED_PASSWORD_KEY = "saved_password"
+_AUTO_LOGIN_KEY = "auto_login"
 _SENSITIVE_CRED_FIELDS = {"token", _SAVED_PASSWORD_KEY}
 _INVALID_LOCK_SENTINEL = "__invalid_api_host_lock__"
 _MIN_REGISTER_PASSWORD_LENGTH = 8
@@ -378,7 +379,7 @@ def _clear_saved_login_fields() -> None:
     if not isinstance(cred, dict) or not cred:
         return
     changed = False
-    for field in ("username", _SAVED_PASSWORD_KEY, "remember_pw"):
+    for field in ("username", _SAVED_PASSWORD_KEY, "remember_pw", _AUTO_LOGIN_KEY):
         if field in cred:
             cred.pop(field, None)
             changed = True
@@ -1698,8 +1699,13 @@ def get_saved_credentials() -> Optional[Dict[str, str]]:
         result = {"username": normalized_username}
         if normalized_password:
             result["password"] = normalized_password
+            if bool(cred.get(_AUTO_LOGIN_KEY)):
+                result["auto_login"] = True
         elif _SAVED_PASSWORD_KEY in cred:
             cred.pop(_SAVED_PASSWORD_KEY, None)
+            changed = True
+        if _AUTO_LOGIN_KEY in cred and not normalized_password:
+            cred.pop(_AUTO_LOGIN_KEY, None)
             changed = True
         if changed:
             _save_cred(cred)
@@ -1712,6 +1718,9 @@ def get_saved_credentials() -> Optional[Dict[str, str]]:
     if _SAVED_PASSWORD_KEY in cred:
         cred.pop(_SAVED_PASSWORD_KEY, None)
         changed = True
+    if _AUTO_LOGIN_KEY in cred:
+        cred.pop(_AUTO_LOGIN_KEY, None)
+        changed = True
     if changed:
         if cred:
             _save_cred(cred)
@@ -1720,7 +1729,7 @@ def get_saved_credentials() -> Optional[Dict[str, str]]:
     return None
 
 
-def remember_login_credentials(username: str, password: str = "") -> None:
+def remember_login_credentials(username: str, password: str = "", auto_login: bool = False) -> None:
     name = _normalize_saved_username(username)
     if not name:
         _clear_saved_login_fields()
@@ -1734,8 +1743,13 @@ def remember_login_credentials(username: str, password: str = "") -> None:
     password_text = str(password or "")
     if password_text:
         cred[_SAVED_PASSWORD_KEY] = password_text
+        if auto_login:
+            cred[_AUTO_LOGIN_KEY] = True
+        else:
+            cred.pop(_AUTO_LOGIN_KEY, None)
     else:
         cred.pop(_SAVED_PASSWORD_KEY, None)
+        cred.pop(_AUTO_LOGIN_KEY, None)
     _save_cred(cred)
 
 

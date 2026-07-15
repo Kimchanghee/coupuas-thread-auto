@@ -73,7 +73,10 @@ class LoginWindow(QMainWindow):
         self._username_available = False
         self._username_check_token = 0
         self._app_version = _resolve_app_version()
+        self._auto_login_pending = False
         self._setup_ui()
+        if self._auto_login_pending:
+            QTimer.singleShot(450, self._maybe_start_auto_login)
 
     def _setup_ui(self):
         self.setWindowTitle("쇼츠스레드메이커 - 로그인")
@@ -226,7 +229,7 @@ class LoginWindow(QMainWindow):
 
         # Remember
         self.remember_cb = QCheckBox("아이디/비밀번호 저장", page)
-        self.remember_cb.setGeometry(50, 328, 220, 22)
+        self.remember_cb.setGeometry(50, 328, 178, 22)
         self.remember_cb.setFont(QFont(fn, 9))
         self.remember_cb.setStyleSheet(f"""
             QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; }}
@@ -241,6 +244,13 @@ class LoginWindow(QMainWindow):
         """)
         self.remember_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remember_cb.toggled.connect(self._on_remember_toggled)
+
+        self.auto_login_cb = QCheckBox("자동 로그인", page)
+        self.auto_login_cb.setGeometry(240, 328, 130, 22)
+        self.auto_login_cb.setFont(QFont(fn, 9))
+        self.auto_login_cb.setStyleSheet(self.remember_cb.styleSheet())
+        self.auto_login_cb.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.auto_login_cb.toggled.connect(self._on_auto_login_toggled)
 
         # Login button
         self.btn_login = QPushButton("로그인", page)
@@ -290,14 +300,35 @@ class LoginWindow(QMainWindow):
             self.login_id.setText(cred["username"])
             self.login_pw.setText(cred.get("password", ""))
             self.remember_cb.setChecked(True)
+            self.auto_login_cb.setChecked(bool(cred.get("auto_login")) and bool(cred.get("password")))
+            self._auto_login_pending = self.auto_login_cb.isChecked()
 
     def _on_remember_toggled(self, checked: bool):
         if checked:
             return
+        self.auto_login_cb.setChecked(False)
         try:
             auth_client.remember_login_credentials("", "")
         except Exception:
             logger.exception("아이디 저장 해제 상태를 반영하지 못했습니다.")
+
+    def _on_auto_login_toggled(self, checked: bool):
+        if checked and not self.remember_cb.isChecked():
+            self.remember_cb.setChecked(True)
+
+    def _maybe_start_auto_login(self):
+        if self.stack.currentIndex() != 0:
+            return
+        if not self.auto_login_cb.isChecked():
+            return
+        if not self.login_id.text().strip() or not self.login_pw.text():
+            return
+        if not self.btn_login.isEnabled():
+            return
+
+        self.login_status.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
+        self.login_status.setText("자동 로그인 중...")
+        self._do_login()
 
     # ─── Register Page ──────────────────────────────────────
     def _build_register_page(self):
@@ -494,7 +525,11 @@ class LoginWindow(QMainWindow):
             saved_password = self.login_pw.text()
             try:
                 if self.remember_cb.isChecked():
-                    auth_client.remember_login_credentials(saved_username, saved_password)
+                    auth_client.remember_login_credentials(
+                        saved_username,
+                        saved_password,
+                        auto_login=self.auto_login_cb.isChecked(),
+                    )
                 else:
                     auth_client.remember_login_credentials("", "")
             except Exception:
