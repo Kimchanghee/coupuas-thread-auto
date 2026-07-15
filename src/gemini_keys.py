@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Iterable, Optional, Tuple
-
-from src.config import config
+from typing import Any, Iterable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 MAX_GEMINI_API_KEYS = 10
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
+FALLBACK_GEMINI_MODELS = (
+    DEFAULT_GEMINI_MODEL,
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+)
 
 _KEY_ERROR_MARKERS = (
     "invalid api key",
@@ -39,6 +43,77 @@ _NETWORK_ERROR_MARKERS = (
     "max retries exceeded",
 )
 
+_MODEL_ERROR_MARKERS = (
+    "not found",
+    "model",
+    "unsupported",
+    "invalid argument",
+    "404",
+)
+
+
+def _get_config():
+    from src.config import config
+
+    return config
+
+
+def get_gemini_model_candidates(preferred: str | Iterable[str] | None = None) -> list[str]:
+    """Return ordered Gemini model candidates with env and compatibility fallbacks."""
+    raw_values: list[str] = []
+    if preferred:
+        if isinstance(preferred, str):
+            raw_values.extend(preferred.split(","))
+        else:
+            raw_values.extend(str(item or "") for item in preferred)
+
+    env_value = os.getenv("GOOGLE_GEMINI_MODEL", "")
+    if env_value:
+        raw_values.extend(env_value.split(","))
+
+    raw_values.extend(FALLBACK_GEMINI_MODELS)
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        model = str(raw or "").strip()
+        if not model or model in seen:
+            continue
+        candidates.append(model)
+        seen.add(model)
+    return candidates
+
+
+def is_retryable_gemini_model_error(exc: BaseException) -> bool:
+    message = str(exc or "").lower()
+    return any(marker in message for marker in _MODEL_ERROR_MARKERS)
+
+
+def generate_content_with_model_fallback(
+    client: Any,
+    *,
+    contents: Any,
+    config: Any = None,
+    preferred_model: str | Iterable[str] | None = None,
+) -> tuple[Any, str]:
+    """Generate content using the latest Gemini model alias with stable fallbacks."""
+    last_error: BaseException | None = None
+    for model in get_gemini_model_candidates(preferred_model):
+        try:
+            kwargs = {"model": model, "contents": contents}
+            if config is not None:
+                kwargs["config"] = config
+            return client.models.generate_content(**kwargs), model
+        except Exception as exc:
+            last_error = exc
+            if is_retryable_gemini_model_error(exc):
+                logger.warning("Gemini 모델 %s 호출 실패, 다음 후보로 재시도합니다: %s", model, exc)
+                continue
+            raise
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("사용 가능한 Gemini 모델 후보가 없습니다.")
+
 
 def normalize_gemini_api_keys(values: Iterable[str] | str | None) -> list[str]:
     if isinstance(values, str):
@@ -62,6 +137,7 @@ def normalize_gemini_api_keys(values: Iterable[str] | str | None) -> list[str]:
 
 
 def get_configured_gemini_api_keys() -> list[str]:
+    config = _get_config()
     if hasattr(config, "get_gemini_api_keys"):
         keys = normalize_gemini_api_keys(config.get_gemini_api_keys())
     else:
@@ -74,6 +150,7 @@ def get_configured_gemini_api_keys() -> list[str]:
 
 
 def save_configured_gemini_api_keys(keys: Iterable[str]) -> list[str]:
+    config = _get_config()
     normalized = normalize_gemini_api_keys(keys)
     if hasattr(config, "set_gemini_api_keys"):
         config.set_gemini_api_keys(normalized)
@@ -97,14 +174,12 @@ def probe_gemini_api_key(api_key: str) -> Tuple[Optional[bool], str]:
     if len(key) < 10:
         return False, "API 키 형식이 올바르지 않습니다."
 
-    model = os.getenv("GOOGLE_GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
-
     try:
         from google import genai
 
         client = genai.Client(api_key=key)
-        response = client.models.generate_content(
-            model=model,
+        response, _model = generate_content_with_model_fallback(
+            client,
             contents="ping",
         )
         text = str(getattr(response, "text", "") or "").strip()

@@ -17,6 +17,7 @@ from src.services.post_concepts import (
     normalize_concept_id,
 )
 from src.services.trending_news import fetch_korean_issue_headlines
+from src.gemini_keys import DEFAULT_GEMINI_MODEL, generate_content_with_model_fallback
 
 
 class AggroGenerator:
@@ -57,7 +58,7 @@ class AggroGenerator:
 
     def __init__(self, api_key: str = "") -> None:
         self._client = None
-        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-3.5-flash")
+        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         self.set_api_key(api_key)
 
     def set_api_key(self, api_key: str) -> None:
@@ -76,8 +77,9 @@ class AggroGenerator:
     def _generate_text(self, prompt: str) -> str:
         if self._client is None:
             return ""
-        response = self._client.models.generate_content(
-            model=self._model_name,
+        response, _model = generate_content_with_model_fallback(
+            self._client,
+            preferred_model=self._model_name,
             contents=prompt,
         )
         text = str(getattr(response, "text", "") or "").strip()
@@ -423,7 +425,7 @@ class AggroGenerator:
 
 
 if __name__ == "__main__":
-    api_key = os.environ.get("GOOGLE_API_KEY", "")
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
     generator = AggroGenerator(api_key)
     test_product = {
         "title": "충전 되는 가열용 텀블러",

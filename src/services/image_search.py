@@ -15,6 +15,7 @@ from urllib.parse import quote, urlparse
 
 import requests
 
+from src.gemini_keys import DEFAULT_GEMINI_MODEL, generate_content_with_model_fallback
 from src.services.cancellation import check_cancelled, is_cancelled_exception
 
 
@@ -36,7 +37,7 @@ class ImageSearchService:
         os.makedirs(self.CACHE_DIR, exist_ok=True)
         self._gemini_client = None
         self._gemini_key_fingerprint = ""
-        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", "gemini-3.5-flash")
+        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         self._prune_cache()
 
     def _get_gemini_client(self, api_key: str):
@@ -94,8 +95,9 @@ class ImageSearchService:
         client = self._get_gemini_client(api_key)
         if client is None:
             return ""
-        response = client.models.generate_content(
-            model=self._model_name,
+        response, _model = generate_content_with_model_fallback(
+            client,
+            preferred_model=self._model_name,
             contents=prompt,
         )
         check_cancelled(cancel_check)

@@ -885,7 +885,7 @@ class CoupangPartnersPipeline:
 if __name__ == "__main__":
     import os
 
-    api_key = os.environ.get("GOOGLE_API_KEY", "")
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
     pipeline = CoupangPartnersPipeline(api_key)
 
     test_urls = [

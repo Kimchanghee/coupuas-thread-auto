@@ -98,7 +98,9 @@ class ComputerUseAgent:
             headless: whether to run browser in headless mode
             profile_dir: logical profile id (used to derive encrypted session path)
         """
-        resolved_api_key = str(api_key or os.environ.get("GOOGLE_API_KEY") or "").strip()
+        resolved_api_key = str(
+            api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+        ).strip()
         if resolved_api_key and resolved_api_key != "dummy-key-for-session-setup":
             self.client = genai.Client(api_key=resolved_api_key)
         else:
@@ -727,7 +729,7 @@ def main(argv: List[str]):
         sys.exit(1)
 
     goal = argv[1]
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
     agent = ComputerUseAgent(api_key=api_key, headless=False)
     try:

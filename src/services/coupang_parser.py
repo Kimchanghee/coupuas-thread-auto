@@ -12,6 +12,11 @@ import time
 from typing import Callable, Optional, Dict
 from urllib.parse import urlparse, parse_qs, urljoin
 
+from src.gemini_keys import (
+    generate_content_with_model_fallback,
+    get_gemini_model_candidates,
+    is_retryable_gemini_model_error,
+)
 from src.services.cancellation import check_cancelled, is_cancelled_exception
 
 # Gemini API 재시도 설정
@@ -235,10 +240,10 @@ class CoupangParser:
 Access Denied이거나 정보를 찾을 수 없으면 빈 객체 {{}}를 반환하세요.
 JSON만 출력하세요."""
 
-                response = client.models.generate_content(
-                    model="gemini-3.5-flash",
+                response, _model = generate_content_with_model_fallback(
+                    client,
                     contents=prompt,
-                    config=GenerateContentConfig(tools=tools)
+                    config=GenerateContentConfig(tools=tools),
                 )
 
                 # 응답 텍스트 추출
@@ -264,6 +269,10 @@ JSON만 출력하세요."""
                     raise
                 last_error = e
                 error_str = str(e).lower()
+
+                if is_retryable_gemini_model_error(e):
+                    print(f"  [!] Gemini URL Context model error: {e}")
+                    return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
 
                 # 서버 오류인 경우에만 재시도
                 if any(err in error_str for err in ['500', '503', 'server', 'overloaded', 'rate', 'quota', 'timeout']):
@@ -296,8 +305,6 @@ JSON만 출력하세요."""
             check_cancelled(cancel_check)
             print(f"  [Parse] Using Gemini REST API with URL Context...")
 
-            api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
-
             prompt = f"""다음 쿠팡 상품 페이지에서 정보를 추출해주세요: {url}
 
 다음 JSON 형식으로 응답해주세요:
@@ -326,13 +333,31 @@ JSON만 출력하세요."""
                 }
             }
 
-            response = requests.post(
-                api_url,
-                json=payload,
-                headers={"x-goog-api-key": self.google_api_key},
-                timeout=60,
-            )
-            response.raise_for_status()
+            response = None
+            last_error = None
+            for model in get_gemini_model_candidates():
+                check_cancelled(cancel_check)
+                api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                try:
+                    response = requests.post(
+                        api_url,
+                        json=payload,
+                        headers={"x-goog-api-key": self.google_api_key},
+                        timeout=60,
+                    )
+                    response.raise_for_status()
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if is_retryable_gemini_model_error(exc):
+                        print(f"  [!] Gemini REST model {model} failed, trying fallback: {_redact_api_key(exc)}")
+                        continue
+                    raise
+
+            if response is None:
+                if last_error is not None:
+                    raise last_error
+                return None
             check_cancelled(cancel_check)
 
             result = response.json()
@@ -361,9 +386,6 @@ JSON만 출력하세요."""
         try:
             # 이미지를 base64로 인코딩
             image_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-
-            # Gemini API 호출
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
 
             prompt = """이 쿠팡 상품 페이지 스크린샷을 분석하여 다음 정보를 JSON 형식으로 추출해주세요:
 
@@ -394,13 +416,30 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
                 }
             }
 
-            response = requests.post(
-                url,
-                json=payload,
-                headers={"x-goog-api-key": self.google_api_key},
-                timeout=30,
-            )
-            response.raise_for_status()
+            response = None
+            last_error = None
+            for model in get_gemini_model_candidates():
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                try:
+                    response = requests.post(
+                        url,
+                        json=payload,
+                        headers={"x-goog-api-key": self.google_api_key},
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if is_retryable_gemini_model_error(exc):
+                        print(f"  [!] Gemini Vision model {model} failed, trying fallback: {_redact_api_key(exc)}")
+                        continue
+                    raise
+
+            if response is None:
+                if last_error is not None:
+                    raise last_error
+                return None
 
             result = response.json()
             text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
