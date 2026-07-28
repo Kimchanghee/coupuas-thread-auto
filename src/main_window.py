@@ -4689,3 +4689,10 @@ class MainWindow(QMainWindow):
             logger.exception("UI activity logger 종료 처리 실패")
 
         event.accept()
+        if not forced_relogin:
+            # The hidden login window is still a top-level Qt window. Closing
+            # only the main window therefore leaves pythonw.exe alive forever
+            # unless the application event loop is ended explicitly.
+            app = QApplication.instance()
+            if app is not None:
+                app.quit()
