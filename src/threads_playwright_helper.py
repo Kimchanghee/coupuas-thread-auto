@@ -1308,28 +1308,26 @@ class ThreadsPlaywrightHelper:
                 self.last_error = f"timeout: {stage}"
                 return True
 
-            # posts_data 타입 확인 및 변환
+            # Publishing structure is intentionally immutable: one root post
+            # followed by one product comment. Do not merge these even when a
+            # legacy environment variable requests a single post.
             if posts_data and isinstance(posts_data[0], str):
-                # 기존 방식: 문자열 리스트
+                # Legacy callers are supported only when they provide both parts.
                 paragraphs = posts_data
                 first_image = None
             else:
-                # 새 방식: dict 리스트
+                # Canonical payload: root_post + product_comment.
                 paragraphs = [post.get('text', '') for post in posts_data]
                 first_image = posts_data[0].get('image_path') if posts_data else None
 
             paragraphs = [str(paragraph or "").strip() for paragraph in paragraphs if str(paragraph or "").strip()]
-            if not paragraphs:
-                print("  게시할 문단이 없습니다")
-                self.last_error = "empty_post_text"
+            if len(paragraphs) != 2:
+                print("  업로드 구조 오류: 본문 1개와 상품 댓글 1개가 필요합니다")
+                self.last_error = "invalid_thread_structure"
                 return False
 
-            if os.getenv("THREAD_AUTO_FORCE_SINGLE_POST", "").strip() == "1" and len(paragraphs) > 1:
-                print(f"  단일 게시글 모드: {len(paragraphs)}개 문단을 하나로 합칩니다")
-                paragraphs = ["\n\n".join(paragraphs)]
-
             total = len(paragraphs)
-            print(f"\n  Playwright로 {total}개 문단 스레드 작성 시작")
+            print("\n  Playwright로 본문 1개 + 상품 댓글 1개 스레드 작성 시작")
             if first_image:
                 print(f"  첫 번째 글에 이미지 첨부 예정: {first_image}")
 

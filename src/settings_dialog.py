@@ -274,9 +274,9 @@ class SettingsDialog(QDialog):
             self.post_concept_combo.addItem(concept.display_label, concept.id)
         layout.addWidget(
             FormField(
-                "글 작성 컨셉",
+                "본문 작성 방식",
                 self.post_concept_combo,
-                "선택한 컨셉으로 상품별 첫 번째 글 문구를 생성합니다",
+                "본문 1개를 생성하고 상품·링크는 아래 상품 댓글에 고정합니다",
             )
         )
 

@@ -33,11 +33,11 @@ POST_CONCEPTS: tuple[PostConcept, ...] = (
     PostConcept(
         id=CONCEPT_CURIOSITY,
         number=1,
-        name="호기심 훅",
-        short_label="기존 컨셉",
+        name="어그로성 훅",
+        short_label="호기심·반전",
         description="지금까지 쓰던 짧고 장난기 있는 어그로형 상품 훅입니다.",
         prompt=(
-            "컨셉: 호기심 훅.\n"
+            "컨셉: 어그로성 훅.\n"
             "- 지금까지의 기본 방식이다.\n"
             "- 상품의 실제 사용 장면과 불편함을 뒤집어서 짧은 호기심을 만든다.\n"
             "- 광고 설명문처럼 쓰지 말고 Threads에서 사람이 툭 던지는 말처럼 쓴다."
@@ -46,11 +46,11 @@ POST_CONCEPTS: tuple[PostConcept, ...] = (
     PostConcept(
         id=CONCEPT_TODAY_ISSUE,
         number=2,
-        name="오늘 이슈 연결",
-        short_label="뉴스/상황 연결",
+        name="현재 이슈 연관",
+        short_label="뉴스·날씨·상황",
         description="현재 이슈가 되는 뉴스, 날씨, 생활 상황을 상품 사용 맥락과 엮습니다.",
         prompt=(
-            "컨셉: 오늘 이슈 연결.\n"
+            "컨셉: 현재 이슈 연관.\n"
             "- 제공된 최신 헤드라인/상황 중 상품과 자연스럽게 연결되는 맥락 하나만 고른다.\n"
             "- 특정 인물, 참사, 사고, 정치 갈등을 판매 문구처럼 이용하지 않는다.\n"
             "- 상품이 사회 문제를 해결한다고 과장하지 않는다.\n"
@@ -62,7 +62,7 @@ POST_CONCEPTS: tuple[PostConcept, ...] = (
     PostConcept(
         id=CONCEPT_PROBLEM_SOLUTION,
         number=3,
-        name="생활 문제 해결",
+        name="생활 문제 해결형",
         short_label="불편 해결",
         description="일상 불편을 먼저 짚고 상품을 해결 후보처럼 보여주는 컨셉입니다.",
         prompt=(
@@ -75,7 +75,7 @@ POST_CONCEPTS: tuple[PostConcept, ...] = (
     PostConcept(
         id=CONCEPT_BUYING_GUIDE,
         number=4,
-        name="구매 기준 제안",
+        name="구매 기준 제안형",
         short_label="고르는 기준",
         description="상품을 고를 때 놓치기 쉬운 기준을 제안하는 실용형 컨셉입니다.",
         prompt=(

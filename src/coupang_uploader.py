@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 쿠팡 파트너스 전용 Threads 업로더
-2개 포스트 형식 (어그로 문구 + 미디어 / 링크 + 규정)으로 업로드합니다.
+고정 2단 형식 (본문 + 상품 댓글)으로 업로드합니다.
 """
 import time
 import threading
@@ -13,6 +13,7 @@ from src.threads_navigation import goto_threads_with_fallback
 from src.config import config
 from src.services.cancellation import OperationCancelled
 from src.services.post_concepts import normalize_concept_id
+from src.services.thread_payload import build_product_thread_payload
 
 
 class CancelledException(Exception):
@@ -25,8 +26,8 @@ class CoupangThreadsUploader:
     쿠팡 파트너스 전용 업로더
 
     각 상품마다:
-    1. 첫 번째 포스트: 어그로 문구 + 이미지/영상
-    2. 두 번째 포스트: 상품 링크 + 규정 문구
+    1. 본문: 선택한 작성 방식의 상품 기반 훅 + 이미지/영상
+    2. 상품 댓글: 상품 링크 + 쿠팡 파트너스 고지
     """
 
     def __init__(self, google_api_key: str = ""):
@@ -128,19 +129,7 @@ class CoupangThreadsUploader:
 
             print(f"  로그인 완료: @{ig_username}" if ig_username else "  로그인 완료")
 
-            first_post = product_post['first_post']
-            second_post = product_post['second_post']
-
-            posts_data = [
-                {
-                    'text': first_post['text'],
-                    'image_path': first_post.get('media_path')
-                },
-                {
-                    'text': second_post['text'],
-                    'image_path': None
-                }
-            ]
+            posts_data = build_product_thread_payload(product_post)
 
             self._check_cancelled()
 
@@ -270,18 +259,9 @@ class CoupangThreadsUploader:
                         raise Exception(f"로그인 실패: {ig_username or '계정 미설정'}")
                     log("로그인 확인됨", f"@{ig_username} 계정으로 로그인됨" if ig_username else "로그인 완료")
 
-                    posts_data = [
-                        {
-                            'text': product['first_post']['text'],
-                            'image_path': product['first_post'].get('media_path')
-                        },
-                        {
-                            'text': product['second_post']['text'],
-                            'image_path': None
-                        }
-                    ]
+                    posts_data = build_product_thread_payload(product)
 
-                    log("스레드 작성 시작", "2개 포스트 작성 중...")
+                    log("스레드 작성 시작", "본문 + 상품 댓글 작성 중...")
                     success = helper.create_thread_direct(posts_data)
 
                     if not success:
@@ -746,20 +726,11 @@ class CoupangPartnersPipeline:
                     except Exception:
                         log("페이지 경고", "페이지 로드 시간 초과, 계속 진행")
 
-                    # 게시물 데이터 준비 (2개 포스트)
-                    posts_data = [
-                        {
-                            'text': post_data['first_post']['text'],
-                            'image_path': post_data['first_post'].get('media_path')
-                        },
-                        {
-                            'text': post_data['second_post']['text'],
-                            'image_path': None
-                        }
-                    ]
+                    # 게시물 데이터 준비: 본문 1개 + 상품 댓글 1개
+                    posts_data = build_product_thread_payload(post_data)
 
                     # 스레드 작성
-                    log("게시물 작성", "2개 포스트 스레드를 작성합니다...")
+                    log("게시물 작성", "본문과 상품 댓글을 연결 스레드로 작성합니다...")
                     success = helper.create_thread_direct(posts_data)
 
                     if success:

@@ -67,12 +67,23 @@ def test_click_new_thread_falls_back_to_direct_intent_route(monkeypatch):
 
 
 class _PostingHelper(ThreadsPlaywrightHelper):
+    def __init__(self, page):
+        super().__init__(page)
+        self.typed: list[tuple[str, int]] = []
+
     def click_new_thread(self) -> bool:
         self.page.compose_open = True
         return True
 
     def type_in_textarea(self, text, index=0, require_empty=False) -> bool:
+        self.typed.append((text, index))
         return True
+
+    def count_textareas(self) -> int:
+        return 2
+
+    def find_empty_textarea_index(self):
+        return 1
 
     def click_post_button(self) -> bool:
         return True
@@ -90,3 +101,14 @@ def test_create_thread_ignores_hidden_login_text_when_compose_is_open(monkeypatc
 
     assert helper.create_thread_direct(["first post", "second post"]) is True
     assert helper.last_error is None
+    assert [text for text, _ in helper.typed] == ["first post", "second post"]
+
+
+def test_create_thread_rejects_any_payload_except_root_and_comment(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_PLAYWRIGHT_TOTAL_TIMEOUT_SEC", "30")
+    page = _FakePage()
+    helper = _PostingHelper(page)
+
+    assert helper.create_thread_direct(["root only"]) is False
+    assert helper.last_error == "invalid_thread_structure"
+    assert helper.typed == []

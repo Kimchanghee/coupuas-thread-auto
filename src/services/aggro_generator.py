@@ -393,22 +393,23 @@ class AggroGenerator:
 
         second_text = self._build_second_post_text(original_url, title, keywords)
 
+        root_post = {
+            "text": aggro_text,
+            "media_path": media_path,
+            "media_type": "video" if video_path else "image",
+        }
+        product_comment = {
+            "text": second_text,
+            "media_path": None,
+            "media_type": None,
+        }
         return {
-            "first_post": {
-                "text": aggro_text,
-                "media_path": media_path,
-                "media_type": "video" if video_path else "image",
-            },
-            "second_post": {
-                "text": second_text,
-                "media_path": None,
-                "media_type": None,
-            },
-            "third_post": {
-                "text": self.ACTIVITY_WARNING,
-                "media_path": None,
-                "media_type": None,
-            },
+            # These names express the required publishing structure directly.
+            "root_post": root_post,
+            "product_comment": product_comment,
+            # Compatibility for any in-flight jobs made by older app versions.
+            "first_post": root_post,
+            "second_post": product_comment,
             "product_title": title,
             "original_url": original_url,
             "post_concept": selected_concept_id,

@@ -44,9 +44,10 @@ for _env_path in _env_paths:
     if _env_path.exists() and not _env_path.is_symlink():
         load_dotenv(_env_path, override=False)
 
-_DEFAULT_API_SERVER_URL = "https://project-user-dashboard-api.vercel.app"
+_DEFAULT_API_SERVER_URL = "https://newshopping-shorts-auth.vercel.app"
 _DEPRECATED_API_SERVER_URLS = {
     "https://13-124-7-65.nip.io",
+    "https://project-user-dashboard-api.vercel.app",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
     "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
 }
@@ -401,15 +402,15 @@ def _safe_json(resp: requests.Response) -> Dict[str, Any]:
 
 def _normalize_password_for_backend(password: str) -> str:
     """
-    Send the user's password as typed.
+    Preserve the deployed authentication contract without sending plaintext.
 
-    The shared dashboard backend owns password hashing. Older STMaker builds
-    sent SHA-256 text; the backend accepts that legacy storage shape as a
-    fallback so new clients can follow the same contract as SSMaker.
+    The operating API stores this client-side SHA-256 value inside its own
+    adaptive password hash. Registration and login must therefore normalize
+    the password identically.
     """
     if not isinstance(password, str):
         password = str(password or "")
-    return password
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def _localize_message(message: str) -> str:

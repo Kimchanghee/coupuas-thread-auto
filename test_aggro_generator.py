@@ -7,6 +7,11 @@ from src.services.post_concepts import (
     get_post_concept,
     normalize_concept_id,
 )
+from src.services.thread_payload import (
+    PRODUCT_COMMENT,
+    ROOT_POST,
+    build_product_thread_payload,
+)
 
 
 def test_first_post_fallback_is_product_specific_and_link_free():
@@ -43,6 +48,28 @@ def test_product_post_keeps_link_only_in_second_post():
     assert "https://link.coupang.com/a/dVx6gM6fm0" in second_text
     assert second_text.startswith("🔗")
     assert AggroGenerator.COUPANG_DISCLOSURE in second_text
+
+
+def test_product_post_exposes_fixed_root_and_product_comment_payload():
+    generator = AggroGenerator()
+    result = generator.generate_product_post(
+        {
+            "title": "휴대용 선풍기",
+            "search_keywords": "휴대용 선풍기",
+            "original_url": "https://link.coupang.com/a/test",
+            "image_path": "product.jpg",
+        }
+    )
+
+    payload = build_product_thread_payload(result)
+
+    assert result[ROOT_POST] is result["first_post"]
+    assert result[PRODUCT_COMMENT] is result["second_post"]
+    assert [item["role"] for item in payload] == [ROOT_POST, PRODUCT_COMMENT]
+    assert payload[0]["image_path"] == "product.jpg"
+    assert payload[1]["image_path"] is None
+    assert "https://link.coupang.com/a/test" not in payload[0]["text"]
+    assert "https://link.coupang.com/a/test" in payload[1]["text"]
 
 
 def test_bad_model_output_falls_back_to_clean_first_post():

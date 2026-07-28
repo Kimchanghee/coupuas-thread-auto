@@ -38,6 +38,7 @@ from src.gemini_keys import (
     select_working_gemini_api_key,
 )
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
+from src.services.thread_payload import build_product_thread_payload
 from src.theme import (Colors, Typography, Radius, Gradients,
                        global_stylesheet, badge_style, stat_card_style,
                        terminal_text_style,
@@ -1112,7 +1113,7 @@ class MainWindow(QMainWindow):
         self.video_check = QCheckBox("이미지보다 영상 업로드 우선", sec2)
         self.video_check.setGeometry(24, 48, 400, 24)
 
-        concept_label = QLabel("글 작성 컨셉", sec2)
+        concept_label = QLabel("본문 작성 방식", sec2)
         concept_label.setGeometry(24, 82, 120, 22)
         concept_label.setStyleSheet(_field_lbl_style)
 
@@ -1136,7 +1137,7 @@ class MainWindow(QMainWindow):
             lambda _idx: self._sync_post_concept_combos(self.post_concept_combo)
         )
 
-        concept_hint = QLabel("선택한 컨셉으로 상품별 첫 번째 글 문구가 생성됩니다", sec2)
+        concept_hint = QLabel("본문 1개를 생성하고, 상품·링크는 바로 아래 상품 댓글에 고정합니다", sec2)
         concept_hint.setGeometry(410, 85, 460, 18)
         concept_hint.setStyleSheet(hint_text_style())
 
@@ -1432,7 +1433,7 @@ class MainWindow(QMainWindow):
         concept_title.setGeometry(24, 14, 220, 24)
         concept_title.setStyleSheet(_section_title_style)
 
-        concept_label = QLabel("컨셉 선택", concept_sec)
+        concept_label = QLabel("본문 작성 방식", concept_sec)
         concept_label.setGeometry(24, 48, 120, 20)
         concept_label.setStyleSheet(_field_lbl_style)
 
@@ -1447,7 +1448,7 @@ class MainWindow(QMainWindow):
         )
 
         concept_desc = QLabel(
-            "선택한 컨셉으로 상품별 첫 번째 글 문구가 생성됩니다. 2번은 현재 이슈와 상품을 연결합니다.",
+            "본문 1개를 자동 생성하고 상품·링크는 바로 아래 상품 댓글에 고정합니다. 2번은 현재 이슈와 상품을 연결합니다.",
             concept_sec,
         )
         concept_desc.setGeometry(368, 82, 540, 20)
@@ -4025,16 +4026,7 @@ class MainWindow(QMainWindow):
                     )
                     time.sleep(2)
 
-                    posts_data = [
-                        {
-                            "text": post_data["first_post"]["text"],
-                            "image_path": post_data["first_post"].get("media_path"),
-                        },
-                        {
-                            "text": post_data["second_post"]["text"],
-                            "image_path": None,
-                        },
-                    ]
+                    posts_data = build_product_thread_payload(post_data)
 
                     # Reserve work token when backend supports atomic quota flow.
                     if not quota_bypass:
