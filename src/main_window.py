@@ -974,11 +974,12 @@ class MainWindow(QMainWindow):
         # ── Live Run State Banner ───────────────────────────
         state_y = btn_y + 56
         self._run_state_frame = QFrame(page)
+        self._run_state_frame.setObjectName("runStateFrame")
         self._run_state_frame.setGeometry(28, state_y, 944, 78)
         self._run_state_frame.setStyleSheet(
-            f"QFrame {{"
+            f"QFrame#runStateFrame {{"
             f"  background-color: {Colors.INFO_BG};"
-            f"  border: 1px solid {Colors.INFO_BORDER};"
+            f"  border: none;"
             f"  border-radius: {Radius.LG};"
             f"}}"
         )
@@ -987,14 +988,14 @@ class MainWindow(QMainWindow):
         self._run_state_title.setGeometry(18, 12, 160, 20)
         self._run_state_title.setStyleSheet(
             f"color: {Colors.INFO}; font-size: 9pt; font-weight: 800;"
-            " background: transparent;"
+            " background: transparent; border: none;"
         )
 
         self._run_state_main = QLabel("아직 실행 중인 대기열이 없습니다.", self._run_state_frame)
         self._run_state_main.setGeometry(18, 36, 420, 24)
         self._run_state_main.setStyleSheet(
             f"color: {Colors.TEXT_PRIMARY}; font-size: 12pt; font-weight: 800;"
-            " background: transparent;"
+            " background: transparent; border: none;"
         )
 
         self._run_state_detail = QLabel("링크를 넣고 자동화 시작을 누르면 현재 상태가 여기에 표시됩니다.", self._run_state_frame)
@@ -1002,7 +1003,7 @@ class MainWindow(QMainWindow):
         self._run_state_detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._run_state_detail.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
-            " background: transparent;"
+            " background: transparent; border: none;"
         )
 
         self._run_state_next = QLabel("다음 작업: --", self._run_state_frame)
@@ -1010,7 +1011,7 @@ class MainWindow(QMainWindow):
         self._run_state_next.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._run_state_next.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
-            " background: transparent;"
+            " background: transparent; border: none;"
         )
 
         # ── Status Table ───────────────────────────────────
@@ -1988,7 +1989,6 @@ class MainWindow(QMainWindow):
             detail = f"남은 작업 {pending}개"
             color = Colors.INFO
             bg = Colors.INFO_BG
-            border = Colors.INFO_BORDER
             sidebar_status = f"예약 대기 · {pending}개 남음"
             progress_text = f"다음 {self._format_clock(next_allowed_at)}"
         elif phase in {"processing", "uploading"}:
@@ -1997,7 +1997,6 @@ class MainWindow(QMainWindow):
             detail = message or f"대기열 {pending}개 남음"
             color = Colors.WARNING
             bg = Colors.WARNING_BG
-            border = Colors.WARNING_BORDER
             sidebar_status = f"처리 중 · {pending}개 남음"
             progress_text = "업로드 중"
         elif phase == "running":
@@ -2006,7 +2005,6 @@ class MainWindow(QMainWindow):
             detail = f"총 {total}개 · 4시간 간격"
             color = Colors.WARNING
             bg = Colors.WARNING_BG
-            border = Colors.WARNING_BORDER
             sidebar_status = f"실행중 · {pending}개 대기"
             progress_text = "실행중"
         elif phase == "finished":
@@ -2015,7 +2013,6 @@ class MainWindow(QMainWindow):
             detail = f"성공 {completed} · 실패 {failed}"
             color = Colors.SUCCESS
             bg = Colors.SUCCESS_BG
-            border = Colors.SUCCESS_BORDER
             sidebar_status = "완료"
             progress_text = "완료"
         elif phase in {"blocked", "error"}:
@@ -2024,7 +2021,6 @@ class MainWindow(QMainWindow):
             detail = current_item[:48] if current_item else "로그를 확인하세요"
             color = Colors.ERROR
             bg = Colors.ERROR_BG
-            border = Colors.ERROR_BORDER
             sidebar_status = "확인 필요"
             progress_text = "확인 필요"
         else:
@@ -2033,7 +2029,6 @@ class MainWindow(QMainWindow):
             detail = "링크를 넣고 자동화 시작을 누르면 현재 상태가 여기에 표시됩니다."
             color = Colors.INFO
             bg = Colors.INFO_BG
-            border = Colors.INFO_BORDER
             sidebar_status = "대기중"
             progress_text = ""
 
@@ -2046,15 +2041,16 @@ class MainWindow(QMainWindow):
             next_text = f"남은 작업: {pending}개"
 
         self._run_state_frame.setStyleSheet(
-            f"QFrame {{"
+            f"QFrame#runStateFrame {{"
             f"  background-color: {bg};"
-            f"  border: 1px solid {border};"
+            f"  border: none;"
             f"  border-radius: {Radius.LG};"
             f"}}"
         )
         self._run_state_title.setText(title)
         self._run_state_title.setStyleSheet(
-            f"color: {color}; font-size: 9pt; font-weight: 800; background: transparent;"
+            f"color: {color}; font-size: 9pt; font-weight: 800;"
+            f" background: transparent; border: none;"
         )
         self._run_state_main.setText(main)
         self._run_state_detail.setText(detail)
@@ -2066,8 +2062,7 @@ class MainWindow(QMainWindow):
         self.progress_label.setText(progress_text)
         self.progress_label.setVisible(bool(progress_text))
         self._statusbar_dot.setStyleSheet(
-            f"background-color: {color}; border-radius: 5px;"
-            f" border: 2px solid {border};"
+            f"background-color: {color}; border-radius: 5px; border: none;"
         )
 
         self._log_user_activity(
