@@ -97,6 +97,8 @@ class Signals(QObject):
     reset_steps = pyqtSignal()
     threads_login_launch = pyqtSignal(bool, str)  # success, detail
     threads_browser_closed = pyqtSignal()
+    heartbeat_complete = pyqtSignal(object)
+    update_check_complete = pyqtSignal(object)
 
 
 # ─── Badge ──────────────────────────────────────────────────
@@ -263,8 +265,12 @@ class MainWindow(QMainWindow):
         self.signals.reset_steps.connect(self._reset_steps)
         self.signals.threads_login_launch.connect(self._on_threads_login_launch_result)
         self.signals.threads_browser_closed.connect(self._on_threads_browser_closed)
+        self.signals.heartbeat_complete.connect(self._apply_heartbeat_result)
+        self.signals.update_check_complete.connect(self._apply_update_check_result)
 
         self._current_page = 0
+        self._heartbeat_in_flight = False
+        self._update_check_in_flight = False
         # Apply global stylesheet before building widgets so sizeHint/metrics are correct
         # for any fixed-geometry placement that depends on styled font/padding.
         self.setStyleSheet(global_stylesheet())
@@ -4348,80 +4354,112 @@ class MainWindow(QMainWindow):
     # ────────────────────────────────────────────────────────
 
     def _send_heartbeat(self):
-        """Send heartbeat and reflect server connectivity in the UI."""
-        logger.debug("하트비트 실행; is_running=%s", self.is_running)
-        try:
-            if os.getenv("THREAD_AUTO_DISABLE_HEARTBEAT", "").strip() == "1":
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
-                )
-                self._connection_label.setText("로컬 실행")
-                self._connection_label.setStyleSheet(
-                    f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
-                )
-                self._server_label.setText("서버 연결: 로컬 모드")
-                if not self.is_running:
-                    self.status_label.setText("로컬 실행")
-                return
+        """Start a server heartbeat without blocking Qt's event loop."""
+        if os.getenv("THREAD_AUTO_DISABLE_HEARTBEAT", "").strip() == "1":
+            self._apply_heartbeat_result({"state": "disabled"})
+            return
 
+        # A slow request here used to make typing and button clicks freeze.
+        if self._heartbeat_in_flight:
+            return
+        self._heartbeat_in_flight = True
+        task = "uploading" if self.is_running else "idle"
+        threading.Thread(
+            target=self._heartbeat_worker,
+            args=(task,),
+            daemon=True,
+            name="server-heartbeat-worker",
+        ).start()
+
+    def _heartbeat_worker(self, task: str) -> None:
+        """Run the blocking server heartbeat away from the Qt event loop."""
+        try:
             from src import auth_client
 
             if not auth_client.is_logged_in():
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;"
-                )
-                self._connection_label.setText("로그아웃")
-                self._connection_label.setStyleSheet(
-                    f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; background: transparent;"
-                )
-                self.status_label.setText("로그아웃")
-                self._server_label.setText("서버 연결: 로그아웃")
-                if not self._session_expiry_notified:
-                    show_warning(self, "세션 만료", "로그인 세션이 만료되었거나 로그아웃되었습니다. 다시 로그인해주세요.")
-                    self._session_expiry_notified = True
-                    self._redirect_to_login_window("세션이 만료되었습니다. 다시 로그인해주세요.")
-                return
-
-            task = "uploading" if self.is_running else "idle"
-            result = auth_client.heartbeat(
-                current_task=task,
-                app_version=self._app_version
-            )
-            if isinstance(result, dict):
-                self._update_account_display()
-            if result.get("status") is True:
-                self._session_expiry_notified = False
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
-                )
-                self._connection_label.setText("서버 접속 중")
-                self._connection_label.setStyleSheet(
-                    f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
-                )
-                self._server_label.setText("서버 연결: 정상")
-                if not self.is_running:
-                    self.status_label.setText("연결됨")
+                payload = {"state": "logged_out"}
             else:
-                self._online_dot.setStyleSheet(
-                    f"background-color: {Colors.ERROR}; border-radius: 4px;"
-                )
-                self._connection_label.setText("연결 끊김")
-                self._connection_label.setStyleSheet(
-                    f"color: {Colors.ERROR}; font-size: 8pt; font-weight: 700; background: transparent;"
-                )
-                self._server_label.setText("서버 연결: 끊김")
-                self.status_label.setText("연결 끊김")
-        except Exception:
-            logger.exception("하트비트 전송 실패")
+                payload = {
+                    "state": "complete",
+                    "result": auth_client.heartbeat(
+                        current_task=task,
+                        app_version=self._app_version,
+                    ),
+                }
+        except Exception as exc:
+            logger.exception("Heartbeat worker failed")
+            payload = {"state": "error", "error": str(exc)}
+
+        try:
+            self.signals.heartbeat_complete.emit(payload)
+        except RuntimeError:
+            # The window may have been destroyed while the request was running.
+            pass
+
+    def _apply_heartbeat_result(self, payload: object) -> None:
+        """Apply heartbeat state on the Qt thread after the worker completes."""
+        self._heartbeat_in_flight = False
+        if self._closed:
+            return
+
+        data = payload if isinstance(payload, dict) else {}
+        state = data.get("state")
+        if state == "disabled":
             self._online_dot.setStyleSheet(
-                f"background-color: {Colors.ERROR}; border-radius: 4px;"
+                f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
             )
-            self._connection_label.setText("연결 오류")
+            self._connection_label.setText("로컬 실행")
             self._connection_label.setStyleSheet(
-                f"color: {Colors.ERROR}; font-size: 8pt; font-weight: 700; background: transparent;"
+                f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
             )
-            self._server_label.setText("서버 연결: 오류")
-            self.status_label.setText("연결 오류")
+            self._server_label.setText("서버 연결: 로컬 모드")
+            if not self.is_running:
+                self.status_label.setText("로컬 실행")
+            return
+
+        if state == "logged_out":
+            self._online_dot.setStyleSheet(
+                f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;"
+            )
+            self._connection_label.setText("로그아웃")
+            self._connection_label.setStyleSheet(
+                f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; background: transparent;"
+            )
+            self.status_label.setText("로그아웃")
+            self._server_label.setText("서버 연결: 로그아웃")
+            if not self._session_expiry_notified:
+                show_warning(self, "세션 만료", "로그인 세션이 만료되었거나 로그아웃되었습니다. 다시 로그인해 주세요.")
+                self._session_expiry_notified = True
+                self._redirect_to_login_window("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.")
+            return
+
+        result = data.get("result") if state == "complete" else None
+        if isinstance(result, dict):
+            self._update_account_display()
+
+        if isinstance(result, dict) and result.get("status") is True:
+            self._session_expiry_notified = False
+            self._online_dot.setStyleSheet(
+                f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
+            )
+            self._connection_label.setText("서버 접속 중")
+            self._connection_label.setStyleSheet(
+                f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
+            )
+            self._server_label.setText("서버 연결: 정상")
+            if not self.is_running:
+                self.status_label.setText("연결됨")
+            return
+
+        self._online_dot.setStyleSheet(
+            f"background-color: {Colors.ERROR}; border-radius: 4px;"
+        )
+        self._connection_label.setText("연결 오류")
+        self._connection_label.setStyleSheet(
+            f"color: {Colors.ERROR}; font-size: 8pt; font-weight: 700; background: transparent;"
+        )
+        self._server_label.setText("서버 연결: 오류")
+        self.status_label.setText("연결 오류")
 
     def _redirect_to_login_window(self, status_message: str = ""):
         """세션 만료 시 로그인 창으로 복귀하고 현재 메인 창을 정리한다."""
@@ -4499,26 +4537,50 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _check_for_updates_silent(self):
-        """백그라운드 자동 업데이트 체크 (알림만 표시)."""
+        """Check for updates without blocking text entry or paint events."""
         if os.getenv("THREAD_AUTO_DISABLE_AUTO_UPDATE", "").strip() == "1":
-            logger.info("백그라운드 업데이트 확인 건너뜀: THREAD_AUTO_DISABLE_AUTO_UPDATE=1")
+            logger.info("Automatic update check disabled by environment")
             return
-        logger.info("백그라운드 업데이트 확인 시작")
+        if self._update_check_in_flight:
+            return
+
+        self._update_check_in_flight = True
+        threading.Thread(
+            target=self._update_check_worker,
+            daemon=True,
+            name="update-check-worker",
+        ).start()
+
+
+    def _update_check_worker(self) -> None:
+        """Check for updates without blocking text entry or paint events."""
         try:
             from src.auto_updater import AutoUpdater
 
-            updater = AutoUpdater(self._app_version)
-            update_info = updater.check_for_updates()
+            update_info = AutoUpdater(self._app_version).check_for_updates()
+            payload = {"update_info": update_info}
+        except Exception as exc:
+            logger.exception("Background update check failed")
+            payload = {"error": str(exc)}
 
-            if update_info:
-                version_text = str(update_info.get("version", "") or "").strip()
-                logger.info("자동 업데이트 발견, 즉시 업데이트를 시작합니다 (version=%s)", version_text)
-                self._run_auto_update_flow(update_info)
-        except Exception as e:
-            logger.exception("백그라운드 업데이트 확인 실패")
-            # Silent check: keep UI quiet; details are already in logs.
+        try:
+            self.signals.update_check_complete.emit(payload)
+        except RuntimeError:
+            pass
+
+    def _apply_update_check_result(self, payload: object) -> None:
+        self._update_check_in_flight = False
+        if self._closed:
             return
 
+        data = payload if isinstance(payload, dict) else {}
+        update_info = data.get("update_info")
+        if not isinstance(update_info, dict) or not update_info:
+            return
+
+        version_text = str(update_info.get("version", "") or "").strip()
+        logger.info("Update available; starting update flow (version=%s)", version_text)
+        self._run_auto_update_flow(update_info)
 
     def _run_auto_update_flow(self, update_info: dict):
         """Run download/install immediately without confirmation prompts."""
