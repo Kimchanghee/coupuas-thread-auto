@@ -2,6 +2,16 @@
 
 쓰레드(Threads) 플랫폼에 글을 자동으로 업로드하는 Windows용 Python 애플리케이션입니다.
 
+**현재 버전: v3.0.54** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
+
+## 이용권
+
+- **무료**: 매월 5회 작업
+- **주간 이용권**: 7일 19,000원
+- **월간 이용권**: 30일 49,000원
+
+이용권별 계정 수와 작업량은 앱의 결제 화면에 표시되는 최신 정책을 따릅니다. 결제 또는 이용 문의는 [GitHub Issues](https://github.com/Kimchanghee/coupuas-thread-auto/issues)에서 남길 수 있습니다.
+
 ## 주요 기능
 
 - **AI 기반 상품 분석/문구 생성**: 쿠팡 링크를 분석하고 Threads용 짧은 홍보 문구를 생성

@@ -1,14 +1,14 @@
 # Runtime dependencies
 PyQt6==6.10.2
 google-genai==2.11.0
-Pillow==12.2.0
+Pillow==12.3.0
 requests==2.33.0
 selenium==4.41.0
 webdriver-manager==4.0.2
 playwright==1.58.0
 python-dotenv==1.2.2
-cryptography==46.0.7
-pyasn1==0.6.3
+cryptography==50.0.0
+pyasn1==0.6.4
 urllib3==2.7.0
 grpcio==1.80.0
 colorama==0.4.6

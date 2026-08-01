@@ -73,58 +73,80 @@ async function authRequest(path, token, body) {
   return { response, payload };
 }
 
-async function reserveWork(userId, token) {
-  const { response, payload } = await authRequest("/user/work/reserve", token, {
-    user_id: userId,
-    token,
-  });
-  if ([404, 405, 501].includes(response.status)) {
-    const legacy = await authRequest("/user/work/check", token, {
-      user_id: userId,
-      token,
-    });
-    if (legacy.response.status === 401 || legacy.response.status === 403) {
-      throw new ManagedAiError("AUTH_REQUIRED", 401, "로그인이 만료되었습니다.");
-    }
-    if (!legacy.response.ok || !isAllowedQuotaPayload(legacy.payload)) {
-      throw new ManagedAiError(
-        "SUBSCRIPTION_REQUIRED",
-        403,
-        sanitizeText(legacy.payload?.message, 240) || "무료 사용량 또는 구독을 확인해주세요.",
-      );
-    }
-    return {
-      reservationId: `legacy:${crypto.randomUUID()}`,
-      quotaMode: "legacy",
-    };
+function reservationBody(userId, token, reservationId = "", requestId = "") {
+  const body = { user_id: userId, token };
+  if (requestId) body.idempotency_key = requestId;
+  if (reservationId) {
+    body.reservation_id = reservationId;
+    body.reserve_id = reservationId;
+    body.work_token = reservationId;
   }
-  if (response.status === 401 || response.status === 403) {
+  return body;
+}
+
+async function reserveWork(userId, token, requestId) {
+  const { response, payload } = await authRequest(
+    "/user/work/reserve",
+    token,
+    reservationBody(userId, token, "", requestId),
+  );
+  if ([404, 405, 501].includes(response.status)) {
+    throw new ManagedAiError(
+      "ATOMIC_QUOTA_UNAVAILABLE",
+      503,
+      "안전한 작업량 예약 기능을 사용할 수 없습니다. 잠시 후 다시 시도해주세요.",
+    );
+  }
+  if (response.status === 401) {
     throw new ManagedAiError("AUTH_REQUIRED", 401, "로그인이 만료되었습니다.");
   }
-  if (!response.ok || !isAllowedQuotaPayload(payload)) {
+  if (response.status === 402 || response.status === 403) {
     throw new ManagedAiError(
       "SUBSCRIPTION_REQUIRED",
       403,
-      sanitizeText(payload?.message, 240) || "무료 사용량 또는 구독을 확인해주세요.",
+      sanitizeText(payload?.message, 240) || "무료 사용량 또는 이용권을 확인해주세요.",
+    );
+  }
+  if (!response.ok) {
+    throw new ManagedAiError(
+      "QUOTA_RESERVATION_FAILED",
+      503,
+      sanitizeText(payload?.message, 240) || "작업량을 안전하게 예약하지 못했습니다.",
+    );
+  }
+  if (payload?.code === "IDEMPOTENCY_REPLAY") {
+    throw new ManagedAiError(
+      "DUPLICATE_REQUEST",
+      409,
+      "이미 처리된 요청입니다. 새 작업으로 다시 시도해주세요.",
+    );
+  }
+  if (!isAllowedQuotaPayload(payload)) {
+    throw new ManagedAiError(
+      "SUBSCRIPTION_REQUIRED",
+      403,
+      sanitizeText(payload?.message, 240) || "무료 사용량 또는 이용권을 확인해주세요.",
     );
   }
   const reservationId = extractReservationId(payload);
   if (!reservationId) {
-    throw new ManagedAiError("RESERVATION_INVALID", 409, "작업량 예약 ID를 받지 못했습니다.");
+    throw new ManagedAiError(
+      "RESERVATION_INVALID",
+      503,
+      "작업량 예약 ID를 받지 못해 안전상 요청을 중단했습니다.",
+    );
   }
-  return { reservationId, quotaMode: "reservation" };
+  return reservationId;
 }
 
-async function releaseWork(userId, token, reservationId) {
+async function releaseWork(userId, token, reservationId, requestId) {
   if (!reservationId) return;
   try {
-    await authRequest("/user/work/release", token, {
-      user_id: userId,
+    await authRequest(
+      "/user/work/release",
       token,
-      reservation_id: reservationId,
-      reserve_id: reservationId,
-      work_token: reservationId,
-    });
+      reservationBody(userId, token, reservationId, requestId),
+    );
   } catch {
     // The authentication service owns reservation TTL recovery.
   }
@@ -181,9 +203,12 @@ export default async function handler(req, res) {
   }
 
   let reservationId = "";
-  let quotaMode = "";
   let userId = "";
   let loginToken = "";
+  const requestId = sanitizeText(
+    req.headers["idempotency-key"] || crypto.randomUUID(),
+    120,
+  );
   try {
     const authorization = String(req.headers.authorization || "");
     loginToken = authorization.replace(/^Bearer\s+/i, "").trim();
@@ -202,7 +227,7 @@ export default async function handler(req, res) {
     }
 
     const product = normalizeProduct(body?.product);
-    ({ reservationId, quotaMode } = await reserveWork(userId, loginToken));
+    reservationId = await reserveWork(userId, loginToken, requestId);
 
     const gatewayToken = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
     if (!gatewayToken) {
@@ -242,16 +267,11 @@ export default async function handler(req, res) {
       degradedReason = "ai_credits_required";
       variants = validateVariants(buildFallbackVariants(product), product);
     }
-    const requestId = sanitizeText(
-      req.headers["idempotency-key"] || crypto.randomUUID(),
-      120,
-    );
-
     sendJson(res, 200, {
       success: true,
       ai_job_id: requestId,
       reservation_id: reservationId,
-      quota_mode: quotaMode,
+      quota_mode: "reservation",
       prompt_version: "threads-ko-v1",
       model,
       degraded,
@@ -260,8 +280,8 @@ export default async function handler(req, res) {
       request_ip_hash_basis: requestIp(req) ? "present" : "missing",
     });
   } catch (error) {
-    if (reservationId && quotaMode === "reservation") {
-      await releaseWork(userId, loginToken, reservationId);
+    if (reservationId) {
+      await releaseWork(userId, loginToken, reservationId, requestId);
     }
     const managed = error instanceof ManagedAiError;
     const gatewayStatus = Number(error?.status || 0);

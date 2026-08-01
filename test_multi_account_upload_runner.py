@@ -3,9 +3,12 @@ from types import SimpleNamespace
 from src.services.account_queue import AccountQueueStore
 from src.services.link_history import LinkHistory
 from src.services.multi_account_upload_runner import (
+    AccountBlockedError,
+    AuthQuotaAdapter,
     MultiAccountUploadRunner,
     QuotaReservation,
 )
+import pytest
 
 
 class FakePipeline:
@@ -81,6 +84,29 @@ class FakeQuota:
     def release(self, _reservation):
         self.released += 1
         return self.release_result
+
+
+def test_auth_quota_adapter_passes_stable_key_and_fails_closed(monkeypatch):
+    from src import auth_client
+
+    monkeypatch.delenv("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", raising=False)
+    captured = []
+    monkeypatch.setattr(
+        auth_client,
+        "reserve_work",
+        lambda key: captured.append(key) or {"success": True, "reservation_id": "r-1"},
+    )
+    adapter = AuthQuotaAdapter()
+    assert adapter.reserve("queue-key").reservation_id == "r-1"
+    assert captured == ["queue-key"]
+
+    monkeypatch.setattr(
+        auth_client,
+        "reserve_work",
+        lambda _key: {"success": False, "unsupported": True},
+    )
+    with pytest.raises(AccountBlockedError, match="안전한 작업 예약"):
+        adapter.reserve("queue-key")
 
 
 def _build_runner(tmp_path, helper, quota=None):

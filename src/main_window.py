@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
     QLineEdit, QSpinBox, QCheckBox, QButtonGroup, QComboBox,
     QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QTabBar
+    QScrollArea, QTabBar, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QDesktopServices
@@ -256,6 +256,7 @@ class MainWindow(QMainWindow):
         self._resume_state_path = Path(config.config_dir) / "upload_resume_queue.json"
         self._resume_state_lock = threading.RLock()
         self._resume_items = []
+        self._resume_recovered_idempotency_keys = {}
         self._resume_interval = max(int(getattr(config, "upload_interval", 60) or 60), 30)
         self._resume_next_allowed_at = None
         self._session_expiry_notified = False
@@ -1717,7 +1718,7 @@ class MainWindow(QMainWindow):
         payment_title.setGeometry(24, 14, 220, 22)
         payment_title.setStyleSheet(_section_title_style)
 
-        payment_desc = QLabel("무료 월 5회 · 7일권 1계정 · 월 정기권 다계정", self._settings_payment_sec)
+        payment_desc = QLabel("무료 월 5회 · 7일권 프로그램 내 1계정 · 월 정기권 다계정", self._settings_payment_sec)
         payment_desc.setGeometry(24, 42, 560, 20)
         payment_desc.setStyleSheet("color: #B8B8B8; font-size: 12px; font-weight: 500; background: transparent; border: none;")
 
@@ -2373,7 +2374,13 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _is_resume_unfinished(status: str) -> bool:
-        return str(status or "").lower() in {"pending", "running"}
+        return str(status or "").lower() in {
+            "pending",
+            "running",
+            "posting",
+            "posting_unknown",
+            "posted_commit_pending",
+        }
 
     def _load_resume_state_file(self) -> dict:
         try:
@@ -2392,14 +2399,132 @@ class MainWindow(QMainWindow):
         for item in items:
             if not isinstance(item, dict):
                 continue
-            if not self._is_resume_unfinished(item.get("status")):
+            if str(item.get("status") or "").lower() not in {"pending", "running"}:
                 continue
             url = str(item.get("url") or "").strip()
             if not url:
                 continue
             keyword = str(item.get("keyword") or item.get("title") or "").strip() or None
+            request_id = str(item.get("idempotency_key") or "").strip()
+            if request_id:
+                recovered = getattr(self, "_resume_recovered_idempotency_keys", None)
+                if recovered is None:
+                    recovered = self._resume_recovered_idempotency_keys = {}
+                recovered[url] = request_id
             pending.append((url, keyword))
         return self._normalize_link_data(pending)
+
+    def _reconcile_posted_commit_items(self, state: dict) -> dict:
+        """Retry quota commits for posts that already succeeded externally."""
+        items = state.get("items", []) if isinstance(state, dict) else []
+        changed = False
+        for item in items:
+            if not isinstance(item, dict) or str(item.get("status") or "").lower() != "posted_commit_pending":
+                continue
+            reservation_id = str(item.get("reservation_id") or "").strip()
+            if not reservation_id:
+                item["last_error"] = "missing_reservation_id"
+                continue
+            try:
+                from src import auth_client
+
+                result = auth_client.commit_reserved_work(reservation_id)
+            except Exception:
+                logger.exception("Posted item quota commit recovery failed")
+                result = {"success": False}
+            if isinstance(result, dict) and self._is_work_allowed(result):
+                item["status"] = "completed"
+                item["updated_at"] = datetime.now().astimezone().isoformat()
+                item.pop("reservation_id", None)
+                item.pop("idempotency_key", None)
+                item.pop("last_error", None)
+                changed = True
+            else:
+                item["last_error"] = "quota_commit_retry_pending"
+
+        if changed or any(
+            isinstance(item, dict)
+            and str(item.get("status") or "").lower() == "posted_commit_pending"
+            for item in items
+        ):
+            with self._resume_state_lock:
+                self._resume_items = [dict(item) for item in items if isinstance(item, dict)]
+                self._resume_interval = max(int(state.get("interval") or 60), 30)
+                self._resume_next_allowed_at = state.get("next_allowed_at")
+            self._save_resume_state("posted_commit_reconcile")
+        return state
+
+    def _reconcile_ambiguous_post_items(self, state: dict) -> dict:
+        """Let the user resolve an external post whose result is unknowable."""
+        items = state.get("items", []) if isinstance(state, dict) else []
+        changed = False
+        for item in items:
+            if not isinstance(item, dict) or str(item.get("status") or "").lower() not in {
+                "posting",
+                "posting_unknown",
+            }:
+                continue
+            title = str(item.get("product_title") or item.get("url") or "게시글")
+            choice = QMessageBox.question(
+                self,
+                "게시 결과 확인",
+                (
+                    f"'{title[:60]}' 게시 중 프로그램이 중단되었거나 결과를 확인하지 못했습니다.\n\n"
+                    "Threads에서 게시됐는지 확인한 뒤 선택하세요.\n"
+                    "예: 게시됨(작업량 확정)\n"
+                    "아니요: 게시 안 됨(예약 해제 후 다시 대기)\n"
+                    "취소: 지금은 그대로 보관"
+                ),
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            reservation_id = str(item.get("reservation_id") or "").strip()
+            if choice == QMessageBox.StandardButton.Yes:
+                if reservation_id:
+                    try:
+                        from src import auth_client
+
+                        result = auth_client.commit_reserved_work(reservation_id)
+                    except Exception:
+                        logger.exception("Ambiguous post quota commit failed")
+                        result = {"success": False}
+                    if not isinstance(result, dict) or not self._is_work_allowed(result):
+                        item["last_error"] = "quota_commit_retry_pending"
+                        continue
+                item["status"] = "completed"
+                item["updated_at"] = datetime.now().astimezone().isoformat()
+                item.pop("reservation_id", None)
+                item.pop("idempotency_key", None)
+                item.pop("last_error", None)
+                changed = True
+            elif choice == QMessageBox.StandardButton.No:
+                if reservation_id:
+                    try:
+                        from src import auth_client
+
+                        result = auth_client.release_reserved_work(reservation_id)
+                    except Exception:
+                        logger.exception("Ambiguous post quota release failed")
+                        result = {"success": False}
+                    if not isinstance(result, dict) or not self._is_work_allowed(result):
+                        item["last_error"] = "quota_release_retry_pending"
+                        continue
+                item["status"] = "pending"
+                item["updated_at"] = datetime.now().astimezone().isoformat()
+                item.pop("reservation_id", None)
+                item.pop("idempotency_key", None)
+                item.pop("last_error", None)
+                changed = True
+
+        if changed:
+            with self._resume_state_lock:
+                self._resume_items = [dict(item) for item in items if isinstance(item, dict)]
+                self._resume_interval = max(int(state.get("interval") or 60), 30)
+                self._resume_next_allowed_at = state.get("next_allowed_at")
+            self._save_resume_state("ambiguous_post_reconcile")
+        return state
 
     def _save_resume_state(self, reason: str = "") -> None:
         with self._resume_state_lock:
@@ -2464,12 +2589,25 @@ class MainWindow(QMainWindow):
                     "product_title": "",
                     "updated_at": now_text,
                     "source": source,
+                    "idempotency_key": str(
+                        getattr(self, "_resume_recovered_idempotency_keys", {}).get(url)
+                        or ""
+                    ),
                 }
                 for url, keyword in normalized
             ]
         self._save_resume_state(f"{source}_start")
 
-    def _mark_resume_item(self, url: str, status: str, product_title: str = "", error: str = "") -> None:
+    def _mark_resume_item(
+        self,
+        url: str,
+        status: str,
+        product_title: str = "",
+        error: str = "",
+        *,
+        reservation_id: str = "",
+        idempotency_key: str = "",
+    ) -> None:
         url_text = str(url or "").strip()
         if not url_text:
             return
@@ -2483,6 +2621,19 @@ class MainWindow(QMainWindow):
                     item["product_title"] = str(product_title)
                 if error:
                     item["last_error"] = str(error)[:300]
+                if reservation_id:
+                    item["reservation_id"] = str(reservation_id)
+                if idempotency_key:
+                    item["idempotency_key"] = str(idempotency_key)
+                    recovered = getattr(self, "_resume_recovered_idempotency_keys", None)
+                    if recovered is None:
+                        recovered = self._resume_recovered_idempotency_keys = {}
+                    recovered[url_text] = str(idempotency_key)
+                if str(status).lower() == "completed":
+                    item.pop("reservation_id", None)
+                    item.pop("idempotency_key", None)
+                    item.pop("last_error", None)
+                    getattr(self, "_resume_recovered_idempotency_keys", {}).pop(url_text, None)
                 break
         self._save_resume_state(f"item_{status}")
 
@@ -2555,6 +2706,8 @@ class MainWindow(QMainWindow):
         if self.is_running:
             return
         state = self._load_resume_state_file()
+        state = self._reconcile_posted_commit_items(state)
+        state = self._reconcile_ambiguous_post_items(state)
         pending = self._resume_pending_link_data(state)
         if not pending:
             return
@@ -4992,6 +5145,7 @@ class MainWindow(QMainWindow):
 
                 log("상품 정보 분석 중...")
 
+                external_post_attempted = False
                 try:
                     # Step 1: Content generation (parse + AI)
                     self.signals.step_update.emit(0, "done")
@@ -5077,13 +5231,54 @@ class MainWindow(QMainWindow):
 
                     # Reserve work token when backend supports atomic quota flow.
                     if not quota_bypass and not reserved_work_id:
+                        reservation_request_id = str(
+                            getattr(self, "_resume_recovered_idempotency_keys", {}).get(url)
+                            or post_data.get("managed_ai_job_id")
+                            or hashlib.sha256(
+                                f"{url}|{time.time_ns()}".encode("utf-8")
+                            ).hexdigest()
+                        )
+                        self._mark_resume_item(
+                            url,
+                            "running",
+                            product_name,
+                            idempotency_key=reservation_request_id,
+                        )
                         try:
                             from src import auth_client
-                            reserve_result = auth_client.reserve_work()
+                            reserve_result = auth_client.reserve_work(reservation_request_id)
+                            if (
+                                isinstance(reserve_result, dict)
+                                and reserve_result.get("code") == "IDEMPOTENCY_REPLAY"
+                                and str(reserve_result.get("reservation_status") or "").lower()
+                                in {"released", "expired"}
+                            ):
+                                # The old attempt is conclusively known not to
+                                # have posted. Rotate once before the external
+                                # side effect and start a genuinely new attempt.
+                                reservation_request_id = hashlib.sha256(
+                                    f"{url}|{time.time_ns()}|retry".encode("utf-8")
+                                ).hexdigest()
+                                self._mark_resume_item(
+                                    url,
+                                    "running",
+                                    product_name,
+                                    idempotency_key=reservation_request_id,
+                                )
+                                reserve_result = auth_client.reserve_work(
+                                    reservation_request_id
+                                )
                             if isinstance(reserve_result, dict) and reserve_result.get("unsupported"):
-                                log("작업 예약 API를 지원하지 않아 기존 과금 동기화를 사용합니다.")
-                                reservation_supported = False
-                                reserved_work_id = None
+                                log("안전한 작업 예약 기능을 사용할 수 없어 업로드를 중단합니다.")
+                                emit_run_state(
+                                    "blocked",
+                                    "안전한 작업 예약 기능을 사용할 수 없습니다.",
+                                    product_name or current_label,
+                                    pending=self.link_queue.qsize() + 1,
+                                    completed=max(processed_count - 1, 0),
+                                )
+                                results["cancelled"] = True
+                                break
                             elif not self._is_work_allowed(reserve_result):
                                 quota_message = (
                                     reserve_result.get("message", "사용 가능한 작업량이 없습니다.")
@@ -5116,6 +5311,13 @@ class MainWindow(QMainWindow):
                                     )
                                     results["cancelled"] = True
                                     break
+                                self._mark_resume_item(
+                                    url,
+                                    "running",
+                                    product_name,
+                                    reservation_id=reserved_work_id,
+                                    idempotency_key=reservation_request_id,
+                                )
                         except Exception:
                             logger.exception("업로드 루프에서 작업량 예약 실패")
                             log("작업 예약 실패로 업로드를 중단합니다.")
@@ -5129,20 +5331,38 @@ class MainWindow(QMainWindow):
                             results["cancelled"] = True
                             break
 
+                    # Persist the ambiguous external side-effect boundary before
+                    # asking Threads to publish. A crash from this point onward
+                    # must never cause an automatic duplicate upload.
+                    self._mark_resume_item(
+                        url,
+                        "posting",
+                        product_name,
+                        reservation_id=reserved_work_id,
+                        idempotency_key=reservation_request_id,
+                    )
+                    external_post_attempted = True
                     success = helper.create_thread_direct(posts_data)
                     recorded_success = bool(success)
                     stop_for_billing_sync = False
                     pause_for_threads_ui = False
                     helper_error = str(getattr(helper, "last_error", "") or "")
                     if success:
-                        self._mark_resume_item(url, "completed", product_name)
                         if quota_bypass:
+                            self._mark_resume_item(url, "completed", product_name)
                             results["uploaded"] += 1
                             log(f"업로드 성공: {product_name}")
                             self.signals.step_update.emit(2, "done")
                             self.signals.step_update.emit(3, "done")
                             self.signals.link_status.emit(url, "완료", product_name)
                         else:
+                            if reservation_supported and reserved_work_id:
+                                self._mark_resume_item(
+                                    url,
+                                    "posted_commit_pending",
+                                    product_name,
+                                    reservation_id=reserved_work_id,
+                                )
                             try:
                                 from src import auth_client
                                 if reservation_supported and reserved_work_id:
@@ -5169,6 +5389,7 @@ class MainWindow(QMainWindow):
                                     self.signals.step_update.emit(3, "error")
                                     self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
                                 else:
+                                    self._mark_resume_item(url, "completed", product_name)
                                     results["uploaded"] += 1
                                     log(f"업로드 성공: {product_name}")
                                     self.signals.step_update.emit(2, "done")
@@ -5190,12 +5411,14 @@ class MainWindow(QMainWindow):
                                 self.signals.step_update.emit(3, "error")
                                 self.signals.link_status.emit(url, "실패", "과금 동기화 실패")
                     else:
-                        if reservation_supported and reserved_work_id:
-                            try:
-                                from src import auth_client
-                                auth_client.release_reserved_work(reserved_work_id)
-                            except Exception:
-                                logger.exception("업로드 실패 후 예약 작업량 해제 실패")
+                        self._mark_resume_item(
+                            url,
+                            "posting_unknown",
+                            product_name,
+                            helper_error or "upload_result_unknown",
+                            reservation_id=reserved_work_id,
+                            idempotency_key=reservation_request_id,
+                        )
                         ui_blocker_tokens = (
                             "login_prompt",
                             "login_popup",
@@ -5206,7 +5429,7 @@ class MainWindow(QMainWindow):
                             pause_for_threads_ui = True
                             results["cancelled"] = True
                             blocker = helper_error or "threads_ui_unavailable"
-                            self._mark_resume_item(url, "pending", product_name, blocker)
+                            self._mark_resume_item(url, "posting_unknown", product_name, blocker)
                             log(f"Threads 로그인/작성창 확인 필요: {blocker}. 현재 항목을 보존하고 중단합니다.")
                             emit_run_state(
                                 "blocked",
@@ -5219,7 +5442,7 @@ class MainWindow(QMainWindow):
                             self.signals.link_status.emit(url, "대기", "Threads 확인 필요")
                         else:
                             results["failed"] += 1
-                            self._mark_resume_item(url, "failed", product_name, helper_error or "upload_failed")
+                            self._mark_resume_item(url, "posting_unknown", product_name, helper_error or "upload_failed")
                             log(f"업로드 실패: {product_name}")
                             self.signals.step_update.emit(2, "error")
                             self.signals.link_status.emit(url, "실패", product_name)
@@ -5241,7 +5464,11 @@ class MainWindow(QMainWindow):
                         results["cancelled"] = True
                         break
                 except Exception as exc:
-                    if reservation_supported and reserved_work_id:
+                    if (
+                        reservation_supported
+                        and reserved_work_id
+                        and not external_post_attempted
+                    ):
                         try:
                             from src import auth_client
                             auth_client.release_reserved_work(reserved_work_id)

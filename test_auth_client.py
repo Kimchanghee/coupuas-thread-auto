@@ -651,6 +651,85 @@ def test_reserve_work_short_circuits_when_unsupported_cached(monkeypatch):
     assert len(session.calls) == 0
 
 
+def test_reserve_work_sends_stable_idempotency_key(monkeypatch):
+    _reset_auth_state()
+    auth_client._WORK_RESERVATION_SUPPORTED = None
+    auth_client._auth_state["user_id"] = 1
+    auth_client._auth_state["token"] = "token-1"
+    session = _FakeSession(
+        _FakeResponse(200, {"success": True, "reservation_id": "reservation-1"})
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.reserve_work("queue-item-1")
+
+    assert result["success"] is True
+    assert session.calls[-1]["json"]["idempotency_key"] == "queue-item-1"
+    assert session.calls[-1]["headers"]["Idempotency-Key"] == "queue-item-1"
+
+
+def test_reserve_work_recovers_exact_replayed_reservation(monkeypatch):
+    _reset_auth_state()
+    auth_client._WORK_RESERVATION_SUPPORTED = None
+    auth_client._auth_state["user_id"] = 1
+    auth_client._auth_state["token"] = "token-1"
+    monkeypatch.setattr(
+        auth_client,
+        "_session",
+        _FakeSession(
+            _FakeResponse(
+                200,
+                {
+                    "success": False,
+                    "code": "IDEMPOTENCY_REPLAY",
+                    "reservation_id": "existing-reservation",
+                    "reservation_status": "reserved",
+                },
+            )
+        ),
+    )
+
+    result = auth_client.reserve_work("persisted-queue-key")
+
+    assert result["success"] is True
+    assert result["recovered"] is True
+    assert result["reservation_id"] == "existing-reservation"
+
+
+def test_reserve_work_does_not_recover_released_replay(monkeypatch):
+    _reset_auth_state()
+    auth_client._WORK_RESERVATION_SUPPORTED = None
+    auth_client._auth_state["user_id"] = 1
+    auth_client._auth_state["token"] = "token-1"
+    monkeypatch.setattr(
+        auth_client,
+        "_session",
+        _FakeSession(
+            _FakeResponse(
+                200,
+                {
+                    "success": False,
+                    "code": "IDEMPOTENCY_REPLAY",
+                    "reservation_id": "released-reservation",
+                    "reservation_status": "released",
+                },
+            )
+        ),
+    )
+
+    result = auth_client.reserve_work("released-key")
+
+    assert result["success"] is False
+    assert result.get("recovered") is not True
+
+
+def test_default_weekly_checkout_uses_supported_card_method(monkeypatch):
+    monkeypatch.delenv("THREAD_AUTO_PAYAPP_PAYMENT_TYPE", raising=False)
+    assert auth_client._resolve_default_payapp_payment_type() == "card"
+    assert "card" in auth_client._ALLOWED_PAYAPP_PAYMENT_TYPES
+    assert "vbank" not in auth_client._ALLOWED_PAYAPP_PAYMENT_TYPES
+
+
 def test_remember_username_persists_lowercase(monkeypatch):
     captured = {}
 

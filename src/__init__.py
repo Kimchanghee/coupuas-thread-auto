@@ -15,5 +15,5 @@ Coupang Partners Thread Auto - 소스 패키지
 하위 패키지:
 - services: 서비스 모듈 (coupang_parser, aggro_generator, image_search)
 """
-__version__ = "3.0.51"
+__version__ = "3.0.54"
 __author__ = "와이엠"

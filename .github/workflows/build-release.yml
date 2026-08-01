@@ -8,6 +8,11 @@ on:
       - "v*.*.*"
     paths:
       - "src/**"
+      - "api/**"
+      - "public/**"
+      - "tests_js/**"
+      - "test_*.py"
+      - "conftest.py"
       - "main.py"
       - "login_main.py"
       - "requirements.lock"
@@ -63,7 +68,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --require-hashes -r requirements.lock
+          python -m pip install pytest==9.1.1
           python -m playwright install chromium
+
+      - name: Run automated tests
+        run: |
+          python -m pytest -q
+          node --test tests_js/*.test.mjs
 
       - name: Get version
         id: get_version
@@ -130,7 +141,7 @@ jobs:
 
       - name: Install Inno Setup
         run: |
-          choco install innosetup --no-progress -y
+          choco install innosetup --version=6.6.1 --no-progress -y
 
       - name: Build installer
         env:
@@ -212,13 +223,14 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Release ${{ needs.build.outputs.version }}
           body: |
-            서버 관리형 AI와 다중 Threads 계정 자동화를 추가한 버전입니다.
+            작업량·결제 보안을 강화하고 공식 제품 안내를 정비한 릴리스입니다.
 
             ### 주요 변경 사항
-            - 별도 AI API 키 없이 로그인과 이용권만으로 네 가지 Threads 문안을 생성합니다.
-            - 상품 타깃과 사용 장면을 분석해 후킹 본문과 상품 답글을 분리 생성합니다.
-            - 계정별 브라우저 프로필, 대기열, 업로드 이력 및 재개 상태를 지원합니다.
-            - xAI 우선 생성과 제한된 장애 대체 경로, Vercel 상태 확인 API를 추가했습니다.
+            - 별도 API 키 없이 관리형 AI로 네 가지 Threads 문안을 생성합니다.
+            - 월 5회 무료 작업과 주간 19,000원·월간 49,000원 이용권을 제공합니다.
+            - 작업량을 원자적으로 예약·확정·해제해 중복 차감과 확인 전용 우회를 차단합니다.
+            - 요금제에 맞춰 여러 Threads 계정의 대기열, 업로드 이력과 재개 상태를 관리합니다.
+            - 브라우저 로그인 세션을 사용자 PC에 암호화해 보관하고 보안 의존성을 갱신했습니다.
 
             Windows 사용자는 설치형 파일을 받으면 됩니다.
             - 설치형: `CoupangThreadAutoSetup.exe`
@@ -245,7 +257,7 @@ jobs:
             {
               "tag_name": "${{ needs.build.outputs.version }}",
               "release_name": "Release ${{ needs.build.outputs.version }}",
-              "body": "서버 관리형 AI와 다중 Threads 계정 자동화: 별도 AI API 키 없이 네 가지 문안을 생성하고 계정별 대기열과 업로드 이력을 관리합니다.",
+              "body": "${{ needs.build.outputs.version }}: 별도 API 키 없는 관리형 AI, 월 5회 무료 작업, 원자적 작업량 처리, 결제·세션 보안 강화와 요금제별 계정 운영을 제공합니다.",
               "installer_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
               "standalone_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAuto.exe",
               "metadata_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/latest.json"

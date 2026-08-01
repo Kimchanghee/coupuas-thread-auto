@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -51,23 +52,18 @@ class AuthQuotaAdapter:
         ).strip().lower()
         return value in {"1", "true", "yes", "y", "on"}
 
-    def reserve(self) -> QuotaReservation:
+    def reserve(self, idempotency_key: str | None = None) -> QuotaReservation:
         if self._bypass_enabled():
             return QuotaReservation(bypass=True)
 
         from src import auth_client
 
-        result = auth_client.reserve_work()
+        result = auth_client.reserve_work(idempotency_key)
         if isinstance(result, dict) and result.get("unsupported"):
-            availability = auth_client.check_work_available()
-            if not self._allowed(availability):
-                message = (
-                    availability.get("message", "사용 가능한 작업량이 없습니다.")
-                    if isinstance(availability, dict)
-                    else "작업량 확인에 실패했습니다."
-                )
-                raise AccountBlockedError("quota_unavailable", str(message))
-            return QuotaReservation(legacy=True)
+            raise AccountBlockedError(
+                "quota_reservation_unsupported",
+                "안전한 작업 예약 기능을 사용할 수 없어 업로드를 중단합니다.",
+            )
         if not self._allowed(result):
             message = (
                 result.get("message", "사용 가능한 작업량이 없습니다.")
@@ -368,7 +364,17 @@ class MultiAccountUploadRunner:
                     pending_count=self._pending_count(queue_store),
                 )
             if reservation is None:
-                reservation = self._quota.reserve()
+                item_id = str(item.get("item_id") or "").strip()
+                idempotency_key = str(item.get("idempotency_key") or "").strip()
+                if not idempotency_key:
+                    idempotency_key = hashlib.sha256(
+                        f"{account_id}|{item_id}|{url}".encode("utf-8")
+                    ).hexdigest()
+                    queue_store.update_current(idempotency_key=idempotency_key)
+                if isinstance(self._quota, AuthQuotaAdapter):
+                    reservation = self._quota.reserve(idempotency_key)
+                else:
+                    reservation = self._quota.reserve()
             queue_store.update_current(
                 stage="reserved",
                 reservation_id=str(getattr(reservation, "reservation_id", "") or ""),

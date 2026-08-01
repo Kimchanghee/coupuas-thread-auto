@@ -49,7 +49,7 @@ const gatewayVariants = {
   ],
 };
 
-test("falls back to legacy check/use quota contract when reserve is unsupported", async (t) => {
+test("fails closed without calling AI when atomic reservation is unsupported", async (t) => {
   const originalFetch = globalThis.fetch;
   const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
   process.env.AI_GATEWAY_API_KEY = "test-gateway-key";
@@ -63,21 +63,9 @@ test("falls back to legacy check/use quota contract when reserve is unsupported"
   });
 
   const calls = [];
-  const gatewayRequests = [];
-  globalThis.fetch = async (url, options = {}) => {
+  globalThis.fetch = async (url) => {
     calls.push(String(url));
-    if (calls.length === 1) {
-      return jsonResponse(404, { success: false });
-    }
-    if (calls.length === 2) {
-      return jsonResponse(200, { available: true });
-    }
-    gatewayRequests.push(JSON.parse(options.body));
-    return jsonResponse(403, {
-      error: {
-        message: "AI Gateway requires a valid credit card on file.",
-      },
-    });
+    return jsonResponse(404, { success: false });
   };
 
   const req = {
@@ -103,18 +91,169 @@ test("falls back to legacy check/use quota contract when reserve is unsupported"
   await handler(req, res);
 
   const payload = JSON.parse(res.body);
+  assert.equal(res.statusCode, 503);
+  assert.equal(payload.success, false);
+  assert.equal(payload.code, "ATOMIC_QUOTA_UNAVAILABLE");
+  assert.match(calls[0], /\/user\/work\/reserve$/);
+  assert.equal(calls.length, 1);
+});
+
+test("rejects an idempotency replay without calling AI again", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
+  process.env.AI_GATEWAY_API_KEY = "test-gateway-key";
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalGatewayKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = originalGatewayKey;
+  });
+
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return jsonResponse(200, {
+      success: false,
+      allowed: false,
+      code: "IDEMPOTENCY_REPLAY",
+      reservation_id: "existing-reservation",
+    });
+  };
+
+  const req = {
+    method: "POST",
+    headers: {
+      authorization: "Bearer login-token",
+      "idempotency-key": "already-used-request",
+    },
+    body: {
+      user_id: "user-1",
+      product: {
+        title: "접이식 캠핑 웨건 카트",
+        url: "https://link.coupang.com/a/example",
+        keywords: "캠핑 웨건",
+        features: ["접이식"],
+      },
+      client: { schema_version: 1 },
+    },
+  };
+  const res = mockResponse();
+
+  await handler(req, res);
+
+  const payload = JSON.parse(res.body);
+  assert.equal(res.statusCode, 409);
+  assert.equal(payload.code, "DUPLICATE_REQUEST");
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /\/user\/work\/reserve$/);
+});
+
+test("reserves atomically and releases the reservation when generation fails", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
+  process.env.AI_GATEWAY_API_KEY = "test-gateway-key";
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalGatewayKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = originalGatewayKey;
+  });
+
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), body: JSON.parse(options.body || "{}") });
+    if (requests.length === 1) {
+      return jsonResponse(200, { success: true, reservation_id: "reserve-1" });
+    }
+    if (requests.length === 2) {
+      return jsonResponse(500, { error: { message: "provider unavailable" } });
+    }
+    return jsonResponse(200, { success: true, released: true });
+  };
+
+  const req = {
+    method: "POST",
+    headers: {
+      authorization: "Bearer login-token",
+      "idempotency-key": "request-atomic-1",
+    },
+    body: {
+      user_id: "user-1",
+      product: {
+        title: "접이식 캠핑 웨건 카트",
+        url: "https://link.coupang.com/a/example",
+        keywords: "캠핑 웨건",
+        features: ["접이식"],
+      },
+      client: { schema_version: 1 },
+    },
+  };
+  const res = mockResponse();
+
+  await handler(req, res);
+
+  const payload = JSON.parse(res.body);
+  assert.equal(res.statusCode, 503);
+  assert.equal(payload.success, false);
+  assert.equal(payload.code, "AI_TEMPORARILY_UNAVAILABLE");
+  assert.deepEqual(
+    requests.map((item) => new URL(item.url).pathname),
+    ["/user/work/reserve", "/v1/chat/completions", "/user/work/release"],
+  );
+  assert.equal(requests[0].body.idempotency_key, "request-atomic-1");
+  assert.equal(requests[2].body.reservation_id, "reserve-1");
+  assert.equal(requests[2].body.idempotency_key, "request-atomic-1");
+});
+
+test("returns an atomic reservation for the desktop to commit after upload", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
+  process.env.AI_GATEWAY_API_KEY = "test-gateway-key";
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    if (originalGatewayKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = originalGatewayKey;
+  });
+
+  const requests = [];
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), body: JSON.parse(options.body || "{}") });
+    if (requests.length === 1) {
+      return jsonResponse(200, { allowed: true, work_token: "reserve-success-1" });
+    }
+    return jsonResponse(200, {
+      choices: [{ message: { content: JSON.stringify(gatewayVariants) } }],
+    });
+  };
+
+  const req = {
+    method: "POST",
+    headers: {
+      authorization: "Bearer login-token",
+      "idempotency-key": "request-success-1",
+    },
+    body: {
+      user_id: "user-1",
+      product: {
+        title: "접이식 캠핑 웨건 카트",
+        url: "https://link.coupang.com/a/example",
+        keywords: "캠핑 웨건",
+        features: ["접이식"],
+      },
+      client: { schema_version: 1 },
+    },
+  };
+  const res = mockResponse();
+
+  await handler(req, res);
+
+  const payload = JSON.parse(res.body);
   assert.equal(res.statusCode, 200);
   assert.equal(payload.success, true);
-  assert.equal(payload.quota_mode, "legacy");
-  assert.equal(payload.model, "template-fallback");
-  assert.equal(payload.degraded, true);
-  assert.equal(payload.degraded_reason, "ai_credits_required");
-  assert.match(payload.reservation_id, /^legacy:/);
+  assert.equal(payload.reservation_id, "reserve-success-1");
+  assert.equal(payload.quota_mode, "reservation");
   assert.equal(payload.variants.length, 4);
-  assert.match(calls[0], /\/user\/work\/reserve$/);
-  assert.match(calls[1], /\/user\/work\/check$/);
-  assert.equal(calls[2], "https://ai-gateway.vercel.sh/v1/chat/completions");
-  assert.equal(calls.length, 3);
-  assert.equal(gatewayRequests.length, 1);
-  assert.equal(gatewayRequests[0].model, "xai/grok-4.3");
+  assert.deepEqual(
+    requests.map((item) => new URL(item.url).pathname),
+    ["/user/work/reserve", "/v1/chat/completions"],
+  );
+  assert.equal(requests[0].body.idempotency_key, "request-success-1");
 });

@@ -239,7 +239,8 @@ colorama==0.4.6 \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
     # via -r requirements.txt
-cryptography==46.0.7 \
+cryptography==50.0.0 \
+    --hash=sha256:bd1c592e4d5974f0d08d4888e432157adba757c66da0246918e43677fafa2d30 \
     --hash=sha256:04959522f938493042d595a736e7dbdff6eb6cc2339c11465b3ff89343b65f65 \
     --hash=sha256:128c5edfe5e5938b86b03941e94fac9ee793a94452ad1365c9fc3f4f62216832 \
     --hash=sha256:1d25aee46d0c6f1a501adcddb2d2fee4b979381346a78558ed13e50aa8a59067 \
@@ -464,7 +465,8 @@ pefile==2024.8.26 \
     # via
     #   -r requirements.txt
     #   pyinstaller
-pillow==12.2.0 \
+pillow==12.3.0 \
+    --hash=sha256:8e95e1385e4998ae9694eeaa4730ba5457ff61185b3a55e2e7bea0880aef452a \
     --hash=sha256:00a2865911330191c0b818c59103b58a5e697cae67042366970a6b6f1b20b7f9 \
     --hash=sha256:01afa7cf67f74f09523699b4e88c73fb55c13346d212a59a2db1f86b0a63e8c5 \
     --hash=sha256:03e7e372d5240cc23e9f07deca4d775c0817bffc641b01e9c3af208dbd300987 \
@@ -567,7 +569,8 @@ playwright==1.58.0 \
     --hash=sha256:a2bf639d0ce33b3ba38de777e08697b0d8f3dc07ab6802e4ac53fb65e3907af8 \
     --hash=sha256:c95568ba1eda83812598c1dc9be60b4406dffd60b149bc1536180ad108723d6b
     # via -r requirements.txt
-pyasn1==0.6.3 \
+pyasn1==0.6.4 \
+    --hash=sha256:deda9277cfd454080ec40b207fb6df82206a3a2688735233cdcd8d3d565f088b \
     --hash=sha256:697a8ecd6d98891189184ca1fa05d1bb00e2f84b5977c481452050549c8a72cf \
     --hash=sha256:a80184d120f0864a52a073acc6fc642847d0be408e7c7252f31390c0f4eadcde
     # via

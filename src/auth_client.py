@@ -12,6 +12,7 @@ import threading
 import time
 import hashlib
 import ssl
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -77,7 +78,6 @@ _ALLOWED_PAYAPP_PAYMENT_TYPES = frozenset(
     {
         "card",
         "phone",
-        "vbank",
         "kpay",
         "npay",
         "sapay",
@@ -988,7 +988,7 @@ def _resolve_default_payapp_payment_type() -> str:
     env_value = str(os.getenv("THREAD_AUTO_PAYAPP_PAYMENT_TYPE", "")).strip().lower()
     if env_value:
         return env_value
-    return "vbank"
+    return "card"
 
 
 def create_payapp_checkout(
@@ -1659,8 +1659,15 @@ def use_work() -> Dict[str, Any]:
         return {"success": False}
 
 
-def _reservation_body(user_id: Any, token: Any, reservation_id: Optional[str] = None) -> Dict[str, Any]:
+def _reservation_body(
+    user_id: Any,
+    token: Any,
+    reservation_id: Optional[str] = None,
+    idempotency_key: Optional[str] = None,
+) -> Dict[str, Any]:
     body: Dict[str, Any] = {"user_id": user_id, "token": token}
+    if idempotency_key:
+        body["idempotency_key"] = str(idempotency_key)
     if reservation_id:
         body["reservation_id"] = reservation_id
         body["reserve_id"] = reservation_id
@@ -1668,7 +1675,7 @@ def _reservation_body(user_id: Any, token: Any, reservation_id: Optional[str] = 
     return body
 
 
-def reserve_work() -> Dict[str, Any]:
+def reserve_work(idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     global _WORK_RESERVATION_SUPPORTED
 
     if _check_api_url():
@@ -1680,11 +1687,12 @@ def reserve_work() -> Dict[str, Any]:
     if _WORK_RESERVATION_SUPPORTED is False:
         return {"success": False, "unsupported": True, "message": "작업 예약 기능이 지원되지 않습니다."}
 
+    request_id = str(idempotency_key or uuid.uuid4()).strip()
     try:
         resp = _session.post(
             f"{API_SERVER_URL}/user/work/reserve",
-            json=_reservation_body(user_id, token),
-            headers=_build_auth_headers(token),
+            json=_reservation_body(user_id, token, idempotency_key=request_id),
+            headers={**_build_auth_headers(token), "Idempotency-Key": request_id},
             timeout=10,
         )
         if resp.status_code in {404, 405, 501}:
@@ -1693,6 +1701,28 @@ def reserve_work() -> Dict[str, Any]:
         payload = _safe_json(resp)
         if resp.status_code == 200:
             _WORK_RESERVATION_SUPPORTED = True
+            if (
+                payload.get("code") == "IDEMPOTENCY_REPLAY"
+                and payload.get("reservation_status") == "reserved"
+                and str(
+                    payload.get("reservation_id")
+                    or payload.get("reserve_id")
+                    or payload.get("work_token")
+                    or ""
+                ).strip()
+            ):
+                # A persisted queue item may be retrying after the first
+                # response was lost.  Recover only the server's exact existing
+                # reservation; the AI service still rejects replay requests.
+                payload = dict(payload)
+                payload.update(
+                    {
+                        "success": True,
+                        "allowed": True,
+                        "available": True,
+                        "recovered": True,
+                    }
+                )
             _merge_account_state(payload)
             return payload
         return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
