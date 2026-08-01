@@ -141,7 +141,7 @@ jobs:
 
       - name: Install Inno Setup
         run: |
-          choco install innosetup --version=6.6.1 --no-progress -y
+          choco install innosetup --version=6.6.1 --allow-downgrade --no-progress -y
 
       - name: Build installer
         env:
