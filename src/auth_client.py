@@ -71,7 +71,8 @@ API_SERVER_URL = _normalize_api_server_url(
 )
 PROGRAM_TYPE = "stmaker"
 _DEFAULT_FREE_TRIAL_WORK_COUNT = 5
-_FIXED_PAYAPP_PLAN_ID = "stmaker_business_month"
+_WEEKLY_PAYAPP_PLAN_ID = "stmaker_pro_week"
+_MONTHLY_PAYAPP_PLAN_ID = "stmaker_pro_month"
 _ALLOWED_PAYAPP_PAYMENT_TYPES = frozenset(
     {
         "card",
@@ -683,6 +684,11 @@ _auth_state: Dict[str, Any] = {
     "remaining_count": None,
     "user_type": None,
     "plan_type": None,
+    "plan_id": None,
+    "plan_name": None,
+    "account_limit": 1,
+    "billing_interval": None,
+    "is_recurring": False,
     "is_paid": None,
     "subscription_status": None,
     "expires_at": None,
@@ -707,6 +713,11 @@ def _clear_auth_state_memory() -> None:
         _auth_state["remaining_count"] = None
         _auth_state["user_type"] = None
         _auth_state["plan_type"] = None
+        _auth_state["plan_id"] = None
+        _auth_state["plan_name"] = None
+        _auth_state["account_limit"] = 1
+        _auth_state["billing_interval"] = None
+        _auth_state["is_recurring"] = False
         _auth_state["is_paid"] = None
         _auth_state["subscription_status"] = None
         _auth_state["expires_at"] = None
@@ -822,6 +833,26 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
         plan_type = _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier")
         if isinstance(plan_type, str) and plan_type.strip():
             _auth_state["plan_type"] = plan_type.strip()
+
+        plan_id = _extract_state_value(payload, "plan_id")
+        if isinstance(plan_id, str):
+            _auth_state["plan_id"] = plan_id.strip() or None
+
+        plan_name = _extract_state_value(payload, "plan_name")
+        if isinstance(plan_name, str):
+            _auth_state["plan_name"] = plan_name.strip() or None
+
+        account_limit = _extract_state_value(payload, "account_limit")
+        if isinstance(account_limit, (int, float)) and int(account_limit) >= 1:
+            _auth_state["account_limit"] = int(account_limit)
+
+        billing_interval = _extract_state_value(payload, "billing_interval")
+        if isinstance(billing_interval, str):
+            _auth_state["billing_interval"] = billing_interval.strip() or None
+
+        is_recurring = _coerce_bool(_extract_state_value(payload, "is_recurring"))
+        if is_recurring is not None:
+            _auth_state["is_recurring"] = is_recurring
 
         subscription_status = _extract_state_value(payload, "subscription_status", "plan_status", "status")
         if isinstance(subscription_status, str) and subscription_status.strip():
@@ -950,7 +981,7 @@ def safe_url_for_log(value: Any) -> str:
 
 
 def _resolve_default_payapp_plan_id() -> str:
-    return _FIXED_PAYAPP_PLAN_ID
+    return _WEEKLY_PAYAPP_PLAN_ID
 
 
 def _resolve_default_payapp_payment_type() -> str:
@@ -978,15 +1009,9 @@ def create_payapp_checkout(
     if not re.fullmatch(r"01[016789]\d{7,8}", phone_digits):
         return {"success": False, "message": "휴대폰 번호를 정확히 입력해주세요. (예: 01012345678)"}
 
-    resolved_plan_id = _resolve_default_payapp_plan_id()
-    if isinstance(plan_id, str):
-        requested_plan_id = plan_id.strip()
-        if requested_plan_id and requested_plan_id != resolved_plan_id:
-            logger.info(
-                "고정 결제 플랜 적용: requested_plan_id=%s ignored, fixed_plan_id=%s",
-                requested_plan_id,
-                resolved_plan_id,
-            )
+    resolved_plan_id = str(plan_id or _resolve_default_payapp_plan_id()).strip()
+    if resolved_plan_id != _WEEKLY_PAYAPP_PLAN_ID:
+        return {"success": False, "message": "7일 이용권만 일반 결제를 사용할 수 있습니다."}
     if not resolved_plan_id:
         return {"success": False, "message": "결제 플랜 정보가 없습니다."}
 
@@ -1094,6 +1119,107 @@ def create_payapp_checkout(
             "success": False,
             "message": "결제 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
             "plan_id": resolved_plan_id,
+        }
+
+
+def create_payapp_subscription(
+    phone: str,
+    *,
+    plan_id: str = _MONTHLY_PAYAPP_PLAN_ID,
+) -> Dict[str, Any]:
+    """Create the monthly recurring PayApp subscription checkout."""
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
+    user_id, token = _get_session_user_and_token()
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+    phone_digits = _normalize_phone_number(phone)
+    if not re.fullmatch(r"01[016789]\d{7,8}", phone_digits):
+        return {"success": False, "message": "휴대폰 번호를 정확히 입력해주세요."}
+    if str(plan_id) != _MONTHLY_PAYAPP_PLAN_ID:
+        return {"success": False, "message": "월 정기권만 정기결제를 사용할 수 있습니다."}
+
+    headers = _build_auth_headers(token)
+    headers["X-User-ID"] = str(user_id)
+    day = int(time.localtime().tm_mday)
+    body = {
+        "user_id": str(user_id),
+        "phone": phone_digits,
+        "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+        "cycle_type": "Month",
+        "cycle_day": day if day <= 28 else 90,
+    }
+    try:
+        resp = _request_with_retry(
+            "POST",
+            f"{API_SERVER_URL}/payments/payapp/subscribe",
+            json=body,
+            headers=headers,
+            timeout=30,
+            retries=1,
+        )
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            payload.setdefault("success", bool(payload.get("payurl")))
+            payload.setdefault("plan_id", _MONTHLY_PAYAPP_PLAN_ID)
+            payurl = str(payload.get("payurl") or "").strip()
+            if payurl and not is_trusted_payment_url(payurl):
+                return {
+                    "success": False,
+                    "message": "결제 서버가 신뢰할 수 없는 URL을 반환했습니다.",
+                    "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+                }
+            return payload
+        return {
+            "success": False,
+            "message": _extract_api_message(payload, f"정기결제 요청 실패 ({resp.status_code})"),
+            "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+        }
+    except requests.exceptions.RequestException as exc:
+        return {
+            "success": False,
+            "message": _request_error_message(exc, default_message="정기결제 요청 중 통신 오류가 발생했습니다."),
+            "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+        }
+
+
+def get_subscription_status() -> Dict[str, Any]:
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
+    user_id, token = _get_session_user_and_token()
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+    try:
+        resp = _request_with_retry(
+            "GET",
+            f"{API_SERVER_URL}/user/subscription/my-status",
+            headers=_build_auth_headers(token),
+            timeout=10,
+            retries=1,
+        )
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            is_trial = payload.get("is_trial")
+            if isinstance(is_trial, bool):
+                payload.setdefault("user_type", "trial" if is_trial else "subscriber")
+                payload.setdefault("is_paid", not is_trial)
+                if is_trial and payload.get("plan_id") is None:
+                    with _AUTH_STATE_LOCK:
+                        _auth_state["plan_id"] = None
+                        _auth_state["plan_name"] = None
+                        _auth_state["plan_type"] = None
+            _merge_account_state(payload)
+            return payload
+        return {
+            "success": False,
+            "message": _extract_api_message(payload, f"구독 상태 조회 실패 ({resp.status_code})"),
+        }
+    except requests.exceptions.RequestException as exc:
+        return {
+            "success": False,
+            "message": _request_error_message(exc, default_message="구독 상태 조회 중 통신 오류가 발생했습니다."),
         }
 
 
@@ -1632,10 +1758,14 @@ def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
 
 def refresh_account_state(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
     hb = heartbeat(current_task=current_task, app_version=app_version)
+    subscription = get_subscription_status()
     work = check_work_available()
+    success = bool(hb.get("status")) and bool(work.get("success") or work.get("available"))
     return {
-        "success": bool(hb.get("status")) and bool(work.get("success") or work.get("available")),
+        "success": success,
+        "status": bool(hb.get("status")),
         "heartbeat": hb,
+        "subscription": subscription,
         "work": work,
         "state": get_auth_state(),
     }

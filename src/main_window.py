@@ -1718,8 +1718,8 @@ class MainWindow(QMainWindow):
         payment_title.setGeometry(24, 14, 220, 22)
         payment_title.setStyleSheet(_section_title_style)
 
-        payment_desc = QLabel("스레드 쇼핑 자동화 정기결제 (월 49,000원)", self._settings_payment_sec)
-        payment_desc.setGeometry(24, 42, 420, 20)
+        payment_desc = QLabel("무료 월 5회 · 7일권 1계정 · 월 정기권 다계정", self._settings_payment_sec)
+        payment_desc.setGeometry(24, 42, 560, 20)
         payment_desc.setStyleSheet("color: #B8B8B8; font-size: 12px; font-weight: 500; background: transparent; border: none;")
 
         self._pay_phone_edit = QLineEdit(self._settings_payment_sec)
@@ -1727,16 +1727,25 @@ class MainWindow(QMainWindow):
         self._pay_phone_edit.setPlaceholderText("휴대폰 번호 (예: 01012345678)")
         self._pay_phone_edit.setStyleSheet(_input_style)
 
-        self._pay_monthly_btn = QPushButton("월 49,000원 결제하기", self._settings_payment_sec)
-        self._pay_monthly_btn.setGeometry(286, 70, 230, _control_h)
+        self._pay_weekly_btn = QPushButton("7일 19,000원 · 1계정", self._settings_payment_sec)
+        self._pay_weekly_btn.setGeometry(286, 70, 220, _control_h)
+        self._pay_weekly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pay_weekly_btn.clicked.connect(
+            lambda: self._request_payapp_checkout("stmaker_pro_week")
+        )
+
+        self._pay_monthly_btn = QPushButton("월 49,000원 · 다계정", self._settings_payment_sec)
+        self._pay_monthly_btn.setGeometry(518, 70, 220, _control_h)
         self._pay_monthly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._pay_monthly_btn.clicked.connect(self._request_payapp_checkout)
+        self._pay_monthly_btn.clicked.connect(
+            lambda: self._request_payapp_checkout("stmaker_pro_month")
+        )
 
         self._pay_hint_label = QLabel(
-            "버튼을 누르면 PayApp 결제창으로 바로 이동합니다.",
+            "7일권은 1회 결제, 월 이용권은 매달 정기결제입니다. 결제 승인 후 권한이 자동 반영됩니다.",
             self._settings_payment_sec,
         )
-        self._pay_hint_label.setGeometry(24, 116, 540, 20)
+        self._pay_hint_label.setGeometry(24, 116, 720, 20)
         self._pay_hint_label.setStyleSheet(_hint_lbl_style)
 
         # ── Section 6: 실행 설정 ────────────────────────────
@@ -3096,6 +3105,31 @@ class MainWindow(QMainWindow):
         getter = getattr(config, "list_threads_accounts", None) or getattr(config, "get_threads_accounts", None)
         return list(getter()) if callable(getter) else []
 
+    def _threads_account_limit(self):
+        from src import auth_client
+        from src.subscription_plans import resolve_account_limit
+
+        return resolve_account_limit(auth_client.get_auth_state())
+
+    def _is_threads_account_allowed(self, account_id):
+        account_ids = [item.account_id for item in self._threads_accounts()]
+        try:
+            return account_ids.index(str(account_id or "")) < self._threads_account_limit()
+        except ValueError:
+            return False
+
+    def _ensure_threads_account_allowed(self, account_id=None):
+        account_id = str(account_id or self.selected_threads_account_id() or "")
+        if self._is_threads_account_allowed(account_id):
+            return True
+        show_warning(
+            self,
+            "요금제 계정 제한",
+            f"현재 요금제는 Threads 계정 {self._threads_account_limit()}개까지 사용할 수 있습니다. "
+            "월 정기권을 결제하면 기존 계정과 대기열을 그대로 다시 사용할 수 있습니다.",
+        )
+        return False
+
     def selected_threads_account_id(self):
         """Stable account ID currently selected by the settings or upload UI."""
         tabs = getattr(self, "_upload_account_tabs", None)
@@ -3131,6 +3165,8 @@ class MainWindow(QMainWindow):
             combo.clear()
             for account in accounts:
                 label = account.display_name or account.expected_username
+                if not self._is_threads_account_allowed(account.account_id):
+                    label += " (잠김)"
                 combo.addItem(label, account.account_id)
             combo.setCurrentIndex(max(combo.findData(preferred), 0))
             combo.blockSignals(blocked)
@@ -3142,12 +3178,21 @@ class MainWindow(QMainWindow):
                 tabs.removeTab(0)
             for account in accounts:
                 label = account.display_name or account.expected_username
+                if not self._is_threads_account_allowed(account.account_id):
+                    label += " (잠김)"
                 index = tabs.addTab(label)
                 tabs.setTabData(index, account.account_id)
             tabs.setCurrentIndex(max(self._upload_tab_index(tabs, preferred), 0))
             tabs.blockSignals(blocked)
 
         self._apply_selected_threads_account(preferred)
+        add_btn = getattr(self, "threads_account_add_btn", None)
+        if add_btn is not None:
+            can_add = len(accounts) < self._threads_account_limit()
+            add_btn.setEnabled(can_add)
+            add_btn.setToolTip(
+                "" if can_add else f"현재 요금제는 계정 {self._threads_account_limit()}개까지 가능합니다."
+            )
 
     def _apply_selected_threads_account(self, account_id):
         account = next((item for item in self._threads_accounts() if item.account_id == str(account_id or "")), None)
@@ -3331,6 +3376,13 @@ class MainWindow(QMainWindow):
             self.stop_all_btn.setEnabled(any_active)
 
     def _add_threads_account_from_ui(self):
+        if len(self._threads_accounts()) >= self._threads_account_limit():
+            show_warning(
+                self,
+                "계정 추가 제한",
+                f"현재 요금제는 Threads 계정 {self._threads_account_limit()}개까지 추가할 수 있습니다.",
+            )
+            return
         username = self._normalize_threads_username(self.username_edit.text())
         if not username:
             show_warning(self, "계정 이름", "Threads 사용자명을 먼저 입력하세요.")
@@ -3793,14 +3845,14 @@ class MainWindow(QMainWindow):
         if not self._open_external_link(kakao_url, "settings_kakao_contact"):
             show_error(self, "문의하기", f"카카오톡 문의 페이지를 열지 못했습니다.\n{kakao_url}")
 
-    def _request_payapp_checkout(self):
+    def _request_payapp_checkout(self, plan_id="stmaker_pro_week"):
         phone = re.sub(r"[^0-9]", "", self._pay_phone_edit.text().strip())
         phone_masked = phone
         if len(phone) >= 7:
             phone_masked = f"{phone[:3]}****{phone[-4:]}"
         self._log_user_activity(
             "payment_checkout_requested",
-            f"phone={phone_masked}",
+            f"phone={phone_masked}; plan_id={plan_id}",
         )
         if not phone:
             self._log_user_activity(
@@ -3813,7 +3865,10 @@ class MainWindow(QMainWindow):
 
         try:
             from src import auth_client
-            result = auth_client.create_payapp_checkout(phone)
+            if plan_id == "stmaker_pro_month":
+                result = auth_client.create_payapp_subscription(phone, plan_id=plan_id)
+            else:
+                result = auth_client.create_payapp_checkout(phone, plan_id=plan_id)
         except Exception:
             self._log_user_activity("payment_checkout_request_failed", "reason=api_exception", level="ERROR")
             logger.exception("PayApp 결제 요청 중 예외가 발생했습니다.")
@@ -3838,7 +3893,7 @@ class MainWindow(QMainWindow):
             return
 
         server_plan_id = str(result.get("plan_id") or "").strip()
-        expected_plan_id = "stmaker_business_month"
+        expected_plan_id = plan_id
         if server_plan_id and server_plan_id != expected_plan_id:
             self._log_user_activity(
                 "payment_checkout_request_failed",
@@ -3898,6 +3953,10 @@ class MainWindow(QMainWindow):
 
         self._log_user_activity("payment_checkout_opened", f"url={safe_pay_url}")
         self.signals.log.emit(f"PayApp 결제 페이지가 열렸습니다: {safe_pay_url}")
+        # Refresh entitlement shortly after PayApp approval instead of waiting
+        # for the normal one-minute heartbeat interval.
+        for delay_ms in (5_000, 15_000, 30_000, 60_000, 120_000):
+            QTimer.singleShot(delay_ms, self._send_heartbeat)
 
     def open_settings(self):
         """Switch to settings page (page 2) instead of opening dialog."""
@@ -4319,6 +4378,8 @@ class MainWindow(QMainWindow):
         if account is None:
             show_warning(self, "Threads 계정", "설정에서 먼저 Threads 계정을 추가해 주세요.")
             return False
+        if not self._ensure_threads_account_allowed(account.account_id):
+            return False
         runtime = getattr(self, "_multi_account_runtime", None)
         if runtime is None:
             self._init_multi_account_runtime()
@@ -4368,9 +4429,14 @@ class MainWindow(QMainWindow):
             self._init_multi_account_runtime()
             runtime = self._multi_account_runtime
         runtime.refresh_accounts()
+        allowed_ids = {
+            account.account_id
+            for account in self._threads_accounts()[: self._threads_account_limit()]
+        }
         pending_total = sum(
             len(state.get("pending_items") or []) + (1 if state.get("current_item") else 0)
-            for state in runtime.snapshots().values()
+            for account_id, state in runtime.snapshots().items()
+            if account_id in allowed_ids
         )
         if pending_total <= 0:
             show_info(self, "전체 대기열", "실행할 계정별 대기열이 없습니다.")
@@ -4385,7 +4451,10 @@ class MainWindow(QMainWindow):
         self.is_running = True
         self.start_all_btn.setEnabled(False)
         self.stop_all_btn.setEnabled(True)
-        runtime.start_all()
+        for account in self._threads_accounts()[: self._threads_account_limit()]:
+            state = runtime.snapshot(account.account_id)
+            if state.get("current_item") or state.get("pending_items"):
+                runtime.start_account(account.account_id)
         self.signals.log.emit(f"전체 계정 대기열 {pending_total}개 실행을 시작했습니다.")
 
     def stop_all_accounts(self):
@@ -4404,6 +4473,8 @@ class MainWindow(QMainWindow):
         account = self.selected_threads_account()
         runtime = getattr(self, "_multi_account_runtime", None)
         if account is None or runtime is None:
+            return False
+        if not self._ensure_threads_account_allowed(account.account_id):
             return False
         state = runtime.snapshot(account.account_id)
         pending = len(state.get("pending_items") or []) + (
@@ -4432,6 +4503,8 @@ class MainWindow(QMainWindow):
     def start_upload(self):
         logger.info("업로드 시작 호출")
         self._log_user_activity("batch_start_requested", "source=start_button")
+        if not self._ensure_threads_account_allowed():
+            return
         content = self.links_text.toPlainText().strip()
         if not content:
             if self._start_existing_selected_queue():
@@ -4579,6 +4652,8 @@ class MainWindow(QMainWindow):
     def add_links_to_queue(self):
         self._log_user_activity("queue_add_links_requested", "source=add_button")
         logger.info("링크 큐 추가 호출")
+        if not self._ensure_threads_account_allowed():
+            return
         content = self.links_text.toPlainText().strip()
         if not content:
             self._log_user_activity("queue_add_links_blocked", "reason=empty_links_input", level="WARNING")
@@ -5371,7 +5446,7 @@ class MainWindow(QMainWindow):
             else:
                 payload = {
                     "state": "complete",
-                    "result": auth_client.heartbeat(
+                    "result": auth_client.refresh_account_state(
                         current_task=task,
                         app_version=self._app_version,
                     ),
@@ -5426,6 +5501,7 @@ class MainWindow(QMainWindow):
         result = data.get("result") if state == "complete" else None
         if isinstance(result, dict):
             self._update_account_display()
+            self._refresh_threads_account_ui(self.selected_threads_account_id())
 
         if isinstance(result, dict) and result.get("status") is True:
             self._session_expiry_notified = False
