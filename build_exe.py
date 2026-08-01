@@ -49,6 +49,7 @@ HIDDEN_IMPORTS = [
     "packaging.specifiers",
     # Project modules
     "src",
+    "src.ai_provider",
     "src.main_window",
     "src.config",
     "src.coupang_uploader",
@@ -65,10 +66,17 @@ HIDDEN_IMPORTS = [
     "src.tutorial",
     "src.services",
     "src.services.aggro_generator",
+    "src.services.grok_cli_provider",
+    "src.services.account_queue",
+    "src.services.multi_account_coordinator",
+    "src.services.multi_account_runtime",
+    "src.services.multi_account_upload_runner",
     "src.services.image_search",
     "src.services.link_history",
     "src.services.coupang_parser",
     "src.services.cancellation",
+    "src.models",
+    "src.models.threads_account",
 ]
 
 DATAS = [

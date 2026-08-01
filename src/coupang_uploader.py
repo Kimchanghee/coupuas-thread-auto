@@ -367,11 +367,25 @@ class CoupangPartnersPipeline:
     3. Threads 업로드
     """
 
-    def __init__(self, google_api_key: str = ""):
+    def __init__(self, google_api_key: str = "", ai_provider: str | None = None):
+        from src.ai_provider import AI_PROVIDER_GEMINI, normalize_ai_provider
+
         resolved_key = str(google_api_key or getattr(config, "gemini_api_key", "") or "").strip()
         if resolved_key and not getattr(config, "gemini_api_key", ""):
             config.gemini_api_key = resolved_key
         self._google_api_key = resolved_key
+        provider_value = ai_provider
+        if provider_value is None:
+            # Existing callers that explicitly pass a Gemini key keep their
+            # historical behavior; the UI always passes its selected provider.
+            provider_value = (
+                AI_PROVIDER_GEMINI
+                if str(google_api_key or "").strip()
+                else getattr(config, "ai_provider", "")
+            )
+        self._ai_provider = normalize_ai_provider(
+            provider_value
+        )
         self._cancel_event = threading.Event()
 
         self._coupang_parser = None
@@ -381,7 +395,22 @@ class CoupangPartnersPipeline:
         self._image_search = None
 
     def _resolve_google_api_key(self) -> str:
-        return self._google_api_key
+        from src.ai_provider import AI_PROVIDER_GEMINI
+
+        return self._google_api_key if self._ai_provider == AI_PROVIDER_GEMINI else ""
+
+    def set_ai_provider(self, ai_provider: str) -> None:
+        """Update the text provider and reset services that capture provider state."""
+        from src.ai_provider import normalize_ai_provider
+
+        normalized = normalize_ai_provider(ai_provider)
+        if normalized == self._ai_provider:
+            return
+        self._ai_provider = normalized
+        self._coupang_parser = None
+        self._image_search = None
+        if self._aggro_generator is not None:
+            self._aggro_generator.set_ai_provider(normalized)
 
     def set_google_api_key(self, google_api_key: str = "") -> None:
         """Update the runtime Gemini key and reset clients that captured it."""
@@ -398,6 +427,10 @@ class CoupangPartnersPipeline:
         self._cancel_event.set()
         if self._uploader:
             self._uploader.cancel()
+
+    def reset_cancel(self):
+        """Reset a prior item cancellation before another account starts."""
+        self._cancel_event.clear()
 
     def _check_cancelled(self):
         """취소 여부 확인"""
@@ -419,7 +452,10 @@ class CoupangPartnersPipeline:
     def aggro_generator(self):
         if self._aggro_generator is None:
             from src.services.aggro_generator import AggroGenerator
-            self._aggro_generator = AggroGenerator()
+            self._aggro_generator = AggroGenerator(
+                api_key=self._resolve_google_api_key(),
+                ai_provider=self._ai_provider,
+            )
         return self._aggro_generator
 
     @property

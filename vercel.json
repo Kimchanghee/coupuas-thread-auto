@@ -3,11 +3,26 @@
   "version": 2,
   "builds": [
     {
+      "src": "api/**/*.mjs",
+      "use": "@vercel/node"
+    },
+    {
       "src": "public/**",
       "use": "@vercel/static"
     }
   ],
   "routes": [
+    {
+      "src": "/api/health",
+      "dest": "/api/health.mjs"
+    },
+    {
+      "src": "/api/ai/thread-variants",
+      "dest": "/api/ai/thread-variants.mjs"
+    },
+    {
+      "handle": "filesystem"
+    },
     {
       "src": "/(.*)",
       "dest": "/public/index.html"

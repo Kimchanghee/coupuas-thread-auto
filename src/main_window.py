@@ -24,11 +24,17 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
     QLineEdit, QSpinBox, QCheckBox, QButtonGroup, QComboBox,
     QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea
+    QScrollArea, QTabBar
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QDesktopServices
 
+from src.ai_provider import (
+    AI_PROVIDER_GEMINI,
+    AI_PROVIDER_GROK_CLI,
+    AI_PROVIDER_MANAGED,
+    normalize_ai_provider,
+)
 from src.config import config
 from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
 from src.gemini_keys import (
@@ -39,6 +45,8 @@ from src.gemini_keys import (
 )
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.services.thread_payload import build_product_thread_payload
+from src.services.account_queue import AccountQueueStore
+from src.services.multi_account_runtime import MultiAccountRuntime
 from src.theme import (Colors, Typography, Radius, Gradients,
                        global_stylesheet, badge_style, stat_card_style,
                        terminal_text_style,
@@ -99,6 +107,9 @@ class Signals(QObject):
     threads_browser_closed = pyqtSignal()
     heartbeat_complete = pyqtSignal(object)
     update_check_complete = pyqtSignal(object)
+    grok_status = pyqtSignal(str, str, str)
+    account_runtime_state = pyqtSignal(str, object)
+    account_runtime_log = pyqtSignal(str, str)
 
 
 # ─── Badge ──────────────────────────────────────────────────
@@ -229,7 +240,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Coupang Partners Thread Automation")
         self.setFixedSize(WIN_W, WIN_H)
 
-        self.pipeline = CoupangPartnersPipeline(config.gemini_api_key)
+        self.pipeline = CoupangPartnersPipeline(
+            config.gemini_api_key,
+            ai_provider=getattr(config, "ai_provider", AI_PROVIDER_GROK_CLI),
+        )
         self._stop_event = threading.Event()
         self._stop_event.set()
         self._urls_lock = threading.Lock()
@@ -248,6 +262,9 @@ class MainWindow(QMainWindow):
         self._redirecting_to_login = False
         self._force_close_for_relogin = False
         self._latest_run_state = {}
+        self._account_drafts = {}
+        self._upload_tab_syncing = False
+        self._multi_account_runtime = None
         self._init_activity_logger()
         logger.info("메인 윈도우 초기화 완료")
 
@@ -267,6 +284,9 @@ class MainWindow(QMainWindow):
         self.signals.threads_browser_closed.connect(self._on_threads_browser_closed)
         self.signals.heartbeat_complete.connect(self._apply_heartbeat_result)
         self.signals.update_check_complete.connect(self._apply_update_check_result)
+        self.signals.grok_status.connect(self._apply_grok_status)
+        self.signals.account_runtime_state.connect(self._on_account_runtime_state)
+        self.signals.account_runtime_log.connect(self._on_account_runtime_log)
 
         self._current_page = 0
         self._heartbeat_in_flight = False
@@ -292,6 +312,7 @@ class MainWindow(QMainWindow):
 
         # Load settings into widgets
         self._load_settings()
+        self._init_multi_account_runtime()
         QTimer.singleShot(1800, self._prompt_resume_queue_if_needed)
         self._bind_ui_activity_logging()
         self._log_user_activity("ui_main_window_opened", f"version={self._app_version}")
@@ -897,7 +918,16 @@ class MainWindow(QMainWindow):
     # ── Page 0: 링크 입력 ───────────────────────────────────
 
     def _build_page0_links(self, page):
+        # Account tabs sit above the draft editor.  Account IDs, never labels,
+        # are stored as tab data so renamed accounts cannot cross-contaminate.
+        self._upload_account_tabs = QTabBar(page)
+        self._upload_account_tabs.setGeometry(28, 82, 944, 30)
+        self._upload_account_tabs.setExpanding(False)
+        self._upload_account_tabs.setUsesScrollButtons(True)
+        self._upload_account_tabs.currentChanged.connect(self._on_upload_account_tab_changed)
         cy = self._make_page_header(page, "◈", "링크 입력")
+
+        cy += 38
 
         # Coupang Partners hyperlink (top right)
         self._coupang_link = QLabel(
@@ -976,6 +1006,19 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.stop_btn.setProperty("class", "outline-danger")
         self.stop_btn.clicked.connect(self.stop_upload)
+
+        self.start_all_btn = QPushButton("전체 시작", page)
+        self.start_all_btn.setGeometry(578, btn_y, 180, 44)
+        self.start_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start_all_btn.setProperty("class", "outline-success")
+        self.start_all_btn.clicked.connect(self.start_all_accounts)
+
+        self.stop_all_btn = QPushButton("전체 중지", page)
+        self.stop_all_btn.setGeometry(768, btn_y, 204, 44)
+        self.stop_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stop_all_btn.setEnabled(False)
+        self.stop_all_btn.setProperty("class", "outline-danger")
+        self.stop_all_btn.clicked.connect(self.stop_all_accounts)
 
         # ── Live Run State Banner ───────────────────────────
         state_y = btn_y + 56
@@ -1292,9 +1335,58 @@ class MainWindow(QMainWindow):
             "}"
         )
 
-        # Scroll area for settings content
+        self._settings_tab_bar = QTabBar(page)
+        self._settings_tab_bar.setObjectName("settingsTabBar")
+        self._settings_tab_bar.setGeometry(24, cy, 952, 44)
+        self._settings_tab_bar.setDrawBase(False)
+        self._settings_tab_bar.setExpanding(True)
+        self._settings_tab_bar.setUsesScrollButtons(False)
+        self._settings_tab_bar.setAccessibleName("설정 카테고리")
+        for tab_label in ("계정 · 연결", "작성 · AI", "앱 설정", "구독 · 지원"):
+            self._settings_tab_bar.addTab(tab_label)
+        self._settings_tab_bar.setStyleSheet(
+            "QTabBar {"
+            " background: transparent;"
+            " border: none;"
+            "}"
+            "QTabBar::tab {"
+            " background-color: #141414;"
+            " color: #9CA3AF;"
+            " border: 1px solid rgba(255, 255, 255, 0.05);"
+            " border-bottom: 2px solid transparent;"
+            " padding: 10px 16px;"
+            " margin-right: 6px;"
+            " min-height: 20px;"
+            " font-size: 12px;"
+            " font-weight: 700;"
+            "}"
+            "QTabBar::tab:first {"
+            " border-top-left-radius: 8px;"
+            " border-bottom-left-radius: 8px;"
+            "}"
+            "QTabBar::tab:last {"
+            " border-top-right-radius: 8px;"
+            " border-bottom-right-radius: 8px;"
+            " margin-right: 0px;"
+            "}"
+            "QTabBar::tab:hover {"
+            " color: #FFFFFF;"
+            " background-color: #1A1A1A;"
+            "}"
+            "QTabBar::tab:selected {"
+            " color: #FFFFFF;"
+            " background-color: rgba(227, 22, 57, 0.12);"
+            " border-color: rgba(227, 22, 57, 0.35);"
+            " border-bottom-color: #E31639;"
+            "}"
+            "QTabBar::tab:focus {"
+            " border-color: #E31639;"
+            "}"
+        )
+
+        # Scroll area for the selected settings category
         scroll = QScrollArea(page)
-        scroll.setGeometry(0, cy, CONTENT_W, CONTENT_H - cy)
+        scroll.setGeometry(0, cy + 56, CONTENT_W, CONTENT_H - cy - 116)
         scroll.setWidgetResizable(False)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
@@ -1320,6 +1412,7 @@ class MainWindow(QMainWindow):
         content = QWidget()
         content.setFixedWidth(CONTENT_W)
         scroll.setWidget(content)
+        self._settings_scroll = scroll
 
         sy = 12
 
@@ -1328,6 +1421,7 @@ class MainWindow(QMainWindow):
         acct.setGeometry(24, sy, 952, 104)
         acct.setFrameShape(QFrame.Shape.NoFrame)
         acct.setStyleSheet(_section_style)
+        self._settings_account_sec = acct
 
         acct_icon = QLabel("U", acct)
         acct_icon.setGeometry(20, 26, 40, 40)
@@ -1377,9 +1471,10 @@ class MainWindow(QMainWindow):
 
         # ── Section 2: Threads 계정 ────────────────────────
         threads_sec = QFrame(content)
-        threads_sec.setGeometry(24, sy, 952, 252)
+        threads_sec.setGeometry(24, sy, 952, 300)
         threads_sec.setFrameShape(QFrame.Shape.NoFrame)
         threads_sec.setStyleSheet(_section_style)
+        self._settings_threads_sec = threads_sec
 
         threads_title = QLabel("Threads 계정", threads_sec)
         threads_title.setGeometry(24, 14, 220, 24)
@@ -1393,28 +1488,39 @@ class MainWindow(QMainWindow):
         name_hint.setGeometry(124, 46, 220, 20)
         name_hint.setStyleSheet(_hint_lbl_style)
 
+        self.threads_account_combo = QComboBox(threads_sec)
+        self.threads_account_combo.setGeometry(24, 70, 430, _control_h)
+        self.threads_account_combo.currentIndexChanged.connect(self._on_threads_account_selected)
+
+        self.threads_account_add_btn = QPushButton("계정 추가", threads_sec)
+        self.threads_account_add_btn.setGeometry(466, 70, 140, _control_h)
+        self.threads_account_add_btn.clicked.connect(self._add_threads_account_from_ui)
+        self.threads_account_remove_btn = QPushButton("계정 삭제", threads_sec)
+        self.threads_account_remove_btn.setGeometry(618, 70, 140, _control_h)
+        self.threads_account_remove_btn.clicked.connect(self._remove_selected_threads_account)
+
         self.username_edit = QLineEdit(threads_sec)
-        self.username_edit.setGeometry(24, 70, 904, _control_h)
+        self.username_edit.setGeometry(24, 122, 904, _control_h)
         self.username_edit.setPlaceholderText("예: myaccount")
         self.username_edit.setStyleSheet(_input_style)
 
         self._threads_status_dot = QLabel("", threads_sec)
-        self._threads_status_dot.setGeometry(24, 122, 10, 10)
+        self._threads_status_dot.setGeometry(24, 174, 10, 10)
         self._threads_status_dot.setStyleSheet("background-color: #9CA3AF; border-radius: 5px;")
 
         self.login_status_label = QLabel("연결 안됨", threads_sec)
-        self.login_status_label.setGeometry(42, 118, 320, 22)
+        self.login_status_label.setGeometry(42, 170, 320, 22)
         self.login_status_label.setStyleSheet(
             "color: #9CA3AF; font-size: 11px; font-weight: 500; background: transparent; border: none;"
         )
 
         self.threads_login_btn = QPushButton("Threads 로그인", threads_sec)
-        self.threads_login_btn.setGeometry(576, 146, 170, _control_h)
+        self.threads_login_btn.setGeometry(576, 198, 170, _control_h)
         self.threads_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.threads_login_btn.clicked.connect(self._open_threads_login)
 
-        self.check_login_btn = QPushButton("로그인 완료 안내", threads_sec)
-        self.check_login_btn.setGeometry(758, 146, 170, _control_h)
+        self.check_login_btn = QPushButton("로그인 상태 확인", threads_sec)
+        self.check_login_btn.setGeometry(758, 198, 170, _control_h)
         self.check_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_login_btn.clicked.connect(self._check_login_status)
 
@@ -1424,17 +1530,18 @@ class MainWindow(QMainWindow):
             "3) 닫으면 세션이 자동 저장되어 다음 작업에서 바로 사용됩니다."
         )
         self._threads_hint_label = QLabel(hint_text, threads_sec)
-        self._threads_hint_label.setGeometry(24, 190, 904, 46)
+        self._threads_hint_label.setGeometry(24, 242, 904, 46)
         self._threads_hint_label.setWordWrap(True)
         self._threads_hint_label.setStyleSheet(_hint_lbl_style)
 
-        sy += 266
+        sy += 314
 
         # ── Section 3: 글 작성 컨셉 ─────────────────────────
         concept_sec = QFrame(content)
         concept_sec.setGeometry(24, sy, 952, 132)
         concept_sec.setFrameShape(QFrame.Shape.NoFrame)
         concept_sec.setStyleSheet(_section_style)
+        self._settings_concept_sec = concept_sec
 
         concept_title = QLabel("글 작성 컨셉", concept_sec)
         concept_title.setGeometry(24, 14, 220, 24)
@@ -1463,7 +1570,7 @@ class MainWindow(QMainWindow):
 
         sy += 156
 
-        # ── Section 4: Gemini API 설정 (다중 키) ────────────
+        # ── Section 4: AI 글 생성 설정 ─────────────────────
         self._settings_content = content
         self._settings_flow_start_y = sy
         self._settings_gap = 24
@@ -1474,16 +1581,38 @@ class MainWindow(QMainWindow):
         self._settings_api_sec.setFrameShape(QFrame.Shape.NoFrame)
         self._settings_api_sec.setStyleSheet(_section_style)
 
-        self._settings_api_title = QLabel("Gemini API 설정", self._settings_api_sec)
+        self._settings_api_title = QLabel("AI 글 생성 설정", self._settings_api_sec)
         self._settings_api_title.setGeometry(24, 14, 220, 24)
         self._settings_api_title.setStyleSheet(_section_title_style)
 
-        self._settings_api_guide = QLabel(
-            '<a href="https://ssmaker.lovable.app/notice" '
-            'style="color:#3B82F6; text-decoration:none;">API KEY 발급 안내 →</a>',
+        self._ai_provider_label = QLabel("사용할 AI", self._settings_api_sec)
+        self._ai_provider_label.setGeometry(24, 48, 120, 20)
+        self._ai_provider_label.setStyleSheet(_field_lbl_style)
+
+        self._ai_provider_combo = QComboBox(self._settings_api_sec)
+        self._ai_provider_combo.setObjectName("aiProviderCombo")
+        self._ai_provider_combo.setGeometry(24, 72, 320, _control_h)
+        self._ai_provider_combo.addItem("AI 자동 작성 (구독 포함)", AI_PROVIDER_MANAGED)
+        if str(os.getenv("THREAD_AUTO_ALLOW_LOCAL_AI_PROVIDERS", "")).strip().lower() in {
+            "1", "true", "yes", "on"
+        }:
+            self._ai_provider_combo.addItem("Grok CLI (개발용)", AI_PROVIDER_GROK_CLI)
+            self._ai_provider_combo.addItem("Gemini API (개발용)", AI_PROVIDER_GEMINI)
+        self._ai_provider_combo.setStyleSheet(_combo_style)
+
+        self._ai_provider_hint = QLabel(
+            "별도 API 키 없이 로그인과 구독만으로 자동 작성됩니다.",
             self._settings_api_sec,
         )
-        self._settings_api_guide.setGeometry(24, 40, 220, 20)
+        self._ai_provider_hint.setGeometry(368, 82, 540, 20)
+        self._ai_provider_hint.setStyleSheet(_hint_lbl_style)
+
+        self._settings_api_guide = QLabel(
+            '<a href="https://ssmaker.lovable.app/notice" '
+            'style="color:#3B82F6; text-decoration:none;">Gemini API KEY 발급 안내 →</a>',
+            self._settings_api_sec,
+        )
+        self._settings_api_guide.setGeometry(24, 124, 260, 20)
         self._settings_api_guide.setOpenExternalLinks(False)
         self._settings_api_guide.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self._settings_api_guide.setStyleSheet("background: transparent; border: none; font-size: 11px;")
@@ -1495,8 +1624,29 @@ class MainWindow(QMainWindow):
             "여러 키를 저장하면 자동으로 다음 키로 전환됩니다. (최대 10개)",
             self._settings_api_sec,
         )
-        self._settings_api_hint.setGeometry(252, 42, 650, 18)
+        self._settings_api_hint.setGeometry(306, 124, 596, 18)
         self._settings_api_hint.setStyleSheet(_hint_lbl_style)
+
+        self._grok_status_label = QLabel("Grok 상태를 확인해주세요.", self._settings_api_sec)
+        self._grok_status_label.setGeometry(24, 124, 500, 22)
+        self._grok_status_label.setStyleSheet(
+            "color: #B8B8B8; font-size: 12px; background: transparent; border: none;"
+        )
+
+        self._grok_install_btn = QPushButton("설치 안내", self._settings_api_sec)
+        self._grok_install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._grok_install_btn.setStyleSheet(_ghost_btn_style)
+        self._grok_install_btn.clicked.connect(self._open_grok_install_guide)
+
+        self._grok_login_btn = QPushButton("Grok 로그인", self._settings_api_sec)
+        self._grok_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._grok_login_btn.setStyleSheet(_ghost_btn_style)
+        self._grok_login_btn.clicked.connect(self._start_grok_login)
+
+        self._grok_check_btn = QPushButton("연결 확인", self._settings_api_sec)
+        self._grok_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._grok_check_btn.setStyleSheet(_ghost_btn_style)
+        self._grok_check_btn.clicked.connect(self._refresh_grok_status)
 
         self._gemini_key_rows = []
         for index in range(MAX_GEMINI_API_KEYS):
@@ -1516,10 +1666,13 @@ class MainWindow(QMainWindow):
             edit = QLineEdit(self._settings_api_sec)
             edit.setEchoMode(QLineEdit.EchoMode.Password)
             edit.setPlaceholderText("Gemini API 키를 입력하세요")
+            edit.setAccessibleName(f"Gemini API 키 {index + 1}")
             edit.setStyleSheet(_input_style)
 
             toggle = QPushButton("보기", self._settings_api_sec)
             toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+            toggle.setCheckable(True)
+            toggle.setAccessibleName(f"Gemini API 키 {index + 1} 표시")
             toggle.setStyleSheet(_ghost_btn_style)
             toggle.clicked.connect(
                 lambda _checked=False, row_index=index: self._toggle_gemini_key_visibility(row_index)
@@ -1537,6 +1690,7 @@ class MainWindow(QMainWindow):
         self._add_gemini_key_btn = QPushButton("키 추가", self._settings_api_sec)
         self._add_gemini_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_gemini_key_btn.clicked.connect(self._add_gemini_key_row)
+        self._ai_provider_combo.currentIndexChanged.connect(self._on_ai_provider_changed)
 
         # ── Section 4: 앱 정보 ─────────────────────────────
         self._settings_info_sec = QFrame(content)
@@ -1634,7 +1788,8 @@ class MainWindow(QMainWindow):
         contact_desc.setStyleSheet(_hint_lbl_style)
 
         # ── Action Buttons Row ─────────────────────────────
-        self._settings_save_btn = QPushButton("저장", content)
+        self._settings_save_btn = QPushButton("설정 저장", page)
+        self._settings_save_btn.setGeometry(816, CONTENT_H - 52, 160, 40)
         self._settings_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._settings_save_btn.clicked.connect(self._save_settings)
 
@@ -1658,7 +1813,12 @@ class MainWindow(QMainWindow):
             btn.setFixedHeight(_control_h)
 
         self._visible_gemini_key_rows = 1
+        self._settings_scroll_positions = {}
+        self._settings_active_tab = 0
         self._set_visible_gemini_key_rows(1)
+        self._settings_tab_bar.currentChanged.connect(self._on_settings_tab_changed)
+        self._settings_tab_bar.setCurrentIndex(0)
+        self._relayout_settings_sections()
 
     # ── StatusBar ───────────────────────────────────────────
 
@@ -2369,6 +2529,18 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.debug("업로드 대기열 파일 삭제 실패", exc_info=True)
 
+    def _archive_legacy_resume_state(self) -> None:
+        """Retire the old global resume file after account-queue import."""
+        if not self._resume_state_path.exists():
+            return
+        archived = self._resume_state_path.with_name(
+            self._resume_state_path.stem + ".migrated.json"
+        )
+        try:
+            os.replace(self._resume_state_path, archived)
+        except OSError:
+            logger.exception("Legacy upload resume state could not be archived.")
+
     def _prompt_resume_queue_if_needed(self) -> None:
         if os.getenv("THREAD_AUTO_DISABLE_RESUME_PROMPT", "").strip() == "1":
             return
@@ -2393,12 +2565,14 @@ class MainWindow(QMainWindow):
             self.signals.log.emit("저장된 미완료 업로드 대기열을 삭제했습니다.")
             return
 
-        self.start_link_data_batch(
+        imported = self.start_link_data_batch(
             pending,
             interval=interval,
             source="resume",
             next_allowed_at=state.get("next_allowed_at"),
         )
+        if imported:
+            self._archive_legacy_resume_state()
 
     def start_link_data_batch(
         self,
@@ -2418,11 +2592,26 @@ class MainWindow(QMainWindow):
 
         config.load()
         interval = max(int(interval or config.upload_interval or 60), 30)
-        api_key = self._resolve_runtime_gemini_api_key(validate=True)
-        if not api_key or len(api_key.strip()) < 10:
+        selected_provider = normalize_ai_provider(getattr(config, "ai_provider", ""))
+        api_key = (
+            self._resolve_runtime_gemini_api_key(validate=True)
+            if selected_provider == AI_PROVIDER_GEMINI
+            else ""
+        )
+        if selected_provider == AI_PROVIDER_GEMINI and (
+            not api_key or len(api_key.strip()) < 10
+        ):
             self._log_user_activity("batch_start_key_fallback", "reason=invalid_runtime_api_key", level="WARNING")
             logger.warning("Gemini API 키 검증 실패: 제목 기반 fallback 문구로 계속 진행합니다.")
             api_key = ""
+
+        return self._start_selected_account_batch(
+            link_data,
+            interval=interval,
+            selected_provider=selected_provider,
+            api_key=api_key,
+            next_allowed_at=next_allowed_at,
+        )
 
         self._log_user_activity("batch_start_confirmed", f"links={len(link_data)}; interval={interval}; source={source}")
         self.is_running = True
@@ -2490,6 +2679,8 @@ class MainWindow(QMainWindow):
         }
         if hasattr(self.pipeline, "set_google_api_key"):
             self.pipeline.set_google_api_key(api_key)
+        if hasattr(self.pipeline, "set_ai_provider"):
+            self.pipeline.set_ai_provider(selected_provider)
         self._active_pipeline = self.pipeline
         thread = threading.Thread(
             target=self._run_upload_queue,
@@ -2550,6 +2741,9 @@ class MainWindow(QMainWindow):
         return re.sub(r"[^\w\-.]", "_", name)
 
     def _get_profile_dir(self):
+        account = self.selected_threads_account()
+        if account is not None:
+            return account.profile_id
         username = self._normalize_threads_username(self.username_edit.text().strip())
         if not username:
             username = self._normalize_threads_username(str(getattr(config, "instagram_username", "") or "").strip())
@@ -2574,6 +2768,135 @@ class MainWindow(QMainWindow):
             return keys[0]
         return str(getattr(config, "gemini_api_key", "") or "").strip()
 
+    def _selected_ai_provider(self):
+        combo = getattr(self, "_ai_provider_combo", None)
+        if combo is not None:
+            return normalize_ai_provider(combo.currentData())
+        return normalize_ai_provider(getattr(config, "ai_provider", ""))
+
+    def _on_ai_provider_changed(self, _index=None):
+        provider = self._selected_ai_provider()
+        if hasattr(self, "_ai_provider_hint"):
+            if provider == AI_PROVIDER_MANAGED:
+                self._ai_provider_hint.setText(
+                    "AI 사용료는 구독에 포함됩니다. 별도 API 키나 프로그램 설치가 필요하지 않습니다."
+                )
+            elif provider == AI_PROVIDER_GROK_CLI:
+                self._ai_provider_hint.setText(
+                    "Grok은 API 키 없이 사용자 본인의 무료 Grok 계정으로 로그인합니다."
+                )
+            else:
+                self._ai_provider_hint.setText(
+                    "Gemini는 사용자가 발급한 API 키를 사용하며 여러 키를 순서대로 전환합니다."
+                )
+        self._relayout_settings_sections()
+        if provider == AI_PROVIDER_GROK_CLI:
+            self._refresh_grok_status()
+
+    def _open_grok_install_guide(self):
+        from src.services.grok_cli_provider import GROK_INSTALL_URL
+
+        QDesktopServices.openUrl(QUrl(GROK_INSTALL_URL))
+        self._log_user_activity("grok_install_guide_opened", GROK_INSTALL_URL)
+
+    def _set_grok_buttons_enabled(self, enabled):
+        for name in ("_grok_install_btn", "_grok_login_btn", "_grok_check_btn"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setEnabled(bool(enabled))
+
+    def _refresh_grok_status(self):
+        if getattr(self, "_grok_status_check_running", False):
+            return
+        self._grok_status_check_running = True
+        self._set_grok_buttons_enabled(False)
+        if hasattr(self, "_grok_status_label"):
+            self._grok_status_label.setText("Grok CLI 상태 확인 중...")
+            self._grok_status_label.setStyleSheet(
+                "color: #F59E0B; font-size: 12px; background: transparent; border: none;"
+            )
+
+        def worker():
+            try:
+                from src.services.grok_cli_provider import get_grok_cli_status
+
+                status = get_grok_cli_status()
+                self.signals.grok_status.emit(status.code, status.message, "check")
+            except Exception as exc:
+                logger.exception("Grok CLI 상태 확인에 실패했습니다.")
+                self.signals.grok_status.emit(
+                    "error",
+                    f"Grok 상태 확인 실패: {exc}",
+                    "check",
+                )
+
+        threading.Thread(target=worker, daemon=True, name="grok-status-check").start()
+
+    def _start_grok_login(self):
+        if getattr(self, "_grok_login_running", False):
+            return
+
+        from src.services.grok_cli_provider import find_grok_cli
+
+        if not find_grok_cli():
+            show_warning(
+                self,
+                "Grok CLI 설치 필요",
+                "Grok CLI를 먼저 설치해주세요. 공식 설치 안내 페이지를 엽니다.",
+            )
+            self._open_grok_install_guide()
+            return
+
+        self._grok_login_running = True
+        self._set_grok_buttons_enabled(False)
+        self._grok_status_label.setText("브라우저에서 Grok 로그인을 완료해주세요...")
+        self._grok_status_label.setStyleSheet(
+            "color: #F59E0B; font-size: 12px; background: transparent; border: none;"
+        )
+        self._log_user_activity("grok_login_started", "source=settings_page")
+
+        def worker():
+            try:
+                from src.services.grok_cli_provider import login_to_grok_cli
+
+                status = login_to_grok_cli()
+                self.signals.grok_status.emit(status.code, status.message, "login")
+            except Exception as exc:
+                code = str(getattr(exc, "code", "error") or "error")
+                self.signals.grok_status.emit(code, str(exc), "login")
+
+        threading.Thread(target=worker, daemon=True, name="grok-login").start()
+
+    def _apply_grok_status(self, code, message, source="check"):
+        self._grok_status_check_running = False
+        if source == "check" and getattr(self, "_grok_login_running", False):
+            # A status check may have started just before OAuth login. Its stale
+            # result must not overwrite the active login instructions.
+            return
+        if source == "login":
+            self._grok_login_running = False
+        self._set_grok_buttons_enabled(True)
+        label = getattr(self, "_grok_status_label", None)
+        if label is None:
+            return
+
+        colors = {
+            "ready": "#10B981",
+            "not_installed": "#F59E0B",
+            "not_logged_in": "#F59E0B",
+            "free_limit": "#F59E0B",
+        }
+        color = colors.get(str(code), "#EF4444")
+        label.setText(str(message or "Grok 상태를 확인할 수 없습니다."))
+        label.setStyleSheet(
+            f"color: {color}; font-size: 12px; background: transparent; border: none;"
+        )
+        self._log_user_activity(
+            "grok_status_updated",
+            f"status={str(code)[:40]}",
+            level="INFO" if code == "ready" else "WARNING",
+        )
+
     def _toggle_gemini_key_visibility(self, row_index):
         if row_index < 0 or row_index >= len(getattr(self, "_gemini_key_rows", [])):
             return
@@ -2585,9 +2908,11 @@ class MainWindow(QMainWindow):
         if edit.echoMode() == QLineEdit.EchoMode.Password:
             edit.setEchoMode(QLineEdit.EchoMode.Normal)
             toggle.setText("숨기기")
+            toggle.setChecked(True)
         else:
             edit.setEchoMode(QLineEdit.EchoMode.Password)
             toggle.setText("보기")
+            toggle.setChecked(False)
 
     def _add_gemini_key_row(self):
         rows = getattr(self, "_gemini_key_rows", [])
@@ -2629,10 +2954,14 @@ class MainWindow(QMainWindow):
         x = getattr(self, "_settings_section_x", 24)
         w = getattr(self, "_settings_section_w", 952)
         gap = getattr(self, "_settings_gap", 24)
-        sy = getattr(self, "_settings_flow_start_y", 12)
+        sy = 12
 
+        provider = self._selected_ai_provider()
+        is_grok = provider == AI_PROVIDER_GROK_CLI
+        is_gemini = provider == AI_PROVIDER_GEMINI
+        is_managed = provider == AI_PROVIDER_MANAGED
         row_count = max(1, int(getattr(self, "_visible_gemini_key_rows", 1)))
-        row_start_y = 72
+        row_start_y = 154
         row_step = 50
         row_height = 40
         badge_x = 24
@@ -2647,32 +2976,104 @@ class MainWindow(QMainWindow):
             row["badge"].setGeometry(badge_x, row_y + 7, badge_w, 24)
             row["edit"].setGeometry(key_x, row_y, key_w, row_height)
             row["toggle"].setGeometry(toggle_x, row_y, toggle_w, row_height)
+            visible = is_gemini and index < row_count
+            row["badge"].setVisible(visible)
+            row["edit"].setVisible(visible)
+            row["toggle"].setVisible(visible)
+
+        for widget in (
+            getattr(self, "_settings_api_guide", None),
+            getattr(self, "_settings_api_hint", None),
+            getattr(self, "_add_gemini_key_btn", None),
+        ):
+            if widget is not None:
+                widget.setVisible(is_gemini)
+
+        for widget in (
+            getattr(self, "_grok_status_label", None),
+            getattr(self, "_grok_install_btn", None),
+            getattr(self, "_grok_login_btn", None),
+            getattr(self, "_grok_check_btn", None),
+        ):
+            if widget is not None:
+                widget.setVisible(is_grok)
+
+        self._grok_install_btn.setGeometry(24, 158, 134, 40)
+        self._grok_login_btn.setGeometry(170, 158, 150, 40)
+        self._grok_check_btn.setGeometry(332, 158, 134, 40)
 
         add_btn_y = row_start_y + (row_count * row_step) + 4
         self._add_gemini_key_btn.setGeometry(24, add_btn_y, 134, 40)
-        api_h = add_btn_y + 40 + 18
-        self._settings_api_sec.setGeometry(x, sy, w, api_h)
-        sy += api_h + gap
+        if is_managed:
+            api_h = 128
+        elif is_grok:
+            api_h = 220
+        else:
+            api_h = add_btn_y + 40 + 18
 
-        self._settings_info_sec.setGeometry(x, sy, w, 96)
-        sy += 96 + gap
+        section_specs = {
+            0: (
+                (self._settings_account_sec, 104),
+                (self._settings_threads_sec, 300),
+            ),
+            1: (
+                (self._settings_concept_sec, 132),
+                (self._settings_api_sec, api_h),
+            ),
+            2: (
+                (self._settings_startup_sec, 96),
+                (self._settings_info_sec, 96),
+            ),
+            3: (
+                (self._settings_payment_sec, 164),
+                (self._settings_tutorial_sec, 104),
+                (self._settings_contact_sec, 108),
+            ),
+        }
+        all_sections = tuple(
+            section
+            for specs in section_specs.values()
+            for section, _height in specs
+        )
+        active_tab = int(getattr(self, "_settings_active_tab", 0) or 0)
+        active_specs = section_specs.get(active_tab, section_specs[0])
 
-        self._settings_payment_sec.setGeometry(x, sy, w, 164)
-        sy += 164 + gap
+        for section in all_sections:
+            section.setVisible(False)
+        for section, section_height in active_specs:
+            section.setGeometry(x, sy, w, section_height)
+            section.setVisible(True)
+            sy += section_height + gap
 
-        self._settings_startup_sec.setGeometry(x, sy, w, 96)
-        sy += 96 + gap
+        content_height = max(sy, 120)
+        self._settings_content.setFixedHeight(content_height)
 
-        self._settings_tutorial_sec.setGeometry(x, sy, w, 104)
-        sy += 104 + gap
+    def _on_settings_tab_changed(self, index):
+        try:
+            tab_index = int(index)
+        except (TypeError, ValueError):
+            return
 
-        self._settings_contact_sec.setGeometry(x, sy, w, 108)
-        sy += 108 + gap
+        scroll = getattr(self, "_settings_scroll", None)
+        positions = getattr(self, "_settings_scroll_positions", {})
+        previous_index = int(getattr(self, "_settings_active_tab", 0) or 0)
+        if scroll is not None:
+            positions[previous_index] = scroll.verticalScrollBar().value()
 
-        self._settings_save_btn.setGeometry(x + w - 160, sy, 160, 40)
-        sy += 66
+        self._settings_active_tab = max(0, min(tab_index, 3))
+        self._settings_scroll_positions = positions
+        self._relayout_settings_sections()
 
-        self._settings_content.setFixedHeight(sy + 24)
+        if scroll is not None:
+            scroll.verticalScrollBar().setValue(
+                int(positions.get(self._settings_active_tab, 0) or 0)
+            )
+        self._log_user_activity(
+            "settings_inner_tab_switch",
+            f"index={self._settings_active_tab}",
+            min_interval_sec=0.08,
+            dedupe_key=f"settings-tab:{self._settings_active_tab}",
+        )
 
     def _set_post_concept_combo_value(self, combo, concept_id):
         selected_concept = normalize_concept_id(concept_id)
@@ -2688,8 +3089,307 @@ class MainWindow(QMainWindow):
             if combo is not None and combo is not source_combo:
                 self._set_post_concept_combo_value(combo, selected_concept)
 
+    # ── Threads accounts / account-scoped upload drafts ─────────────────
+
+    def _threads_accounts(self):
+        """Return configured accounts across the small config API transition."""
+        getter = getattr(config, "list_threads_accounts", None) or getattr(config, "get_threads_accounts", None)
+        return list(getter()) if callable(getter) else []
+
+    def selected_threads_account_id(self):
+        """Stable account ID currently selected by the settings or upload UI."""
+        tabs = getattr(self, "_upload_account_tabs", None)
+        if tabs is not None and tabs.currentIndex() >= 0:
+            account_id = tabs.tabData(tabs.currentIndex())
+            if account_id:
+                return str(account_id)
+        combo = getattr(self, "threads_account_combo", None)
+        return str(combo.currentData() or "") if combo is not None else ""
+
+    def selected_threads_account(self):
+        """Return the selected configured account, or ``None`` when unset."""
+        account_id = self.selected_threads_account_id()
+        return next((item for item in self._threads_accounts() if item.account_id == account_id), None)
+
+    @staticmethod
+    def _upload_tab_index(tabs, account_id):
+        target = str(account_id or "")
+        for index in range(tabs.count()):
+            if str(tabs.tabData(index) or "") == target:
+                return index
+        return -1
+
+    def _refresh_threads_account_ui(self, selected_id=None):
+        accounts = self._threads_accounts()
+        preferred = str(selected_id or getattr(config, "active_threads_account_id", "") or "")
+        if preferred not in {account.account_id for account in accounts}:
+            preferred = accounts[0].account_id if accounts else ""
+
+        combo = getattr(self, "threads_account_combo", None)
+        if combo is not None:
+            blocked = combo.blockSignals(True)
+            combo.clear()
+            for account in accounts:
+                label = account.display_name or account.expected_username
+                combo.addItem(label, account.account_id)
+            combo.setCurrentIndex(max(combo.findData(preferred), 0))
+            combo.blockSignals(blocked)
+
+        tabs = getattr(self, "_upload_account_tabs", None)
+        if tabs is not None:
+            blocked = tabs.blockSignals(True)
+            while tabs.count():
+                tabs.removeTab(0)
+            for account in accounts:
+                label = account.display_name or account.expected_username
+                index = tabs.addTab(label)
+                tabs.setTabData(index, account.account_id)
+            tabs.setCurrentIndex(max(self._upload_tab_index(tabs, preferred), 0))
+            tabs.blockSignals(blocked)
+
+        self._apply_selected_threads_account(preferred)
+
+    def _apply_selected_threads_account(self, account_id):
+        account = next((item for item in self._threads_accounts() if item.account_id == str(account_id or "")), None)
+        if account is not None:
+            self.username_edit.setText(account.expected_username)
+            if hasattr(self, "hour_spin"):
+                total = int(account.upload_interval)
+                self.hour_spin.setValue(total // 3600)
+                self.min_spin.setValue((total % 3600) // 60)
+                self.sec_spin.setValue(total % 60)
+        elif not self._threads_accounts():
+            self.username_edit.setText(str(getattr(config, "instagram_username", "") or ""))
+        if hasattr(self, "links_text"):
+            self._visible_upload_account_id = str(account_id or "")
+            blocked = self.links_text.blockSignals(True)
+            self.links_text.setPlainText(self._account_drafts.get(str(account_id or ""), ""))
+            self.links_text.blockSignals(blocked)
+            self._update_link_count()
+        self._render_account_queue(str(account_id or ""))
+
+    def _on_threads_account_selected(self, index):
+        combo = self.threads_account_combo
+        account_id = str(combo.itemData(index) or "")
+        previous_id = getattr(self, "_visible_upload_account_id", "")
+        if previous_id and hasattr(self, "links_text"):
+            self._account_drafts[previous_id] = self.links_text.toPlainText()
+        if account_id:
+            config.set_active_threads_account(account_id)
+            config.save()
+        tabs = getattr(self, "_upload_account_tabs", None)
+        tab_index = self._upload_tab_index(tabs, account_id) if tabs is not None else -1
+        if tabs is not None and tabs.currentIndex() != tab_index:
+            tabs.setCurrentIndex(max(tab_index, 0))
+        self._apply_selected_threads_account(account_id)
+
+    def _on_upload_account_tab_changed(self, index):
+        if self._upload_tab_syncing:
+            return
+        tabs = self._upload_account_tabs
+        previous_id = getattr(self, "_visible_upload_account_id", "")
+        if previous_id:
+            self._account_drafts[previous_id] = self.links_text.toPlainText()
+        account_id = str(tabs.tabData(index) or "")
+        self._visible_upload_account_id = account_id
+        self._upload_tab_syncing = True
+        self.links_text.setPlainText(self._account_drafts.get(account_id, ""))
+        self._upload_tab_syncing = False
+        combo = getattr(self, "threads_account_combo", None)
+        if combo is not None and combo.currentIndex() != combo.findData(account_id):
+            combo.setCurrentIndex(max(combo.findData(account_id), 0))
+        self._render_account_queue(account_id)
+
+    def _render_account_queue(self, account_id):
+        if not account_id or not hasattr(self, "link_table"):
+            return
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None:
+            state = runtime.queue_store(account_id).get_state()
+        else:
+            state = AccountQueueStore(account_id, root=Path(config.config_dir) / "queues").get_state()
+        items = list(state.pending_items)
+        if state.current_item:
+            items.insert(0, state.current_item)
+        self.link_table.setRowCount(0)
+        self._link_url_row_map.clear()
+        for row, item in enumerate(items):
+            url = str(item.get("url", ""))
+            self.link_table.insertRow(row)
+            self.link_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            self.link_table.setItem(row, 1, QTableWidgetItem(url))
+            self.link_table.setItem(row, 2, QTableWidgetItem("진행 중" if item == state.current_item else "대기"))
+            self.link_table.setItem(row, 3, QTableWidgetItem(str(item.get("title", ""))))
+            self._link_url_row_map[url] = row
+
+    def _init_multi_account_runtime(self):
+        if self._multi_account_runtime is not None:
+            return
+        self._multi_account_runtime = MultiAccountRuntime(
+            config=config,
+            pipeline=self.pipeline,
+            queue_root=Path(config.config_dir) / "queues",
+            history_root=Path(config.config_dir) / "history",
+            on_state=lambda account_id, state: self.signals.account_runtime_state.emit(
+                str(account_id), state
+            ),
+            on_log=lambda account_id, message: self.signals.account_runtime_log.emit(
+                str(account_id), str(message)
+            ),
+        )
+        self._multi_account_runtime.refresh_accounts()
+        account_id = self.selected_threads_account_id()
+        if account_id:
+            self._render_account_queue(account_id)
+
+    def _refresh_multi_account_runtime(self):
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None:
+            runtime.refresh_accounts()
+
+    def _on_account_runtime_log(self, account_id, message):
+        account = next(
+            (item for item in self._threads_accounts() if item.account_id == account_id),
+            None,
+        )
+        label = (
+            account.display_name or account.expected_username
+            if account is not None
+            else account_id[:8]
+        )
+        self.signals.log.emit(f"[{label}] {message}")
+
+    def _on_account_runtime_state(self, account_id, state):
+        payload = dict(state or {})
+        schedule = payload.get("schedule")
+        pending = len(payload.get("pending_items") or []) + (
+            1 if payload.get("current_item") else 0
+        )
+        phase = str(payload.get("phase") or "idle")
+        next_allowed_at = payload.get("next_allowed_at")
+        blocked_reason = ""
+        running = False
+        enabled = False
+        if schedule is not None:
+            running = bool(getattr(schedule, "running", False))
+            enabled = bool(getattr(schedule, "enabled", False))
+            blocked_reason = str(getattr(schedule, "blocked_reason", "") or "")
+            next_allowed_at = getattr(schedule, "next_allowed_at", next_allowed_at)
+            if running:
+                phase = "processing"
+            elif blocked_reason:
+                phase = "blocked"
+            elif enabled and pending:
+                phase = "waiting" if float(next_allowed_at or 0) > time.time() else "running"
+            elif pending == 0:
+                phase = "finished"
+
+        if account_id == self.selected_threads_account_id():
+            self._render_account_queue(account_id)
+            stats = payload.get("stats") or {}
+            self.signals.run_state.emit(
+                {
+                    "phase": phase,
+                    "message": blocked_reason or (
+                        f"계정별 대기열 {pending}개"
+                        if pending
+                        else "이 계정의 대기열 작업이 완료되었습니다."
+                    ),
+                    "pending": pending,
+                    "total": pending + sum(int(stats.get(key, 0) or 0) for key in ("success", "failed", "skipped")),
+                    "completed": int(stats.get("success", 0) or 0) + int(stats.get("skipped", 0) or 0),
+                    "failed": int(stats.get("failed", 0) or 0),
+                    "next_allowed_at": next_allowed_at,
+                    "current_item": str((payload.get("current_item") or {}).get("url", "")),
+                }
+            )
+            self.start_btn.setEnabled(not running)
+            self.add_btn.setEnabled(True)
+            self.stop_btn.setEnabled(running or enabled)
+
+        tabs = getattr(self, "_upload_account_tabs", None)
+        if tabs is not None:
+            tab_index = self._upload_tab_index(tabs, account_id)
+            account = next(
+                (item for item in self._threads_accounts() if item.account_id == account_id),
+                None,
+            )
+            if tab_index >= 0 and account is not None:
+                label = account.display_name or account.expected_username
+                marker = " ●" if running or enabled else (" !" if blocked_reason else "")
+                tabs.setTabText(tab_index, label + marker)
+
+        runtime = getattr(self, "_multi_account_runtime", None)
+        snapshots = runtime.snapshots().values() if runtime is not None else []
+        any_active = any(
+            bool(getattr(item.get("schedule"), "running", False))
+            or bool(getattr(item.get("schedule"), "enabled", False))
+            for item in snapshots
+        )
+        self.is_running = any_active
+        if hasattr(self, "stop_all_btn"):
+            self.stop_all_btn.setEnabled(any_active)
+
+    def _add_threads_account_from_ui(self):
+        username = self._normalize_threads_username(self.username_edit.text())
+        if not username:
+            show_warning(self, "계정 이름", "Threads 사용자명을 먼저 입력하세요.")
+            return
+        try:
+            account = config.add_threads_account(username, display_name=username, upload_interval=max(30, int(config.upload_interval)))
+            config.set_active_threads_account(account.account_id)
+            config.save()
+        except (ValueError, KeyError) as exc:
+            show_warning(self, "계정 추가", str(exc))
+            return
+        self._refresh_multi_account_runtime()
+        self._refresh_threads_account_ui(account.account_id)
+
+    def _remove_selected_threads_account(self):
+        account_id = self.selected_threads_account_id()
+        if not account_id:
+            return
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None:
+            try:
+                account_state = runtime.snapshot(account_id)
+                schedule = account_state.get("schedule")
+            except KeyError:
+                account_state = {}
+                schedule = None
+            if schedule is not None and (
+                getattr(schedule, "running", False)
+                or getattr(schedule, "enabled", False)
+            ):
+                show_warning(self, "계정 삭제", "실행 중인 계정은 먼저 중지해 주세요.")
+                return
+            if (
+                account_state.get("current_item")
+                or account_state.get("pending_items")
+            ):
+                show_warning(
+                    self,
+                    "계정 삭제",
+                    "대기열이 남아 있는 계정은 삭제할 수 없습니다. 먼저 작업을 완료해 주세요.",
+                )
+                return
+        try:
+            config.remove_threads_account(account_id)
+            config.save()
+        except KeyError:
+            return
+        self._account_drafts.pop(account_id, None)
+        self._refresh_multi_account_runtime()
+        self._refresh_threads_account_ui()
+
     def _load_settings(self):
         """Load config values into widgets."""
+        provider = normalize_ai_provider(getattr(config, "ai_provider", ""))
+        provider_combo = getattr(self, "_ai_provider_combo", None)
+        if provider_combo is not None:
+            provider_index = provider_combo.findData(provider)
+            provider_combo.setCurrentIndex(max(provider_index, 0))
+
         keys = []
         if hasattr(config, "get_gemini_api_keys"):
             try:
@@ -2710,6 +3410,8 @@ class MainWindow(QMainWindow):
             edit.setText(keys[idx] if idx < len(keys) else "")
             edit.setEchoMode(QLineEdit.EchoMode.Password)
             row["toggle"].setText("보기")
+            row["toggle"].setChecked(False)
+        self._on_ai_provider_changed()
 
         total = config.upload_interval
         self.hour_spin.setValue(total // 3600)
@@ -2725,6 +3427,7 @@ class MainWindow(QMainWindow):
             if combo is not None:
                 self._set_post_concept_combo_value(combo, selected_concept)
         self.username_edit.setText(config.instagram_username)
+        self._refresh_threads_account_ui()
 
         # Keep top-right user status chips visually aligned with the reference app.
         def _apply_top_right_status_styles():
@@ -2846,19 +3549,28 @@ class MainWindow(QMainWindow):
             interval = 30
             show_info(self, "알림", "최소 업로드 간격은 30초입니다.")
 
+        selected_provider = self._selected_ai_provider()
         key_values = []
         for index, row in enumerate(getattr(self, "_gemini_key_rows", [])):
             if index >= getattr(self, "_visible_gemini_key_rows", 1):
                 continue
             key_values.append(row["edit"].text().strip())
         key_values = normalize_gemini_api_keys(key_values)
-        if not key_values:
+        if selected_provider == AI_PROVIDER_GEMINI and not key_values:
             self._log_user_activity("settings_save_blocked", "reason=missing_gemini_keys", level="WARNING")
+            tab_bar = getattr(self, "_settings_tab_bar", None)
+            if tab_bar is not None:
+                tab_bar.setCurrentIndex(1)
+            rows = getattr(self, "_gemini_key_rows", [])
+            if rows:
+                rows[0]["edit"].setFocus()
             show_warning(self, "설정 필요", "최소 1개의 Gemini API 키를 입력해주세요.")
             return
-        save_configured_gemini_api_keys(key_values)
+        if key_values:
+            save_configured_gemini_api_keys(key_values)
 
         config.upload_interval = interval
+        config.ai_provider = selected_provider
         config.prefer_video = self.video_check.isChecked()
         config.auto_start_enabled = (
             self._auto_start_check.isChecked()
@@ -2868,8 +3580,22 @@ class MainWindow(QMainWindow):
         concept_combo = getattr(self, "settings_post_concept_combo", None) or getattr(self, "post_concept_combo", None)
         if concept_combo is not None:
             config.post_concept = normalize_concept_id(concept_combo.currentData())
-        config.instagram_username = self.username_edit.text().strip()
+        username = self._normalize_threads_username(self.username_edit.text().strip())
+        account_id = self.selected_threads_account_id()
+        if account_id:
+            try:
+                config.update_threads_account(
+                    account_id,
+                    expected_username=username,
+                    upload_interval=interval,
+                )
+            except (KeyError, ValueError) as exc:
+                show_warning(self, "계정 설정", str(exc))
+                return
+        config.instagram_username = username
         config.save()
+        self._refresh_multi_account_runtime()
+        self._refresh_threads_account_ui(account_id)
         auto_start_synced = sync_auto_start(bool(config.auto_start_enabled))
 
         active_key = self._resolve_runtime_gemini_api_key(validate=False)
@@ -2877,7 +3603,13 @@ class MainWindow(QMainWindow):
         if self.is_running:
             logger.info("실행 중 설정 저장됨; 파이프라인 재초기화는 보류합니다")
         else:
-            self.pipeline = CoupangPartnersPipeline(active_key)
+            self.pipeline = CoupangPartnersPipeline(
+                active_key,
+                ai_provider=selected_provider,
+            )
+            runtime = getattr(self, "_multi_account_runtime", None)
+            if runtime is not None:
+                runtime.set_pipeline(self.pipeline)
 
         if hasattr(self, "_relayout_header_account_card"):
             self._relayout_header_account_card()
@@ -2894,7 +3626,8 @@ class MainWindow(QMainWindow):
                 f"upload_interval={interval}; prefer_video={bool(config.prefer_video)}; "
                 f"auto_start_enabled={bool(config.auto_start_enabled)}; "
                 f"post_concept={normalize_concept_id(getattr(config, 'post_concept', ''))}; "
-                f"username_set={bool(config.instagram_username)}; gemini_keys={len(key_values)}"
+                f"username_set={bool(config.instagram_username)}; "
+                f"ai_provider={selected_provider}; gemini_keys={len(key_values)}"
             ),
         )
         logger.info("설정 저장 완료")
@@ -3188,6 +3921,12 @@ class MainWindow(QMainWindow):
 
         if username:
             config.instagram_username = username
+            account_id = self.selected_threads_account_id()
+            if account_id:
+                try:
+                    config.update_threads_account(account_id, expected_username=username)
+                except (KeyError, ValueError):
+                    pass
             config.save()
 
         if getattr(self, "_threads_login_browser_open", False):
@@ -3214,17 +3953,10 @@ class MainWindow(QMainWindow):
             "threads_login_launch_requested",
             f"profile={profile_dir}; username_set={bool(username)}",
         )
+        # Threads browser login itself does not require an AI key. The dummy
+        # value keeps the browser/session wrapper available in Grok mode.
         if not runtime_api_key or len(runtime_api_key.strip()) < 10:
-            self._log_user_activity(
-                "threads_login_launch_failed",
-                "reason=missing_runtime_api_key",
-                level="WARNING",
-            )
-            self._threads_login_browser_open = False
-            self._restore_login_btn()
-            self._update_login_status("error", "Gemini API 키를 먼저 저장해주세요.")
-            show_warning(self, "설정 필요", "설정에서 유효한 Gemini API 키를 저장한 뒤 다시 시도해주세요.")
-            return
+            runtime_api_key = "dummy-key-for-session-setup"
         logger.info(
             "Threads 로그인 브라우저 실행 요청: profile=%s username_provided=%s",
             profile_dir,
@@ -3432,22 +4164,63 @@ class MainWindow(QMainWindow):
         self._threads_login_browser_open = False
         self._restore_login_btn()
         self._log_user_activity("threads_login_browser_closed", "session_saved=True")
-        self._update_login_status(
-            "success",
-            "브라우저를 닫았습니다. 세션 저장이 완료되었습니다.",
-        )
-        self.signals.log.emit("Threads 브라우저가 닫혀 세션이 저장되었습니다.")
+        self._update_login_status("pending", "저장된 로그인 계정을 확인하는 중...")
+        self.signals.log.emit("Threads 브라우저가 닫혀 세션을 저장했습니다. 계정을 확인합니다.")
+        self._check_login_status()
 
     def _check_login_status(self):
-        self._log_user_activity("threads_login_check_help_opened", "source=settings_button")
-        self._update_login_status("pending", "브라우저에서 로그인 후 창을 닫아주세요.")
-        show_info(
-            self,
-            "로그인 안내",
-            "1) Threads 로그인 버튼을 누릅니다.\n"
-            "2) 열린 브라우저에서 로그인합니다.\n"
-            "3) 브라우저 창을 닫으면 세션이 자동 저장됩니다.",
-        )
+        account = self.selected_threads_account()
+        if account is None:
+            show_warning(self, "Threads 계정", "먼저 확인할 계정을 선택해 주세요.")
+            return
+        self.check_login_btn.setEnabled(False)
+        self.check_login_btn.setText("확인 중...")
+        self._update_login_status("pending", "저장된 로그인 계정을 확인하는 중...")
+        account_id = account.account_id
+        expected_username = account.expected_username
+        profile_id = account.profile_id
+
+        def run_check():
+            agent = None
+            result = (False, None, account_id, expected_username)
+            try:
+                from src.computer_use_agent import ComputerUseAgent
+                from src.threads_playwright_helper import ThreadsPlaywrightHelper
+
+                agent = ComputerUseAgent(
+                    api_key="dummy-key-for-session-check",
+                    headless=True,
+                    profile_dir=profile_id,
+                )
+                agent.start_browser()
+                goto_threads_with_fallback(
+                    agent.page,
+                    path="/",
+                    timeout=15000,
+                    retries_per_url=1,
+                )
+                helper = ThreadsPlaywrightHelper(agent.page)
+                logged_in = helper.check_login_status()
+                username = helper.get_logged_in_username() if logged_in else None
+                verified = bool(
+                    logged_in and helper.verify_account(expected_username)
+                )
+                result = (verified, username, account_id, expected_username)
+            except Exception:
+                logger.exception("Threads 로그인 계정 확인에 실패했습니다.")
+            finally:
+                if agent is not None:
+                    try:
+                        agent.close()
+                    except Exception:
+                        pass
+            if self._closed:
+                return
+            app = QApplication.instance()
+            if app is not None:
+                app.postEvent(self, LoginStatusEvent(result))
+
+        threading.Thread(target=run_check, daemon=True).start()
 
     def _update_login_status(self, state, text):
         color_map = {
@@ -3473,19 +4246,33 @@ class MainWindow(QMainWindow):
         if evt.type() == LoginStatusEvent.EventType:
             if self._closed:
                 return True
-            is_logged_in, username = evt.result
+            result = tuple(evt.result)
+            is_logged_in, username = result[:2]
+            account_id = result[2] if len(result) > 2 else ""
+            expected_username = result[3] if len(result) > 3 else ""
             self._log_user_activity(
                 "threads_login_check_result",
                 f"is_logged_in={bool(is_logged_in)}; username={username or ''}",
             )
             self.check_login_btn.setEnabled(True)
-            self.check_login_btn.setText("로그인 완료 안내")
+            self.check_login_btn.setText("로그인 상태 확인")
 
             if is_logged_in:
                 name = f"@{username}" if username else "연결됨"
                 self._update_login_status("success", name)
+                if account_id:
+                    try:
+                        config.update_threads_account(
+                            account_id,
+                            last_verified_username=username or expected_username,
+                            last_verified_at=datetime.now().astimezone().isoformat(),
+                        )
+                        config.save()
+                        self._refresh_threads_account_ui(account_id)
+                    except (KeyError, ValueError):
+                        logger.exception("Threads 계정 검증 결과 저장에 실패했습니다.")
             else:
-                self._update_login_status("error", "연결 안됨")
+                self._update_login_status("error", "로그인 또는 계정 일치 확인 실패")
             return True
         return super().event(evt)
 
@@ -3510,18 +4297,160 @@ class MainWindow(QMainWindow):
             return bool(work_response.get("status"))
         return False
 
+    def _configure_multi_account_pipeline(self, selected_provider, api_key):
+        if hasattr(self.pipeline, "set_google_api_key"):
+            self.pipeline.set_google_api_key(api_key)
+        if hasattr(self.pipeline, "set_ai_provider"):
+            self.pipeline.set_ai_provider(selected_provider)
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None and not runtime.is_running:
+            runtime.set_pipeline(self.pipeline)
+
+    def _start_selected_account_batch(
+        self,
+        link_data,
+        *,
+        interval,
+        selected_provider,
+        api_key,
+        next_allowed_at=None,
+    ):
+        account = self.selected_threads_account()
+        if account is None:
+            show_warning(self, "Threads 계정", "설정에서 먼저 Threads 계정을 추가해 주세요.")
+            return False
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is None:
+            self._init_multi_account_runtime()
+            runtime = self._multi_account_runtime
+        runtime.refresh_accounts()
+        if next_allowed_at:
+            runtime.queue_store(account.account_id).set_phase(
+                "waiting",
+                next_allowed_at=next_allowed_at,
+            )
+            runtime.refresh_accounts()
+        self._configure_multi_account_pipeline(selected_provider, api_key)
+        added = runtime.enqueue(account.account_id, link_data)
+        if added <= 0:
+            show_info(self, "대기열", "모든 링크가 이미 이 계정의 대기열 또는 업로드 이력에 있습니다.")
+            self._render_account_queue(account.account_id)
+            return False
+
+        self._account_drafts[account.account_id] = "\n".join(item[0] for item in link_data)
+        self.is_running = True
+        self.start_btn.setEnabled(False)
+        self.add_btn.setEnabled(True)
+        self.stop_btn.setEnabled(True)
+        self.stop_all_btn.setEnabled(True)
+        self.status_badge.update_style(Colors.WARNING, "실행중")
+        self._sidebar_status_label.setText("실행중")
+        self._reset_steps()
+        self._render_account_queue(account.account_id)
+        self.signals.run_state.emit(
+            {
+                "phase": "running",
+                "message": f"@{account.expected_username} 대기열에 {added}개 추가",
+                "pending": len(runtime.snapshot(account.account_id).get("pending_items") or []),
+                "total": len(runtime.snapshot(account.account_id).get("pending_items") or []),
+            }
+        )
+        runtime.start_account(account.account_id)
+        self._log_user_activity(
+            "multi_account_batch_started",
+            f"account_id={account.account_id}; added={added}; interval={interval}",
+        )
+        return True
+
+    def start_all_accounts(self):
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is None:
+            self._init_multi_account_runtime()
+            runtime = self._multi_account_runtime
+        runtime.refresh_accounts()
+        pending_total = sum(
+            len(state.get("pending_items") or []) + (1 if state.get("current_item") else 0)
+            for state in runtime.snapshots().values()
+        )
+        if pending_total <= 0:
+            show_info(self, "전체 대기열", "실행할 계정별 대기열이 없습니다.")
+            return
+        selected_provider = normalize_ai_provider(getattr(config, "ai_provider", ""))
+        api_key = (
+            self._resolve_runtime_gemini_api_key(validate=True)
+            if selected_provider == AI_PROVIDER_GEMINI
+            else ""
+        )
+        self._configure_multi_account_pipeline(selected_provider, api_key)
+        self.is_running = True
+        self.start_all_btn.setEnabled(False)
+        self.stop_all_btn.setEnabled(True)
+        runtime.start_all()
+        self.signals.log.emit(f"전체 계정 대기열 {pending_total}개 실행을 시작했습니다.")
+
+    def stop_all_accounts(self):
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is None:
+            return
+        runtime.stop_all()
+        if runtime.is_running:
+            self.pipeline.cancel()
+        self.is_running = False
+        self.start_all_btn.setEnabled(True)
+        self.stop_all_btn.setEnabled(False)
+        self.signals.log.emit("전체 계정 대기열 중지를 요청했습니다.")
+
+    def _start_existing_selected_queue(self) -> bool:
+        account = self.selected_threads_account()
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if account is None or runtime is None:
+            return False
+        state = runtime.snapshot(account.account_id)
+        pending = len(state.get("pending_items") or []) + (
+            1 if state.get("current_item") else 0
+        )
+        if pending <= 0:
+            return False
+        selected_provider = normalize_ai_provider(getattr(config, "ai_provider", ""))
+        api_key = (
+            self._resolve_runtime_gemini_api_key(validate=True)
+            if selected_provider == AI_PROVIDER_GEMINI
+            else ""
+        )
+        self._configure_multi_account_pipeline(selected_provider, api_key)
+        self.is_running = True
+        self.start_btn.setEnabled(False)
+        self.add_btn.setEnabled(True)
+        self.stop_btn.setEnabled(True)
+        self.stop_all_btn.setEnabled(True)
+        runtime.start_account(account.account_id)
+        self.signals.log.emit(
+            f"@{account.expected_username}의 저장된 대기열 {pending}개를 시작했습니다."
+        )
+        return True
+
     def start_upload(self):
         logger.info("업로드 시작 호출")
         self._log_user_activity("batch_start_requested", "source=start_button")
         content = self.links_text.toPlainText().strip()
         if not content:
+            if self._start_existing_selected_queue():
+                return
             self._log_user_activity("batch_start_blocked", "reason=empty_links_input", level="WARNING")
             logger.warning("업로드 시작 차단: 내용이 비어 있습니다")
             show_warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
             return
 
-        api_key = self._resolve_runtime_gemini_api_key(validate=True)
-        if not api_key or len(api_key.strip()) < 10:
+        config.load()
+        selected_provider = normalize_ai_provider(getattr(config, "ai_provider", ""))
+        api_key = (
+            self._resolve_runtime_gemini_api_key(validate=True)
+            if selected_provider == AI_PROVIDER_GEMINI
+            else ""
+        )
+        if selected_provider == AI_PROVIDER_GEMINI and (
+            not api_key or len(api_key.strip()) < 10
+        ):
             self._log_user_activity("batch_start_key_fallback", "reason=invalid_runtime_api_key", level="WARNING")
             logger.warning("Gemini API 키 검증 실패: 제목 기반 fallback 문구로 계속 진행합니다.")
             api_key = ""
@@ -3533,8 +4462,11 @@ class MainWindow(QMainWindow):
             show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
             return
 
-        config.load()
-        interval = max(config.upload_interval, 30)
+        selected_account = self.selected_threads_account()
+        interval = max(
+            int(selected_account.upload_interval if selected_account is not None else config.upload_interval),
+            30,
+        )
         logger.info("업로드 준비 완료: links=%d interval=%d", len(link_data), interval)
 
         quota_bypass = self._is_dev_quota_bypass_enabled()
@@ -3574,7 +4506,12 @@ class MainWindow(QMainWindow):
             logger.info("업로드 시작이 사용자에 의해 취소되었습니다")
             return
 
-        self.start_link_data_batch(link_data, interval=interval, source="manual")
+        self._start_selected_account_batch(
+            link_data,
+            interval=interval,
+            selected_provider=selected_provider,
+            api_key=api_key,
+        )
         return
 
         self._log_user_activity("batch_start_confirmed", f"links={len(link_data)}; interval={interval}")
@@ -3622,6 +4559,10 @@ class MainWindow(QMainWindow):
             "api_key": api_key,
             "profile_dir": profile_dir,
         }
+        if hasattr(self.pipeline, "set_google_api_key"):
+            self.pipeline.set_google_api_key(api_key)
+        if hasattr(self.pipeline, "set_ai_provider"):
+            self.pipeline.set_ai_provider(selected_provider)
         self._active_pipeline = self.pipeline
         thread = threading.Thread(
             target=self._run_upload_queue,
@@ -3650,6 +4591,26 @@ class MainWindow(QMainWindow):
             self._log_user_activity("queue_add_links_blocked", "reason=no_valid_links", level="WARNING")
             logger.warning("링크 큐 추가 차단: 유효한 링크가 없습니다")
             show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
+            return
+
+        runtime = getattr(self, "_multi_account_runtime", None)
+        account = self.selected_threads_account()
+        if runtime is not None and account is not None:
+            added = runtime.enqueue(account.account_id, link_data)
+            self._account_drafts[account.account_id] = "\n".join(item[0] for item in link_data)
+            self._render_account_queue(account.account_id)
+            if added:
+                runtime.start_account(account.account_id)
+                self.is_running = True
+                self.start_btn.setEnabled(False)
+                self.add_btn.setEnabled(True)
+                self.stop_btn.setEnabled(True)
+                self.stop_all_btn.setEnabled(True)
+                self.signals.log.emit(
+                    f"@{account.expected_username} 대기열에 {added}개 링크를 추가했습니다."
+                )
+            else:
+                show_info(self, "대기열", "새로 추가할 링크가 없습니다.")
             return
 
         added = 0
@@ -4000,11 +4961,22 @@ class MainWindow(QMainWindow):
                     pending=self.link_queue.qsize() + 1,
                     completed=max(processed_count - 1, 0),
                 )
-                reserved_work_id = None
-                reservation_supported = False
+                reserved_work_id = str(
+                    post_data.get("managed_ai_reservation_id") or ""
+                ).strip()
+                managed_quota_mode = str(
+                    post_data.get("managed_ai_quota_mode") or "reservation"
+                ).strip().lower()
+                reservation_supported = bool(reserved_work_id) and managed_quota_mode != "legacy"
 
                 try:
                     if not ensure_threads_ready():
+                        if reservation_supported and reserved_work_id:
+                            try:
+                                from src import auth_client
+                                auth_client.release_reserved_work(reserved_work_id)
+                            except Exception:
+                                logger.exception("Threads 확인 실패 후 관리형 AI 예약 해제 실패")
                         results["cancelled"] = True
                         self._mark_resume_item(url, "pending", product_name, "threads_login_required")
                         emit_run_state(
@@ -4030,7 +5002,7 @@ class MainWindow(QMainWindow):
                     posts_data = build_product_thread_payload(post_data)
 
                     # Reserve work token when backend supports atomic quota flow.
-                    if not quota_bypass:
+                    if not quota_bypass and not reserved_work_id:
                         try:
                             from src import auth_client
                             reserve_result = auth_client.reserve_work()
@@ -4332,6 +5304,24 @@ class MainWindow(QMainWindow):
 
     def stop_upload(self):
         logger.info("업로드 중지 호출; is_running=%s", self.is_running)
+        runtime = getattr(self, "_multi_account_runtime", None)
+        account_id = self.selected_threads_account_id()
+        if runtime is not None and account_id:
+            try:
+                schedule = runtime.snapshot(account_id).get("schedule")
+            except KeyError:
+                schedule = None
+            if schedule is not None and (
+                getattr(schedule, "running", False)
+                or getattr(schedule, "enabled", False)
+            ):
+                runtime.stop_account(account_id)
+                if getattr(schedule, "running", False):
+                    self.pipeline.cancel()
+                self.signals.log.emit("선택한 계정의 대기열 중지를 요청했습니다.")
+                self.signals.status.emit("중지중...")
+                self.stop_btn.setEnabled(False)
+                return
         if self.is_running:
             self.signals.log.emit("중지 요청됨. 현재 항목 처리 후 중단합니다.")
             self.signals.status.emit("중지중...")
@@ -4665,6 +5655,9 @@ class MainWindow(QMainWindow):
             self.stop_upload()
         elif self.is_running and forced_relogin:
             self.stop_upload()
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None:
+            runtime.stop_all()
         self._save_resume_state("window_close")
         self._closed = True
         self._browser_cancel.set()

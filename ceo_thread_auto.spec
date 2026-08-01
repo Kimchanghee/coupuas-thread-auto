@@ -24,6 +24,7 @@ hidden_imports = [
 
     # ============ src 패키지 (쿠팡 파트너스 전용) ============
     'src',
+    'src.ai_provider',
     'src.main_window',
     'src.config',
     'src.coupang_uploader',
@@ -37,6 +38,14 @@ hidden_imports = [
     'src.services',
     'src.services.coupang_parser',
     'src.services.aggro_generator',
+    'src.services.grok_cli_provider',
+    'src.services.account_queue',
+    'src.services.link_history',
+    'src.services.multi_account_coordinator',
+    'src.services.multi_account_runtime',
+    'src.services.multi_account_upload_runner',
+    'src.models',
+    'src.models.threads_account',
 
     # ============ Google/Gemini AI ============
     'google',

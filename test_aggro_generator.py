@@ -1,4 +1,64 @@
 from src.services.aggro_generator import AggroGenerator
+from src.services.managed_ai_client import ManagedGeneration, ManagedVariant
+
+
+class _ManagedClientStub:
+    def __init__(self):
+        self.calls = 0
+
+    def generate_variants(self, _product_info):
+        self.calls += 1
+        return ManagedGeneration(
+            ai_job_id="job-1",
+            reservation_id="res-1",
+            quota_mode="legacy",
+            prompt_version="threads-ko-v1",
+            model="xai/grok-4.3",
+            degraded=False,
+            degraded_reason="",
+            variants=tuple(
+                ManagedVariant(
+                    variant_id=variant_id,
+                    root_text=f"{variant_id} 호기심을 만드는 첫 글입니다. 다음 글에서 정체를 확인해봐요.",
+                    product_comment_text="상품 링크와 제휴 고지",
+                )
+                for variant_id in (
+                    "target_direct",
+                    "convenience_contrast",
+                    "fun_reveal",
+                    "use_scene_story",
+                )
+            ),
+        )
+
+
+def test_managed_provider_generates_four_variants_with_one_server_call():
+    managed = _ManagedClientStub()
+    generator = AggroGenerator(
+        ai_provider="managed",
+        managed_client=managed,
+    )
+    product = {
+        "title": "휴대용 선풍기",
+        "original_url": "https://link.coupang.com/a/example",
+        "search_keywords": "여름 출퇴근",
+        "image_path": "media/product.jpg",
+    }
+
+    variants = generator.generate_product_variants(product)
+
+    assert managed.calls == 1
+    assert len(variants) == 4
+    assert {item["hook_variant"] for item in variants} == {
+        "target_direct",
+        "convenience_contrast",
+        "fun_reveal",
+        "use_scene_story",
+    }
+    assert variants[0]["managed_ai_reservation_id"] == "res-1"
+    assert variants[0]["managed_ai_quota_mode"] == "legacy"
+    assert variants[0]["first_post"]["media_path"] is None
+    assert variants[0]["second_post"]["media_path"] == "media/product.jpg"
 from src.services.post_concepts import (
     CONCEPT_BUYING_GUIDE,
     CONCEPT_PROBLEM_SOLUTION,
@@ -66,10 +126,46 @@ def test_product_post_exposes_fixed_root_and_product_comment_payload():
     assert result[ROOT_POST] is result["first_post"]
     assert result[PRODUCT_COMMENT] is result["second_post"]
     assert [item["role"] for item in payload] == [ROOT_POST, PRODUCT_COMMENT]
-    assert payload[0]["image_path"] == "product.jpg"
-    assert payload[1]["image_path"] is None
+    assert payload[0]["image_path"] is None
+    assert payload[1]["image_path"] == "product.jpg"
     assert "https://link.coupang.com/a/test" not in payload[0]["text"]
     assert "https://link.coupang.com/a/test" in payload[1]["text"]
+
+
+def test_four_hook_variants_use_target_pain_benefit_and_fun_logic():
+    generator = AggroGenerator()
+    posts = generator.generate_product_variants(
+        {
+            "title": "Zoomland 허리벨트형 팽창식 구명조끼",
+            "search_keywords": "선상 낚시 허리 구명조끼",
+            "original_url": "https://link.coupang.com/a/test",
+            "image_path": "lifejacket.jpg",
+        }
+    )
+
+    assert [post["hook_variant"] for post in posts] == [
+        "target_direct",
+        "convenience_contrast",
+        "fun_reveal",
+        "use_scene_story",
+    ]
+    assert len({post["root_post"]["text"] for post in posts}) == 4
+    assert all(post["root_post"]["media_path"] is None for post in posts)
+    assert all(post["product_comment"]["media_path"] == "lifejacket.jpg" for post in posts)
+    assert all("https://link.coupang.com/a/test" not in post["root_post"]["text"] for post in posts)
+    assert all("https://link.coupang.com/a/test" in post["product_comment"]["text"] for post in posts)
+
+
+def test_hook_variant_prompt_requires_target_convenience_fun_and_open_loop():
+    prompts = "\n".join(
+        AggroGenerator.build_hook_variant_prompt(variant["id"])
+        for variant in AggroGenerator.HOOK_VARIANTS
+    )
+
+    assert "핵심 타깃" in prompts
+    assert "편하게" in prompts
+    assert "재미있는 비유" in prompts
+    assert "미완성 결말" in prompts
 
 
 def test_bad_model_output_falls_back_to_clean_first_post():
@@ -102,6 +198,17 @@ def test_plain_model_output_gets_playful_emojis():
     assert "선풍기" in cleaned
     assert AggroGenerator._EMOJI_PATTERN.search(cleaned)
     assert len([line for line in cleaned.splitlines() if line.strip()]) == 2
+
+
+def test_clean_model_output_preserves_leading_product_quantity():
+    cleaned = AggroGenerator._clean_first_post_candidate(
+        "1인 자취인데 프라이팬 설거지까지 하는 거 번거롭지 않냐 🍳\n"
+        "그래서 4L 에어프라이어 스펙을 좀 뜯어봄 👀",
+        "에어프라이어 4L 가성비 1인 자취",
+        "에어프라이어 자취 주방",
+    )
+
+    assert cleaned.startswith("1인 자취")
 
 
 def test_awkward_copy_is_rejected():

@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '1'
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPalette, QColor
 
 from src.theme import Colors, global_stylesheet
@@ -64,6 +64,10 @@ def main():
 
     # 메인 윈도우 직접 실행
     main_win = MainWindow()
+    if os.getenv("THREAD_AUTO_TEST_OPEN_SETTINGS", "").strip() == "1":
+        main_win._switch_page(2, source="test_startup")
+    if os.getenv("THREAD_AUTO_TEST_START_GROK_LOGIN", "").strip() == "1":
+        QTimer.singleShot(800, main_win._start_grok_login)
     main_win.show()
 
     sys.exit(app.exec())

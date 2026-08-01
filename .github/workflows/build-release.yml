@@ -212,11 +212,13 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: Release ${{ needs.build.outputs.version }}
           body: |
-            쇼츠스레드메이커 새 버전이 출시되었습니다.
+            서버 관리형 AI와 다중 Threads 계정 자동화를 추가한 버전입니다.
 
-            ### 2026-07-28 업로드 상태 영역 테두리 제거
-            - 업로드 상태 배너의 제목, URL, 분석 상태, 현재 항목에 생기던 중첩 테두리를 모두 제거했습니다.
-            - 초기 화면과 업로드 상태 갱신 뒤에도 테두리가 다시 나타나지 않도록 스타일 적용 범위를 수정했습니다.
+            ### 주요 변경 사항
+            - 별도 AI API 키 없이 로그인과 이용권만으로 네 가지 Threads 문안을 생성합니다.
+            - 상품 타깃과 사용 장면을 분석해 후킹 본문과 상품 답글을 분리 생성합니다.
+            - 계정별 브라우저 프로필, 대기열, 업로드 이력 및 재개 상태를 지원합니다.
+            - xAI 우선 생성과 제한된 장애 대체 경로, Vercel 상태 확인 API를 추가했습니다.
 
             Windows 사용자는 설치형 파일을 받으면 됩니다.
             - 설치형: `CoupangThreadAutoSetup.exe`
@@ -243,7 +245,7 @@ jobs:
             {
               "tag_name": "${{ needs.build.outputs.version }}",
               "release_name": "Release ${{ needs.build.outputs.version }}",
-              "body": "2026-07-28 업로드 상태 영역 테두리 제거: 제목, URL, 분석 상태, 현재 항목에 생기던 중첩 테두리를 모두 제거했습니다.",
+              "body": "서버 관리형 AI와 다중 Threads 계정 자동화: 별도 AI API 키 없이 네 가지 문안을 생성하고 계정별 대기열과 업로드 이력을 관리합니다.",
               "installer_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
               "standalone_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAuto.exe",
               "metadata_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/latest.json"

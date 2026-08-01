@@ -7,6 +7,12 @@ import os
 import re
 from typing import Dict, List, Optional
 
+from src.ai_provider import (
+    AI_PROVIDER_GEMINI,
+    AI_PROVIDER_GROK_CLI,
+    AI_PROVIDER_MANAGED,
+    normalize_ai_provider,
+)
 from src.services.post_concepts import (
     CONCEPT_BUYING_GUIDE,
     CONCEPT_PROBLEM_SOLUTION,
@@ -37,6 +43,44 @@ class AggroGenerator:
     )
     MAX_HOOK_LENGTH = 82
     MAX_SUPPORT_LENGTH = 62
+    HOOK_VARIANTS = (
+        {
+            "id": "target_direct",
+            "label": "타깃 직격형",
+            "prompt": (
+                "상품의 핵심 구매 타깃을 한 사람처럼 선명하게 정하고, 그 사람이 "
+                "반복해서 겪는 불편을 첫 문장에 찌른다. 제품명은 바로 공개하지 말고 "
+                "'나 얘기인데?'라는 반응 뒤에 다음 글을 보게 만드는 미완성 결말을 쓴다."
+            ),
+        },
+        {
+            "id": "convenience_contrast",
+            "label": "편의성 대비형",
+            "prompt": (
+                "기존 방식이 번거롭거나 거추장스러운 장면과 이 상품을 썼을 때 편해질 "
+                "지점을 강하게 대비한다. 기능 목록 대신 사용 전후의 행동 차이를 보여주고 "
+                "핵심 해결책은 다음 글에서 공개한다."
+            ),
+        },
+        {
+            "id": "fun_reveal",
+            "label": "재미있는 정체 공개형",
+            "prompt": (
+                "상품의 모양, 착용 모습, 의외의 사용법에서 웃긴 비유나 짧은 대화를 만든다. "
+                "허위 체험담이나 가짜 인물 권위는 쓰지 말고, 정체가 궁금해 클릭하게 만드는 "
+                "반전 한 줄로 끝낸다."
+            ),
+        },
+        {
+            "id": "use_scene_story",
+            "label": "사용 장면 스토리형",
+            "prompt": (
+                "타깃이 실제로 가장 불편해지는 순간을 3초짜리 장면처럼 시작한다. 문제를 "
+                "해결할 수 있는 상품 특징을 살짝만 암시하고, 답을 끝까지 말하지 않은 채 "
+                "다음 글로 이어지는 질문이나 반전으로 마무리한다."
+            ),
+        },
+    )
     _FIRST_POST_BLOCK_PATTERNS = (
         re.compile(r"https?://\S+", re.IGNORECASE),
         re.compile(r"\b(link\.coupang\.com|www\.coupang\.com)\S*", re.IGNORECASE),
@@ -56,10 +100,29 @@ class AggroGenerator:
     )
     _EMOJI_PATTERN = re.compile(r"[\U0001F300-\U0001FAFF]")
 
-    def __init__(self, api_key: str = "") -> None:
+    def __init__(
+        self,
+        api_key: str = "",
+        ai_provider: str | None = None,
+        grok_client=None,
+        managed_client=None,
+    ) -> None:
         self._client = None
+        self._grok_client = grok_client
+        self._managed_client = managed_client
+        self._ai_provider = normalize_ai_provider(
+            ai_provider,
+            default=AI_PROVIDER_GEMINI,
+        )
         self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
         self.set_api_key(api_key)
+
+    @property
+    def ai_provider(self) -> str:
+        return self._ai_provider
+
+    def set_ai_provider(self, ai_provider: str) -> None:
+        self._ai_provider = normalize_ai_provider(ai_provider)
 
     def set_api_key(self, api_key: str) -> None:
         """Initialize Gemini client without global SDK configuration."""
@@ -75,6 +138,15 @@ class AggroGenerator:
             self._client = None
 
     def _generate_text(self, prompt: str) -> str:
+        if self._ai_provider == AI_PROVIDER_MANAGED:
+            raise RuntimeError("managed AI requires product context")
+        if self._ai_provider == AI_PROVIDER_GROK_CLI:
+            if self._grok_client is None:
+                from src.services.grok_cli_provider import GrokCliProvider
+
+                self._grok_client = GrokCliProvider()
+            return str(self._grok_client.generate_text(prompt) or "").strip()
+
         if self._client is None:
             return ""
         response, _model = generate_content_with_model_fallback(
@@ -95,6 +167,57 @@ class AggroGenerator:
                 if part_text:
                     return part_text
         return ""
+
+    def _managed_generation(self, product_info: dict):
+        if self._managed_client is None:
+            from src.services.managed_ai_client import ManagedAiClient
+
+            self._managed_client = ManagedAiClient()
+        return self._managed_client.generate_variants(product_info)
+
+    def _managed_product_variants(self, product_info: dict) -> List[Dict[str, object]]:
+        generation = self._managed_generation(product_info)
+        title = str(product_info.get("title", "") or product_info.get("product_title", "") or "")
+        original_url = str(product_info.get("original_url", "") or product_info.get("url", "") or "")
+        image_path: Optional[str] = product_info.get("image_path")
+        video_path: Optional[str] = product_info.get("video_path")
+        media_path = video_path if video_path else image_path
+        selected_concept_id = normalize_concept_id(
+            product_info.get("post_concept") or DEFAULT_POST_CONCEPT_ID
+        )
+        results: List[Dict[str, object]] = []
+        for variant in generation.variants:
+            root_post = {
+                "text": variant.root_text,
+                "media_path": None,
+                "media_type": None,
+            }
+            product_comment = {
+                "text": variant.product_comment_text,
+                "media_path": media_path,
+                "media_type": "video" if video_path else "image",
+            }
+            results.append(
+                {
+                    "root_post": root_post,
+                    "product_comment": product_comment,
+                    "first_post": root_post,
+                    "second_post": product_comment,
+                    "product_title": title,
+                    "original_url": original_url,
+                    "post_concept": selected_concept_id,
+                    "hook_variant": variant.variant_id,
+                    "managed_ai": True,
+                    "managed_ai_job_id": generation.ai_job_id,
+                    "managed_ai_reservation_id": generation.reservation_id,
+                    "managed_ai_quota_mode": generation.quota_mode,
+                    "managed_ai_prompt_version": generation.prompt_version,
+                    "managed_ai_model": generation.model,
+                    "managed_ai_degraded": generation.degraded,
+                    "managed_ai_degraded_reason": generation.degraded_reason,
+                }
+            )
+        return results
 
     @staticmethod
     def _normalize_text(value: str) -> str:
@@ -121,6 +244,62 @@ class AggroGenerator:
     def _contains_awkward_copy(cls, text: str) -> bool:
         normalized = str(text or "")
         return any(pattern.search(normalized) for pattern in cls._AWKWARD_COPY_PATTERNS)
+
+    @classmethod
+    def get_hook_variant(cls, variant_id: str | None) -> dict:
+        wanted = str(variant_id or "").strip().lower()
+        for variant in cls.HOOK_VARIANTS:
+            if variant["id"] == wanted:
+                return variant
+        return cls.HOOK_VARIANTS[0]
+
+    @classmethod
+    def build_hook_variant_prompt(cls, variant_id: str | None) -> str:
+        variant = cls.get_hook_variant(variant_id)
+        return (
+            f"후킹 버전: {variant['label']} ({variant['id']})\n"
+            f"{variant['prompt']}\n"
+            "작성 사고 순서: 핵심 타깃 1명 → 그 사람의 구체적인 불편 장면 → "
+            "상품이 편하게 만드는 한 가지 변화 → 재미있는 비유·대화·반전 → 클릭을 부르는 미완성 결말.\n"
+            "상품명과 링크는 첫 글에서 숨기고, 확인되지 않은 체험담·효과·인증은 만들지 않는다."
+        )
+
+    @classmethod
+    def _build_variant_fallback_first_post(
+        cls,
+        title: str,
+        keywords: str,
+        variant_id: str | None,
+    ) -> str:
+        text = f"{title} {keywords}"
+        if re.search(r"(구명조끼|낚시|선상|라이프자켓)", text):
+            variants = {
+                "target_direct": (
+                    "선상에서 채비 바꿀 때마다 두꺼운 조끼랑 팔씨름하는 사람만 보세요 🎣\n"
+                    "상체는 비워두고 허리에 차는 방식이라면 왜 낚시꾼이 먼저 눌러볼까요?"
+                ),
+                "convenience_contrast": (
+                    "낚싯대는 경량으로 맞춰놓고 몸에는 갑옷을 입고 있었네 ㅋㅋ\n"
+                    "장비 많은 날, 허리 한 칸으로 정리되는 방식의 정체가 궁금해집니다."
+                ),
+                "fun_reveal": (
+                    "친구가 낚시터에 웬 챔피언 벨트를 차고 왔냐고 웃었다 🏆\n"
+                    "그런데 이 벨트의 정체를 알고 나면 웃던 사람이 먼저 찾아보게 됩니다."
+                ),
+                "use_scene_story": (
+                    "입질 왔는데 두꺼운 조끼가 팔꿈치를 잡는 순간, 물고기보다 장비가 더 얄밉죠\n"
+                    "선상에서 자주 움직이는 사람에게 허리형이 왜 눈에 들어오는지 이어서 볼까요?"
+                ),
+            }
+            return variants[cls.get_hook_variant(variant_id)["id"]]
+        token = cls._select_core_keyword(title, keywords)
+        variants = {
+            "target_direct": f"{token} 때문에 같은 불편을 매번 참는 사람만 보세요 👀\n딱 한 동작이 편해지는 방식이라면 가장 먼저 누가 찾게 될까요?",
+            "convenience_contrast": f"도구는 샀는데 준비와 정리가 더 일이라면 뭔가 거꾸로됐죠\n{token} 하나로 행동이 얼마나 짧아지는지 다음 글에서 확인해보세요.",
+            "fun_reveal": f"처음 보면 '이걸 어디에 쓰지?' 싶은데 정체를 알면 바로 납득됩니다 😄\n{token}의 의외로 웃긴 쓰임새, 다음 글에 답이 있습니다.",
+            "use_scene_story": f"가장 바쁜 순간에 꼭 한 손이 모자라는 장면, 다들 한 번쯤 있죠\n{token}이 그 순간을 어떻게 바꾸는지 이어서 볼까요?",
+        }
+        return variants[cls.get_hook_variant(variant_id)["id"]]
 
     @staticmethod
     def _select_core_keyword(title: str, keywords: str) -> str:
@@ -255,7 +434,11 @@ class AggroGenerator:
         cleaned = re.sub(r"#\S+", "", cleaned)
         cleaned = cls._normalize_text(cleaned)
 
-        lines = [line.strip(" -•0123456789.()") for line in cleaned.split("\n") if line.strip()]
+        lines = [
+            re.sub(r"^\s*(?:[-•]\s*|\(?\d+[.)]\s*)", "", line).rstrip()
+            for line in cleaned.split("\n")
+            if line.strip()
+        ]
         if not lines:
             return ""
         if len(lines) == 1:
@@ -270,9 +453,7 @@ class AggroGenerator:
         if cls._contains_awkward_copy(merged):
             return ""
 
-        token = cls._select_core_keyword(title, keywords)
-        token_parts = [part for part in token.split() if len(part) >= 2]
-        if token_parts and not any(part in merged for part in token_parts):
+        if len(re.sub(r"\s+", "", merged)) < 20:
             return ""
         return merged
 
@@ -282,9 +463,10 @@ class AggroGenerator:
         product_keywords: str = "",
         api_key: str = "",
         concept_id: str | None = None,
+        variant_id: str | None = None,
     ) -> str:
         """Generate engagement-oriented first post copy for Threads."""
-        if api_key:
+        if api_key and self._ai_provider == AI_PROVIDER_GEMINI:
             self.set_api_key(api_key)
 
         concept = get_post_concept(concept_id)
@@ -303,7 +485,13 @@ class AggroGenerator:
         if not seed_text:
             seed_text = "추천 상품"
 
-        if self._client is None:
+        if self._ai_provider == AI_PROVIDER_GEMINI and self._client is None:
+            if variant_id:
+                return self._build_variant_fallback_first_post(
+                    product_title,
+                    product_keywords,
+                    variant_id,
+                )
             return self._build_fallback_first_post(
                 product_title,
                 product_keywords,
@@ -317,6 +505,7 @@ class AggroGenerator:
                 f"작성 컨셉: {concept.display_label} ({concept.short_label})\n"
                 f"{concept.description}\n"
                 f"{concept.prompt}\n\n"
+                f"{self.build_hook_variant_prompt(variant_id)}\n\n"
                 f"{issue_context}\n\n"
                 "Threads 첫 번째 글에 들어갈 초강력 호기심 유발 문구 2줄을 작성해줘.\n"
                 "규칙:\n"
@@ -348,6 +537,12 @@ class AggroGenerator:
                 raise ValueError("invalid first post candidate")
             return merged
         except Exception as exc:
+            if variant_id:
+                return self._build_variant_fallback_first_post(
+                    product_title,
+                    product_keywords,
+                    variant_id,
+                )
             print(f"  애그로 문구 생성 오류: {exc}")
             return self._build_fallback_first_post(
                 product_title,
@@ -372,8 +567,20 @@ class AggroGenerator:
         product_info: dict,
         api_key: str = "",
         concept_id: str | None = None,
+        variant_id: str | None = None,
     ) -> Dict[str, object]:
         """Build 3-part post payload with media metadata."""
+        if self._ai_provider == AI_PROVIDER_MANAGED:
+            variants = self._managed_product_variants(product_info)
+            wanted = self.get_hook_variant(
+                variant_id or product_info.get("hook_variant")
+            )["id"]
+            for result in variants:
+                if result.get("hook_variant") == wanted:
+                    result["all_managed_variants"] = variants
+                    return result
+            raise RuntimeError("managed AI did not return the requested hook variant")
+
         title = str(product_info.get("title", "") or "")
         keywords = str(product_info.get("search_keywords", "") or "")
         original_url = str(product_info.get("original_url", "") or "")
@@ -388,6 +595,7 @@ class AggroGenerator:
             keywords,
             api_key=api_key,
             concept_id=selected_concept_id,
+            variant_id=variant_id or product_info.get("hook_variant"),
         )
         media_path = video_path if video_path else image_path
 
@@ -395,13 +603,13 @@ class AggroGenerator:
 
         root_post = {
             "text": aggro_text,
-            "media_path": media_path,
-            "media_type": "video" if video_path else "image",
+            "media_path": None,
+            "media_type": None,
         }
         product_comment = {
             "text": second_text,
-            "media_path": None,
-            "media_type": None,
+            "media_path": media_path,
+            "media_type": "video" if video_path else "image",
         }
         return {
             # These names express the required publishing structure directly.
@@ -413,7 +621,28 @@ class AggroGenerator:
             "product_title": title,
             "original_url": original_url,
             "post_concept": selected_concept_id,
+            "hook_variant": self.get_hook_variant(
+                variant_id or product_info.get("hook_variant")
+            )["id"],
         }
+
+    def generate_product_variants(
+        self,
+        product_info: dict,
+        api_key: str = "",
+    ) -> List[Dict[str, object]]:
+        """Generate four target/pain/benefit/fun hook variants for one product."""
+        if self._ai_provider == AI_PROVIDER_MANAGED:
+            return self._managed_product_variants(product_info)
+        return [
+            self.generate_product_post(
+                {**product_info, "hook_variant": variant["id"]},
+                api_key=api_key,
+                concept_id=product_info.get("post_concept"),
+                variant_id=variant["id"],
+            )
+            for variant in self.HOOK_VARIANTS
+        ]
 
     def generate_batch(self, products: list, api_key: str = "") -> List[Dict[str, object]]:
         """Generate post payloads for multiple products."""

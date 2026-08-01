@@ -35,6 +35,6 @@ def build_product_thread_payload(post_data: Mapping[str, Any]) -> list[dict[str,
         {
             "role": PRODUCT_COMMENT,
             "text": comment_text,
-            "image_path": None,
+            "image_path": comment.get("media_path") or comment.get("image_path"),
         },
     ]

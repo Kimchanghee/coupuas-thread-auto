@@ -40,20 +40,19 @@ TUTORIAL_PAGES = [
     },
     {
         "icon": "*",
-        "title": "1단계: API 키 설정",
-        "subtitle": "Google Gemini API 연동",
+        "title": "1단계: AI 선택",
+        "subtitle": "Grok 무료 로그인 또는 Gemini API",
         "content": (
-            "상품 분석과 게시글 생성을 위해\n"
-            "Gemini API 키가 필요합니다.\n"
+            "게시글을 생성할 AI를 선택합니다.\n"
             "\n"
             "  설정 방법\n"
             "\n"
             "  1. 사이드바에서 [설정]을 클릭합니다\n"
-            "  2. Google AI Studio에서 API 키를 발급받으세요\n"
-            "     (aistudio.google.com)\n"
-            "  3. [마스터 API 키] 입력란에 붙여넣기 합니다\n"
+            "  2. 무료 사용은 [Grok CLI (무료)]를 선택합니다\n"
+            "  3. Grok CLI 설치 후 [Grok 로그인]을 누릅니다\n"
+            "  4. Gemini 사용 시 API 키를 입력합니다\n"
             "\n"
-            "  * API 키는 안전하게 로컬에 저장됩니다"
+            "  * Grok 로그인 정보는 공식 CLI가 관리합니다"
         ),
     },
     {
@@ -168,7 +167,7 @@ TUTORIAL_PAGES = [
             "\n"
             "  빠른 시작 순서\n"
             "\n"
-            "  1. [설정] 페이지에서 Gemini API 키 입력\n"
+            "  1. [설정]에서 Grok 무료 또는 Gemini 선택\n"
             "  2. [Threads 계정]에서 로그인\n"
             "  3. [링크 입력]에서 쿠팡 링크 붙여넣기\n"
             "  4. [자동화 시작] 버튼 클릭\n"
@@ -177,7 +176,7 @@ TUTORIAL_PAGES = [
             "\n"
             "  \u2022 업로드 실패: [작업 로그]에서 오류 메시지 확인\n"
             "  \u2022 로그인 만료: [Threads 계정]에서 다시 로그인\n"
-            "  \u2022 API 오류: API 키가 유효한지 확인"
+            "  \u2022 AI 오류: Grok 로그인 또는 Gemini API 키 확인"
         ),
     },
 ]
@@ -481,7 +480,7 @@ OVERLAY_STEPS = [
         "desc": (
             "빠른 시작 순서:\n"
             "\n"
-            "1. [설정] 페이지에서 Gemini API 키 입력\n"
+            "1. [설정] 페이지에서 Grok 무료 또는 Gemini 선택\n"
             "2. [Threads 계정] 페이지에서 로그인\n"
             "3. [링크 입력] 페이지에서 링크 붙여넣기\n"
             "4. [자동화 시작] 버튼 클릭"

@@ -8,6 +8,7 @@ import logging
 import os
 import tempfile
 import threading
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set
@@ -15,6 +16,7 @@ from typing import List, Optional, Set
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 
 logger = logging.getLogger(__name__)
+_SAFE_ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
 class LinkHistory:
@@ -22,16 +24,38 @@ class LinkHistory:
 
     DEFAULT_HISTORY_FILE = Path.home() / ".shorts_thread_maker" / "uploaded_links.json"
 
-    def __init__(self, history_file: Optional[str] = None):
+    def __init__(
+        self,
+        history_file: Optional[str] = None,
+        account_id: Optional[str] = None,
+        history_root: Optional[str] = None,
+        *,
+        root: Optional[str] = None,
+    ):
         self._lock = threading.RLock()
-        self.history_file = Path(history_file).expanduser() if history_file else self.DEFAULT_HISTORY_FILE
+        self.account_id = str(account_id).strip() if account_id is not None else None
+        if self.account_id is not None and not _SAFE_ACCOUNT_ID_RE.fullmatch(self.account_id):
+            raise ValueError("account_id contains unsupported characters")
+        # Default construction intentionally retains the old global file and
+        # its behavior.  Account-specific histories are isolated by filename.
+        selected_root = root if root is not None else history_root
+        if history_file:
+            self.history_file = Path(history_file).expanduser()
+        elif self.account_id:
+            base = Path(selected_root).expanduser() if selected_root else self.DEFAULT_HISTORY_FILE.parent / "history"
+            self.history_file = base / f"{self.account_id}.json"
+        else:
+            self.history_file = self.DEFAULT_HISTORY_FILE
         self.history_file.parent.mkdir(parents=True, exist_ok=True)
         secure_dir_permissions(self.history_file.parent)
         self._history = self._load()
         self._uploaded_set = self._build_uploaded_set()
 
     def _default_payload(self) -> dict:
-        return {"uploaded_links": [], "stats": {"total": 0, "success": 0, "failed": 0}}
+        payload = {"uploaded_links": [], "stats": {"total": 0, "success": 0, "failed": 0}}
+        if self.account_id:
+            payload.update({"version": 2, "account_id": self.account_id})
+        return payload
 
     def _load(self) -> dict:
         if not self.history_file.exists():
@@ -43,6 +67,13 @@ class LinkHistory:
                 return self._default_payload()
             loaded.setdefault("uploaded_links", [])
             loaded.setdefault("stats", {"total": 0, "success": 0, "failed": 0})
+            if self.account_id:
+                # Do not accidentally read another account's history even if a
+                # caller supplied a shared explicit file.
+                if loaded.get("account_id") not in (None, self.account_id):
+                    return self._default_payload()
+                loaded["version"] = 2
+                loaded["account_id"] = self.account_id
             return loaded
         except Exception:
             logger.exception("링크 이력을 불러오지 못했습니다.")
@@ -104,6 +135,8 @@ class LinkHistory:
                 "uploaded_at": datetime.now().isoformat(),
                 "success": bool(success),
             }
+            if self.account_id:
+                record["account_id"] = self.account_id
             self._history["uploaded_links"].append(record)
             stats = self._history.setdefault("stats", {"total": 0, "success": 0, "failed": 0})
             stats["total"] = int(stats.get("total", 0)) + 1

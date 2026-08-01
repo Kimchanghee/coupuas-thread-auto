@@ -23,3 +23,26 @@ def test_normal_main_window_close_ends_the_qt_event_loop():
     assert "if not forced_relogin:" in close_event
     assert "app = QApplication.instance()" in close_event
     assert "app.quit()" in close_event
+
+
+def test_stale_grok_check_does_not_overwrite_active_oauth_login():
+    from src.main_window import MainWindow
+
+    class FakeWindow:
+        _grok_status_check_running = True
+        _grok_login_running = True
+
+        def _set_grok_buttons_enabled(self, _enabled):
+            raise AssertionError("active login controls must remain disabled")
+
+    window = FakeWindow()
+
+    MainWindow._apply_grok_status(
+        window,
+        "not_logged_in",
+        "Grok 로그인이 필요합니다.",
+        "check",
+    )
+
+    assert window._grok_status_check_running is False
+    assert window._grok_login_running is True

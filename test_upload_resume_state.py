@@ -21,6 +21,7 @@ def _make_resume_fake(tmp_path):
         "_set_resume_next_allowed_at",
         "_resume_pending_link_data",
         "_load_resume_state_file",
+        "_archive_legacy_resume_state",
     ):
         setattr(fake, name, getattr(MainWindow, name).__get__(fake, type(fake)))
     fake._is_resume_unfinished = MainWindow._is_resume_unfinished
@@ -51,3 +52,15 @@ def test_resume_state_persists_only_unfinished_items(tmp_path):
 
     fake._mark_resume_item("https://link.coupang.com/a/item2", "failed", "active")
     assert not fake._resume_state_path.exists()
+
+
+def test_legacy_resume_file_is_archived_after_account_import(tmp_path):
+    fake = _make_resume_fake(tmp_path)
+    fake._resume_state_path.write_text('{"items":[]}', encoding="utf-8")
+
+    fake._archive_legacy_resume_state()
+
+    assert not fake._resume_state_path.exists()
+    assert (
+        tmp_path / "upload_resume_queue.migrated.json"
+    ).read_text(encoding="utf-8") == '{"items":[]}'

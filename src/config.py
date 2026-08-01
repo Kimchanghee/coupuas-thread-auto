@@ -3,13 +3,22 @@
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
+from src.ai_provider import (
+    AI_PROVIDER_GEMINI,
+    AI_PROVIDER_GROK_CLI,
+    AI_PROVIDER_MANAGED,
+    normalize_ai_provider,
+)
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
 from src.services.post_concepts import DEFAULT_POST_CONCEPT_ID, normalize_concept_id
+from src.models.threads_account import ThreadsAccount, normalize_threads_username
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +26,7 @@ logger = logging.getLogger(__name__)
 class Config:
     _SECRET_KEYS = ("gemini_api_key", "gemini_api_keys", "threads_api_key", "instagram_password")
     _MAX_GEMINI_KEYS = 10
+    _MAX_THREADS_ACCOUNTS = 10
 
     def __init__(self):
         self._lock = threading.RLock()
@@ -48,8 +58,16 @@ class Config:
                     data = {}
 
             self._load_from_dict(data)
+            accounts_migrated = self._migrate_threads_accounts(data)
             self._load_secrets()
             self._sync_gemini_key_state()
+            if (
+                self._local_ai_providers_enabled()
+                and "ai_provider" not in data
+                and self.gemini_api_keys
+            ):
+                # Preserve existing installations until the user explicitly selects Grok.
+                self.ai_provider = AI_PROVIDER_GEMINI
 
             # Backward-compat migration for old plaintext values.
             migrated = False
@@ -70,7 +88,7 @@ class Config:
                     setattr(self, key, legacy_value)
                     migrated = True
             self._sync_gemini_key_state()
-            if migrated or legacy_plaintext_present:
+            if migrated or legacy_plaintext_present or accounts_migrated:
                 self.save()
             elif not self.config_file.exists():
                 self.save()
@@ -78,6 +96,13 @@ class Config:
     def _load_from_dict(self, data: dict):
         self.upload_interval = int(data.get("upload_interval", 60) or 60)
         self.instagram_username = str(data.get("instagram_username", "") or "")
+        self.threads_accounts = self._deserialize_threads_accounts(data.get("threads_accounts"))
+        self.active_threads_account_id = str(data.get("active_threads_account_id", "") or "")
+        self.ai_provider = (
+            normalize_ai_provider(data.get("ai_provider"), default=AI_PROVIDER_MANAGED)
+            if self._local_ai_providers_enabled()
+            else AI_PROVIDER_MANAGED
+        )
         # Password is loaded from secure secrets storage and migrated in load().
         self.instagram_password = ""
         self.gemini_api_keys = self._normalize_gemini_keys(data.get("gemini_api_keys"))
@@ -89,11 +114,80 @@ class Config:
         self.post_concept = normalize_concept_id(data.get("post_concept"))
         self.tutorial_shown = bool(data.get("tutorial_shown", False))
 
+    @staticmethod
+    def _legacy_profile_id(legacy_value: str, normalized_username: str) -> str:
+        # Matches the value the single-account UI historically passed to
+        # ComputerUseAgent, preserving its encrypted session location.
+        candidate = str(legacy_value or "").strip()
+        if "://" in candidate or candidate.lower().startswith("www."):
+            try:
+                parsed = urlparse(candidate if "://" in candidate else f"https://{candidate}")
+                segments = [part.strip() for part in unquote(parsed.path).split("/") if part.strip()]
+                candidate = segments[-1] if segments else str(parsed.netloc or "")
+            except ValueError:
+                candidate = normalized_username
+        if "/" in candidate:
+            candidate = candidate.rsplit("/", 1)[-1]
+        candidate = candidate.split("?", 1)[0].split("#", 1)[0].strip().removeprefix("@")
+        candidate = re.sub(r"[^A-Za-z0-9._]", "", candidate)[:30] or normalized_username
+        return ".threads_profile_" + candidate
+
+    @classmethod
+    def _deserialize_threads_accounts(cls, raw_accounts):
+        if not isinstance(raw_accounts, list):
+            return []
+        accounts = []
+        ids = set()
+        profiles = set()
+        for raw in raw_accounts:
+            if len(accounts) >= cls._MAX_THREADS_ACCOUNTS:
+                break
+            try:
+                account = ThreadsAccount.from_dict(raw)
+            except (TypeError, ValueError):
+                logger.warning("Invalid Threads account entry ignored while loading configuration.")
+                continue
+            if account.account_id in ids or account.profile_id in profiles:
+                logger.warning("Duplicate Threads account identifier ignored while loading configuration.")
+                continue
+            ids.add(account.account_id)
+            profiles.add(account.profile_id)
+            accounts.append(account)
+        return accounts
+
+    def _migrate_threads_accounts(self, data: dict) -> bool:
+        """Create the first account from legacy config without copying secrets."""
+        if self.threads_accounts:
+            if self.active_threads_account_id not in {a.account_id for a in self.threads_accounts}:
+                self.active_threads_account_id = self.threads_accounts[0].account_id
+                return True
+            return False
+        legacy = str(data.get("instagram_username", "") or "").strip()
+        if not legacy:
+            return False
+        try:
+            username = normalize_threads_username(legacy)
+        except ValueError:
+            logger.warning("Legacy Instagram username could not be migrated as a Threads account.")
+            return False
+        account = ThreadsAccount.create(
+            expected_username=username,
+            display_name=username,
+            profile_id=self._legacy_profile_id(legacy, username),
+            upload_interval=self.upload_interval,
+        )
+        self.threads_accounts = [account]
+        self.active_threads_account_id = account.account_id
+        return True
+
     def _set_defaults(self):
         self.gemini_api_key = ""
         self.gemini_api_keys = []
+        self.ai_provider = AI_PROVIDER_MANAGED
         self.upload_interval = 60
         self.instagram_username = ""
+        self.threads_accounts = []
+        self.active_threads_account_id = ""
         self.instagram_password = ""
         self.threads_api_key = ""
         self.media_download_dir = "media"
@@ -103,6 +197,11 @@ class Config:
         self.instruction = ""
         self.post_concept = DEFAULT_POST_CONCEPT_ID
         self.tutorial_shown = False
+
+    @staticmethod
+    def _local_ai_providers_enabled() -> bool:
+        value = str(os.getenv("THREAD_AUTO_ALLOW_LOCAL_AI_PROVIDERS", "") or "")
+        return value.strip().lower() in {"1", "true", "yes", "on"}
 
     def _load_secrets(self):
         if not self.secrets_file.exists():
@@ -194,6 +293,9 @@ class Config:
             data = {
                 "upload_interval": self.upload_interval,
                 "instagram_username": self.instagram_username,
+                "threads_accounts": [account.to_dict() for account in self.threads_accounts],
+                "active_threads_account_id": self.active_threads_account_id,
+                "ai_provider": normalize_ai_provider(getattr(self, "ai_provider", "")),
                 "media_download_dir": self.media_download_dir,
                 "prefer_video": self.prefer_video,
                 "allow_ai_fallback": self.allow_ai_fallback,
@@ -264,6 +366,69 @@ class Config:
         with self._lock:
             self.gemini_api_keys = self._normalize_gemini_keys(keys)
             self.gemini_api_key = self.gemini_api_keys[0] if self.gemini_api_keys else ""
+
+    def get_threads_accounts(self):
+        with self._lock:
+            return list(self.threads_accounts)
+
+    def get_threads_account(self, account_id):
+        with self._lock:
+            target = str(account_id or "")
+            return next((account for account in self.threads_accounts if account.account_id == target), None)
+
+    def get_active_threads_account(self):
+        with self._lock:
+            return self.get_threads_account(self.active_threads_account_id)
+
+    def add_threads_account(self, expected_username, **values):
+        with self._lock:
+            if len(self.threads_accounts) >= self._MAX_THREADS_ACCOUNTS:
+                raise ValueError("A maximum of 10 Threads accounts is supported")
+            account = ThreadsAccount.create(expected_username, **values)
+            if any(
+                existing.expected_username == account.expected_username
+                for existing in self.threads_accounts
+            ):
+                raise ValueError("This Threads username is already configured")
+            if any(existing.profile_id == account.profile_id for existing in self.threads_accounts):
+                raise ValueError("profile_id is already in use")
+            self.threads_accounts.append(account)
+            if not self.active_threads_account_id:
+                self.active_threads_account_id = account.account_id
+            return account
+
+    def update_threads_account(self, account_id, **changes):
+        with self._lock:
+            for index, account in enumerate(self.threads_accounts):
+                if account.account_id == str(account_id or ""):
+                    updated = account.updated(**changes)
+                    if any(
+                        existing.account_id != account.account_id
+                        and existing.expected_username == updated.expected_username
+                        for existing in self.threads_accounts
+                    ):
+                        raise ValueError("This Threads username is already configured")
+                    self.threads_accounts[index] = updated
+                    return updated
+            raise KeyError("Threads account was not found")
+
+    def remove_threads_account(self, account_id):
+        with self._lock:
+            target = str(account_id or "")
+            remaining = [account for account in self.threads_accounts if account.account_id != target]
+            if len(remaining) == len(self.threads_accounts):
+                raise KeyError("Threads account was not found")
+            self.threads_accounts = remaining
+            if self.active_threads_account_id == target:
+                self.active_threads_account_id = remaining[0].account_id if remaining else ""
+
+    def set_active_threads_account(self, account_id):
+        with self._lock:
+            account = self.get_threads_account(account_id)
+            if account is None:
+                raise KeyError("Threads account was not found")
+            self.active_threads_account_id = account.account_id
+            return account
 
 
 config = Config()
