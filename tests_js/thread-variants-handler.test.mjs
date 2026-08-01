@@ -63,7 +63,8 @@ test("falls back to legacy check/use quota contract when reserve is unsupported"
   });
 
   const calls = [];
-  globalThis.fetch = async (url) => {
+  const gatewayRequests = [];
+  globalThis.fetch = async (url, options = {}) => {
     calls.push(String(url));
     if (calls.length === 1) {
       return jsonResponse(404, { success: false });
@@ -71,6 +72,7 @@ test("falls back to legacy check/use quota contract when reserve is unsupported"
     if (calls.length === 2) {
       return jsonResponse(200, { available: true });
     }
+    gatewayRequests.push(JSON.parse(options.body));
     return jsonResponse(403, {
       error: {
         message: "AI Gateway requires a valid credit card on file.",
@@ -112,4 +114,7 @@ test("falls back to legacy check/use quota contract when reserve is unsupported"
   assert.match(calls[0], /\/user\/work\/reserve$/);
   assert.match(calls[1], /\/user\/work\/check$/);
   assert.equal(calls[2], "https://ai-gateway.vercel.sh/v1/chat/completions");
+  assert.equal(calls.length, 3);
+  assert.equal(gatewayRequests.length, 1);
+  assert.equal(gatewayRequests[0].model, "xai/grok-4.3");
 });

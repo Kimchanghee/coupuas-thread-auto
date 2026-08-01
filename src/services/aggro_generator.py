@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Dict, List, Optional
 
 from src.ai_provider import (
-    AI_PROVIDER_GEMINI,
     AI_PROVIDER_GROK_CLI,
     AI_PROVIDER_MANAGED,
     normalize_ai_provider,
@@ -23,7 +21,9 @@ from src.services.post_concepts import (
     normalize_concept_id,
 )
 from src.services.trending_news import fetch_korean_issue_headlines
-from src.gemini_keys import DEFAULT_GEMINI_MODEL, generate_content_with_model_fallback
+
+
+_AI_PROVIDER_TEMPLATE = "template"
 
 
 class AggroGenerator:
@@ -107,15 +107,13 @@ class AggroGenerator:
         grok_client=None,
         managed_client=None,
     ) -> None:
-        self._client = None
         self._grok_client = grok_client
         self._managed_client = managed_client
-        self._ai_provider = normalize_ai_provider(
-            ai_provider,
-            default=AI_PROVIDER_GEMINI,
+        self._ai_provider = (
+            normalize_ai_provider(ai_provider)
+            if ai_provider is not None
+            else _AI_PROVIDER_TEMPLATE
         )
-        self._model_name = os.environ.get("GOOGLE_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
-        self.set_api_key(api_key)
 
     @property
     def ai_provider(self) -> str:
@@ -125,17 +123,8 @@ class AggroGenerator:
         self._ai_provider = normalize_ai_provider(ai_provider)
 
     def set_api_key(self, api_key: str) -> None:
-        """Initialize Gemini client without global SDK configuration."""
-        key = str(api_key or "").strip()
-        if not key:
-            self._client = None
-            return
-        try:
-            from google import genai
-
-            self._client = genai.Client(api_key=key)
-        except Exception:
-            self._client = None
+        """Retained as a no-op for compatibility with older pipeline callers."""
+        del api_key
 
     def _generate_text(self, prompt: str) -> str:
         if self._ai_provider == AI_PROVIDER_MANAGED:
@@ -147,25 +136,6 @@ class AggroGenerator:
                 self._grok_client = GrokCliProvider()
             return str(self._grok_client.generate_text(prompt) or "").strip()
 
-        if self._client is None:
-            return ""
-        response, _model = generate_content_with_model_fallback(
-            self._client,
-            preferred_model=self._model_name,
-            contents=prompt,
-        )
-        text = str(getattr(response, "text", "") or "").strip()
-        if text:
-            return text
-
-        candidates = getattr(response, "candidates", None) or []
-        for candidate in candidates:
-            content = getattr(candidate, "content", None)
-            parts = getattr(content, "parts", None) or []
-            for part in parts:
-                part_text = str(getattr(part, "text", "") or "").strip()
-                if part_text:
-                    return part_text
         return ""
 
     def _managed_generation(self, product_info: dict):
@@ -466,8 +436,7 @@ class AggroGenerator:
         variant_id: str | None = None,
     ) -> str:
         """Generate engagement-oriented first post copy for Threads."""
-        if api_key and self._ai_provider == AI_PROVIDER_GEMINI:
-            self.set_api_key(api_key)
+        del api_key
 
         concept = get_post_concept(concept_id)
         issue_headlines = (
@@ -485,7 +454,7 @@ class AggroGenerator:
         if not seed_text:
             seed_text = "추천 상품"
 
-        if self._ai_provider == AI_PROVIDER_GEMINI and self._client is None:
+        if self._ai_provider == _AI_PROVIDER_TEMPLATE:
             if variant_id:
                 return self._build_variant_fallback_first_post(
                     product_title,
@@ -655,8 +624,7 @@ class AggroGenerator:
 
 
 if __name__ == "__main__":
-    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
-    generator = AggroGenerator(api_key)
+    generator = AggroGenerator()
     test_product = {
         "title": "충전 되는 가열용 텀블러",
         "original_url": "https://link.coupang.com/a/test123",

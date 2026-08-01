@@ -19,7 +19,7 @@ from src.coupang_uploader import CoupangPartnersPipeline
 
 def test_ai_provider_normalization_defaults_to_managed():
     assert normalize_ai_provider(None) == AI_PROVIDER_MANAGED
-    assert normalize_ai_provider("gemini") == AI_PROVIDER_GEMINI
+    assert normalize_ai_provider("gemini") == AI_PROVIDER_MANAGED
     assert normalize_ai_provider("GROK_CLI") == AI_PROVIDER_GROK_CLI
 
 
@@ -165,7 +165,7 @@ def test_aggro_generator_can_use_grok_provider_without_api_key():
     assert fake_client.prompts
 
 
-def test_pipeline_does_not_use_gemini_key_when_grok_is_selected():
+def test_pipeline_migrates_removed_gemini_provider_to_managed_ai():
     pipeline = CoupangPartnersPipeline(
         google_api_key="stored-gemini-key",
         ai_provider=AI_PROVIDER_GROK_CLI,
@@ -176,5 +176,5 @@ def test_pipeline_does_not_use_gemini_key_when_grok_is_selected():
 
     pipeline.set_ai_provider(AI_PROVIDER_GEMINI)
 
-    assert pipeline._resolve_google_api_key() == "stored-gemini-key"
-    assert pipeline.aggro_generator.ai_provider == AI_PROVIDER_GEMINI
+    assert pipeline._resolve_google_api_key() == ""
+    assert pipeline.aggro_generator.ai_provider == AI_PROVIDER_MANAGED

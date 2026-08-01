@@ -9,7 +9,8 @@
 - **브라우저 세션 기반 업로드**: Playwright로 Threads 웹을 제어하고 로그인 세션을 암호화 저장
 - **Supabase 기반 회원 DB**: 회원가입, 로그인, 작업량과 결제 상태는 운영 인증 API를 통해 Supabase PostgreSQL에서 관리
 - **업로드 이력 관리**: 업로드한 링크를 기록해 중복 업로드를 방지
-- **설정 관리**: Gemini API 키, Threads 사용자명, 업로드 간격 등을 앱에서 설정
+- **간편한 AI 사용**: 별도 AI API 키 없이 로그인과 이용권만으로 Grok 4.3 문안 생성
+- **설정 관리**: Threads 계정, 업로드 간격, 계정별 대기열 등을 앱에서 설정
 
 ## 시스템 요구사항
 
@@ -69,12 +70,10 @@ python setup_login.py
 python login_main.py
 ```
 
-### 3. API 키 설정
-1. 애플리케이션 실행 후 상단의 **⚙️ 설정** 버튼 클릭
-2. **API 키** 탭에서 다음 정보 입력:
-   - **Google API 키**: [Google AI Studio](https://makersuite.google.com/app/apikey)에서 발급 (Gemini 사용)
-   - **Threads 사용자명**: 업로드에 사용할 Threads/Instagram 사용자명
-3. **저장** 버튼 클릭
+### 3. AI 이용 준비
+1. 애플리케이션에서 회원가입 후 로그인합니다.
+2. 무료 사용량 또는 구매한 이용권이 있으면 AI 문안 생성이 바로 활성화됩니다.
+3. 별도의 xAI·Google API 키 발급이나 입력은 필요하지 않습니다.
 
 ### 4. Threads 로그인 준비
 
@@ -120,7 +119,7 @@ coupuas-thread-auto/
 
 ## 주의사항
 
-- API 키와 계정 정보는 안전하게 보관하세요
+- Threads 계정과 로그인 세션 정보를 안전하게 보관하세요
 - 검색된 상품 이미지는 사용자 홈의 `.shorts_thread_maker/media_cache`에 저장됩니다
 - 설정은 사용자 홈 디렉토리의 `.shorts_thread_maker/config.json`에 저장됩니다
 - **세션 파일**은 사용자 홈의 `.shorts_thread_maker/sessions`에 암호화되어 저장되며 공유하지 마세요
@@ -130,16 +129,12 @@ coupuas-thread-auto/
 - **세션 유효기간**: 일반적으로 수개월 유지되지만, 만료 시 재로그인 필요
 - **Chromium 브라우저**: Playwright가 자동으로 설치 및 관리
 - **Instagram OAuth**: Threads는 Instagram 계정으로 로그인합니다
-- **API 제한**: Gemini Computer Use는 Free Tier에서 15 RPM, 1M TPM 제한 있음
+- **이용량 제한**: 무료·7일·월 정기권에 설정된 작업 횟수 안에서 사용할 수 있습니다
 - **중지 처리**: 작업 중 중지를 누르면 현재 네트워크/API 단계가 끝나는 대로 안전하게 중단됩니다
 
-## API 키 발급 방법
+## AI 비용과 API 키
 
-### Gemini API 키
-1. [Google AI Studio](https://makersuite.google.com/app/apikey) 접속
-2. Google 계정으로 로그인
-3. "Get API Key" 버튼 클릭
-4. 생성된 API 키 복사
+운영 서버가 Vercel AI Gateway를 통해 `xai/grok-4.3`을 호출합니다. 사용자는 AI 제공자 계정을 만들거나 API 키를 직접 관리하지 않습니다.
 
 ## 라이선스
 
@@ -151,13 +146,12 @@ coupuas-thread-auto/
 - Python이 올바르게 설치되었는지 확인
 - 필요한 패키지가 모두 설치되었는지 확인: `pip install -r requirements.txt`
 
-### API 오류가 발생하는 경우
-- API 키가 올바르게 입력되었는지 확인
+### AI 오류가 발생하는 경우
+- 로그인 상태와 남은 무료·유료 작업 횟수를 확인
 - 인터넷 연결 상태 확인
-- API 사용량 제한을 초과하지 않았는지 확인
+- 잠시 후 다시 시도하고 계속 실패하면 운영자에게 문의
 
 ### 이미지가 검색되지 않는 경우
-- Gemini API 키가 올바른지 확인
 - 1688 검색 결과가 없거나 이미지 다운로드가 차단되면 이미지 없이 진행될 수 있습니다
 
 ### Computer Use가 작동하지 않는 경우
@@ -170,11 +164,10 @@ python setup_login.py
 
 **API 오버로드:**
 - "API 오버로드" 메시지가 나오면: 5-10분 대기 후 재시도
-- Free Tier 제한 초과 시: 잠시 후 다시 시도하거나 다른 Gemini API 키를 등록
+- 이용량 소진 메시지가 나오면 다음 무료 갱신을 기다리거나 이용권을 구매
 
 **일반적인 문제:**
 - Playwright 설치 확인: `playwright install chromium`
-- Google API 키 확인
 - 방화벽이나 보안 소프트웨어 확인
 
 ## 최근 업데이트

@@ -7,17 +7,21 @@ os.environ.setdefault("THREAD_AUTO_DISABLE_RESUME_PROMPT", "1")
 
 from PyQt6.QtWidgets import QApplication
 
-from src.ai_provider import AI_PROVIDER_GEMINI
+from src.ai_provider import AI_PROVIDER_MANAGED
 from src.config import config
 from src.main_window import MainWindow
 
 
 def test_settings_page_uses_four_category_tabs(monkeypatch):
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setattr(config, "ai_provider", AI_PROVIDER_GEMINI)
+    monkeypatch.delenv("THREAD_AUTO_ALLOW_LOCAL_AI_PROVIDERS", raising=False)
+    monkeypatch.setattr(config, "ai_provider", AI_PROVIDER_MANAGED)
 
     window = MainWindow()
     tab_bar = window._settings_tab_bar
+
+    assert window._ai_provider_combo.count() == 1
+    assert window._ai_provider_combo.currentData() == AI_PROVIDER_MANAGED
 
     assert [tab_bar.tabText(index) for index in range(tab_bar.count())] == [
         "계정 · 연결",

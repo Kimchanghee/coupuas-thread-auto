@@ -1597,7 +1597,6 @@ class MainWindow(QMainWindow):
             "1", "true", "yes", "on"
         }:
             self._ai_provider_combo.addItem("Grok CLI (개발용)", AI_PROVIDER_GROK_CLI)
-            self._ai_provider_combo.addItem("Gemini API (개발용)", AI_PROVIDER_GEMINI)
         self._ai_provider_combo.setStyleSheet(_combo_style)
 
         self._ai_provider_hint = QLabel(

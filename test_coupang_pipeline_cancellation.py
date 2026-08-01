@@ -24,7 +24,7 @@ class _CancellingParser:
 class _ImageSearch:
     def search_product_images(self, product_info, api_key="", cancel_check=None):
         assert product_info["product_id"] == "123456"
-        assert api_key == "test-key"
+        assert api_key == ""
         assert callable(cancel_check)
         assert cancel_check() is False
         return []
@@ -35,7 +35,7 @@ class _AggroGenerator:
 
     def generate_product_post(self, product_info, api_key="", concept_id=None):
         assert product_info["title"] == "테스트 상품"
-        assert api_key == "test-key"
+        assert api_key == ""
         assert concept_id
         return {
             "first_post": {"text": "첫 번째 게시글"},

@@ -10,7 +10,6 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from src.ai_provider import (
-    AI_PROVIDER_GEMINI,
     AI_PROVIDER_GROK_CLI,
     AI_PROVIDER_MANAGED,
     normalize_ai_provider,
@@ -61,14 +60,6 @@ class Config:
             accounts_migrated = self._migrate_threads_accounts(data)
             self._load_secrets()
             self._sync_gemini_key_state()
-            if (
-                self._local_ai_providers_enabled()
-                and "ai_provider" not in data
-                and self.gemini_api_keys
-            ):
-                # Preserve existing installations until the user explicitly selects Grok.
-                self.ai_provider = AI_PROVIDER_GEMINI
-
             # Backward-compat migration for old plaintext values.
             migrated = False
             legacy_plaintext_present = False

@@ -16,7 +16,6 @@ const AUTH_API_URL = String(
 ).replace(/\/$/, "");
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const PRIMARY_MODEL = process.env.PRIMARY_AI_MODEL || "xai/grok-4.3";
-const FALLBACK_MODEL = process.env.FALLBACK_AI_MODEL || "google/gemini-3.5-flash-lite";
 
 function sendJson(res, status, value) {
   res.statusCode = status;
@@ -170,22 +169,6 @@ async function gatewayCompletion(model, token, userId, prompt) {
   return { payload, model };
 }
 
-async function generateWithFallback(gatewayToken, userId, prompt) {
-  const models = [...new Set([PRIMARY_MODEL, FALLBACK_MODEL].filter(Boolean))];
-  let lastError;
-  for (const model of models) {
-    try {
-      return await gatewayCompletion(model, gatewayToken, userId, prompt);
-    } catch (error) {
-      lastError = error;
-      if (![402, 408, 429, 500, 502, 503, 504].includes(Number(error?.status))) {
-        break;
-      }
-    }
-  }
-  throw lastError || new Error("AI Gateway를 사용할 수 없습니다.");
-}
-
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     res.statusCode = 204;
@@ -236,7 +219,8 @@ export default async function handler(req, res) {
     let degraded = false;
     let degradedReason = "";
     try {
-      const completion = await generateWithFallback(
+      const completion = await gatewayCompletion(
+        PRIMARY_MODEL,
         gatewayToken,
         userId,
         prompt,

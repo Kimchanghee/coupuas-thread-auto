@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 운영용 게시글 생성 모델을 Vercel AI Gateway의 `xai/grok-4.3` 단일 경로로 고정했습니다.
+- Gemini 게시글 생성 폴백과 개발자용 Gemini 선택지를 제거하고, 기존 Gemini 설정은 관리형 AI로 자동 전환합니다.
+
 ## v3.0.51 — 서버 관리형 AI 및 다중 Threads 계정 자동화 (2026-08-01)
 
 - 사용자가 별도 AI API 키를 준비하지 않아도 로그인과 이용권만으로 4가지 Threads 문안을 생성하도록 서버 관리형 AI 경로를 추가했습니다.
