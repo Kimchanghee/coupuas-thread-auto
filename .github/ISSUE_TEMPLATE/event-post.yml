@@ -1,0 +1,52 @@
+name: 웹사이트 이벤트 게시글
+description: Thread Auto 공지사항에 노출할 이벤트 글을 작성합니다.
+title: "[EVENT] "
+labels: [event]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        이 이슈는 공개 즉시 웹사이트 공지사항의 이벤트 탭에 표시됩니다. 저장소 소유자가 작성한 이벤트만 노출됩니다.
+  - type: input
+    id: summary
+    attributes:
+      label: 한 줄 소개
+      placeholder: 이벤트의 핵심 혜택을 한 문장으로 적어주세요.
+    validations:
+      required: true
+  - type: input
+    id: starts_at
+    attributes:
+      label: 시작일
+      description: ISO 날짜 형식으로 입력하세요.
+      placeholder: "2026-08-02"
+    validations:
+      required: true
+  - type: input
+    id: ends_at
+    attributes:
+      label: 종료일
+      placeholder: "2026-08-31"
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: 상세 내용
+      placeholder: 혜택, 참여 조건, 유의 사항을 적어주세요.
+    validations:
+      required: true
+  - type: input
+    id: cta_url
+    attributes:
+      label: 참여 링크
+      placeholder: "https://..."
+    validations:
+      required: true
+  - type: input
+    id: cta_label
+    attributes:
+      label: 버튼 문구
+      placeholder: 이벤트 참여하기
+    validations:
+      required: true

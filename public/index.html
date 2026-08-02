@@ -177,6 +177,17 @@
       .security-item strong { display: block; margin-bottom: 6px; font-size: 17px; }
       .security-item span { color: #c8d7ce; font-size: 14px; line-height: 1.6; }
 
+      .newsroom { border-top: 1px solid var(--line); background: #eee9e0; }
+      .newsroom-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; margin-bottom: 34px; }
+      .newsroom-head .section-title { margin-bottom: 0; }
+      .home-notice-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      .home-notice-card { min-height: 210px; display: flex; flex-direction: column; align-items: flex-start; padding: 25px; border: 1px solid var(--line); border-radius: 18px; background: var(--card); text-decoration: none; transition: transform .18s ease, border-color .18s ease; }
+      .home-notice-card:hover { transform: translateY(-3px); border-color: #aaa195; }
+      .home-notice-card strong { margin: 22px 0 12px; font-size: 21px; line-height: 1.35; letter-spacing: -.035em; }
+      .home-notice-card > span:last-child { display: -webkit-box; overflow: hidden; color: var(--muted); line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+      .home-notice-badge { min-height: 27px; display: inline-flex; align-items: center; padding: 0 10px; border: 1px solid var(--sage); border-radius: 999px; background: var(--sage-soft); color: var(--sage); font-size: 12px; font-weight: 900; }
+      .home-notice-badge.event { border-color: #8b670a; background: var(--yellow); color: #5d4300; }
+
       .final-cta { text-align: center; }
       .final-panel { position: relative; overflow: hidden; padding: 72px 24px; border: 1px solid var(--ink); border-radius: 24px; background: var(--yellow); }
       .final-panel::after { content: ""; position: absolute; width: 180px; height: 180px; right: -55px; bottom: -75px; border: 34px solid var(--accent); border-radius: 50%; }
@@ -193,6 +204,7 @@
         .hero-grid { gap: 56px; }
         .app-window { max-width: 620px; margin: 0 auto; }
         .feature-grid, .pricing-grid { grid-template-columns: 1fr; }
+        .home-notice-list { grid-template-columns: 1fr; }
         .feature-card { min-height: auto; }
         .feature-number { margin-bottom: 28px; }
         .price-card.featured { transform: none; }
@@ -200,7 +212,9 @@
 
       @media (max-width: 680px) {
         .shell { width: min(100% - 28px, 1160px); }
-        .nav-links a:not(.button) { display: none; }
+        .nav-links a:not(.button):not(.mobile-essential) { display: none; }
+        .nav-links { gap: 10px; }
+        .nav-links .mobile-essential { min-height: 44px; display: inline-flex; align-items: center; }
         .hero { padding: 68px 0 64px; }
         h1 { font-size: clamp(42px, 13vw, 58px); }
         section { padding: 72px 0; }
@@ -213,6 +227,7 @@
         .step + .step { border-left: 0; border-top: 1px solid var(--ink); }
         .step b { margin-bottom: 24px; }
         .security-wrap { padding: 32px 22px; gap: 36px; }
+        .newsroom-head { align-items: flex-start; flex-direction: column; }
         .footer-row { align-items: flex-start; flex-direction: column; }
       }
 
@@ -233,7 +248,8 @@
           <a href="#features">기능</a>
           <a href="#pricing">요금</a>
           <a href="#security">보안</a>
-          <a class="button small" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows 다운로드</a>
+          <a class="mobile-essential" href="/notices">공지</a>
+          <a class="button small" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows 다운로드</a>
         </div>
       </nav>
     </header>
@@ -246,7 +262,7 @@
             <h1>링크 하나로,<br />운영은 가볍게.</h1>
             <p class="hero-copy">쿠팡 상품을 분석해 서로 다른 네 가지 문안을 만들고, 여러 Threads 계정의 대기열과 업로드 이력까지 한곳에서 관리하세요.</p>
             <div class="hero-actions">
-              <a class="button accent" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료로 시작하기 <span aria-hidden="true">→</span></a>
+              <a class="button accent" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료로 시작하기 <span aria-hidden="true">→</span></a>
               <a class="button ghost" href="#workflow">작동 방식 보기</a>
             </div>
             <ul class="proof" aria-label="제품 장점">
@@ -272,7 +288,7 @@
                 <div class="app-cta">4가지 문안 생성 완료</div>
               </div>
             </div>
-            <div class="floating-note">v3.0.54 · 최신 버전</div>
+            <div class="floating-note" data-latest-version aria-live="polite">최신 버전 확인 중</div>
           </div>
         </div>
       </section>
@@ -308,7 +324,7 @@
           <h2 class="section-title">필요한 만큼만 시작하세요.</h2>
           <p class="section-lead">처음에는 무료로 확인하고, 운영 주기와 계정 수에 맞는 이용권을 선택할 수 있습니다.</p>
           <div class="pricing-grid">
-            <article class="price-card"><div class="plan-tag">부담 없이 체험</div><h3>무료</h3><div class="price">0원 <small>/ 월</small></div><p class="price-copy">기본 자동화 흐름을 직접 확인해보세요.</p><ul class="plan-list"><li>매월 5회 작업</li><li>관리형 AI 문안 4종</li><li>기본 계정 운영</li></ul><a class="button ghost" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료 다운로드</a></article>
+            <article class="price-card"><div class="plan-tag">부담 없이 체험</div><h3>무료</h3><div class="price">0원 <small>/ 월</small></div><p class="price-copy">기본 자동화 흐름을 직접 확인해보세요.</p><ul class="plan-list"><li>매월 5회 작업</li><li>관리형 AI 문안 4종</li><li>기본 계정 운영</li></ul><a class="button ghost" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료 다운로드</a></article>
             <article class="price-card"><div class="plan-tag">짧고 집중적인 운영</div><h3>주간 이용권</h3><div class="price">19,000원 <small>/ 7일</small></div><p class="price-copy">캠페인이나 집중 업로드 기간에 알맞습니다.</p><ul class="plan-list"><li>7일 동안 확장된 작업량</li><li>프로그램 내 Threads 계정 1개</li><li>대기열·업로드 이력 관리</li></ul><a class="button ghost" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new?title=%EC%A3%BC%EA%B0%84%20%EC%9D%B4%EC%9A%A9%EA%B6%8C%20%EB%AC%B8%EC%9D%98">주간 이용권 문의</a></article>
             <article class="price-card featured"><div class="plan-tag">가장 꾸준한 선택 · 추천</div><h3>월간 이용권</h3><div class="price">49,000원 <small>/ 30일</small></div><p class="price-copy">매일 꾸준히 여러 계정을 운영할 때 알맞습니다.</p><ul class="plan-list"><li>30일 동안 확장된 작업량</li><li>프로그램 내 Threads 계정 최대 10개</li><li>우선적인 운영 문의</li></ul><a class="button accent" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new?title=%EC%9B%94%EA%B0%84%20%EC%9D%B4%EC%9A%A9%EA%B6%8C%20%EB%AC%B8%EC%9D%98">월간 이용권 문의</a></article>
           </div>
@@ -326,17 +342,25 @@
         </div>
       </section>
 
+      <section class="newsroom" id="updates">
+        <div class="shell">
+          <div class="newsroom-head"><div><p class="section-kicker">Notice desk</p><h2 class="section-title">새 버전과 이벤트를<br />한눈에 확인하세요.</h2></div><a class="button ghost" href="/notices">공지사항 전체 보기 →</a></div>
+          <div class="home-notice-list" id="home-notice-list" aria-live="polite"><article class="home-notice-card"><span class="home-notice-badge">업데이트</span><strong>최신 소식을 불러오는 중입니다.</strong><span>GitHub Release와 자동으로 연결됩니다.</span></article></div>
+        </div>
+      </section>
+
       <section class="final-cta">
         <div class="shell final-panel">
           <h2>다음 Threads 게시물,<br />링크 하나로 시작하세요.</h2>
           <p>Windows 설치 파일을 내려받고 매월 5회의 무료 작업으로 내 운영 방식에 맞는지 확인해보세요.</p>
-          <div class="final-actions"><a class="button" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows용 다운로드</a><a class="button ghost" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new">문의하기</a></div>
+          <div class="final-actions"><a class="button" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows용 다운로드</a><a class="button ghost" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new">문의하기</a></div>
         </div>
       </section>
     </main>
 
     <footer>
-      <div class="shell footer-row"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">T</span><span>Thread Auto</span></a><div class="footer-links"><a href="https://github.com/Kimchanghee/coupuas-thread-auto/releases">릴리스</a><a href="https://github.com/Kimchanghee/coupuas-thread-auto/issues">고객 지원</a></div><span>© 2026 Thread Auto</span></div>
+      <div class="shell footer-row"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">T</span><span>Thread Auto</span></a><div class="footer-links"><a href="/notices">공지사항</a><a href="https://github.com/Kimchanghee/coupuas-thread-auto/releases">릴리스</a><a href="https://github.com/Kimchanghee/coupuas-thread-auto/issues">고객 지원</a></div><span>© 2026 Thread Auto</span></div>
     </footer>
+    <script src="/site.js" defer></script>
   </body>
 </html>

@@ -1,0 +1,13 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+  categories:
+    - title: "새 기능"
+      labels: [feature, enhancement]
+    - title: "오류 수정"
+      labels: [bug, fix]
+    - title: "보안 및 안정성"
+      labels: [security, reliability]
+    - title: "그 밖의 변경 사항"
+      labels: ["*"]

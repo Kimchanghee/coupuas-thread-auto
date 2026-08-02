@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from src import auto_updater
 
@@ -108,3 +109,37 @@ def test_check_for_updates_prefers_installer_asset(monkeypatch):
     assert info["asset_name"] == "CoupangThreadAutoSetup.exe"
     assert info["asset_kind"] == "installer"
     assert info["checksum_asset_name"] == "CoupangThreadAutoSetup.exe.sha256"
+
+
+def test_installer_update_uses_detached_runner_and_relaunches_app(monkeypatch, tmp_path):
+    installer = tmp_path / "CoupangThreadAutoSetup.exe"
+    installer.write_bytes(b"signed-installer-placeholder")
+    script = tmp_path / "install-update.ps1"
+    script.write_text("Start-Process -FilePath $AppExe", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(auto_updater.os, "name", "nt")
+    monkeypatch.setattr(auto_updater.sys, "executable", r"C:\Program Files\Thread Auto\CoupangThreadAuto.exe")
+    monkeypatch.setattr(auto_updater.AutoUpdater, "_create_installer_update_script", lambda self: str(script))
+    monkeypatch.setattr(auto_updater.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    updater = auto_updater.AutoUpdater("3.0.54")
+    assert updater._run_installer_update(str(installer)) is True
+    args, kwargs = calls[0]
+    assert args[:5] == ["powershell", "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File"]
+    assert "-AppExe" in args
+    assert str(installer) in args
+    assert kwargs["shell"] is False
+    assert "creationflags" in kwargs
+
+
+def test_installer_runner_waits_installs_relaunches_and_self_cleans(tmp_path, monkeypatch):
+    monkeypatch.setattr(auto_updater.AutoUpdater, "_secure_update_temp_dir", staticmethod(lambda: tmp_path))
+    updater = auto_updater.AutoUpdater("3.0.54")
+    path = Path(updater._create_installer_update_script())
+    content = path.read_text(encoding="utf-8")
+    assert "Get-Process -Id $ParentPid" in content
+    assert "Start-Process -FilePath $Installer" in content
+    assert "Start-Process -FilePath $AppExe" in content
+    assert "If setup fails, reopen the existing binary" in content
+    assert "Remove-Item -LiteralPath $PSCommandPath" in content

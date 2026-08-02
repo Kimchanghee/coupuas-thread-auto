@@ -457,12 +457,79 @@ class AutoUpdater:
             print("설치 파일을 찾을 수 없습니다.")
             return False
 
+        update_script = self._create_installer_update_script()
         subprocess.Popen(
-            [str(installer_path), *self.INSTALLER_ARGS],
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "RemoteSigned",
+                "-File",
+                update_script,
+                "-Installer",
+                str(installer_path),
+                "-AppExe",
+                str(sys.executable),
+                "-ParentPid",
+                str(os.getpid()),
+            ],
             shell=False,
             close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return True
+
+    def _create_installer_update_script(self) -> str:
+        """Create a detached installer runner that relaunches the updated app."""
+        installer_args = ", ".join(
+            "'" + value.replace("'", "''") + "'" for value in self.INSTALLER_ARGS
+        )
+        script_content = f"""param(
+    [Parameter(Mandatory=$true)][string]$Installer,
+    [Parameter(Mandatory=$true)][string]$AppExe,
+    [Parameter(Mandatory=$true)][int]$ParentPid
+)
+$ErrorActionPreference = 'Stop'
+try {{
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {{
+        Start-Sleep -Milliseconds 250
+    }}
+    if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {{
+        throw 'Application did not stop before update deadline.'
+    }}
+    $arguments = @({installer_args})
+    $process = Start-Process -FilePath $Installer -ArgumentList $arguments -Wait -PassThru
+    if ($process.ExitCode -notin @(0, 3010)) {{
+        throw "Installer failed with exit code $($process.ExitCode)."
+    }}
+    if (Test-Path -LiteralPath $AppExe) {{ Start-Process -FilePath $AppExe }}
+}} catch {{
+    # If setup fails, reopen the existing binary so saved work can resume.
+    if (Test-Path -LiteralPath $AppExe) {{ Start-Process -FilePath $AppExe }}
+}} finally {{
+    Remove-Item -LiteralPath $Installer -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+}}
+"""
+        fd, script_path = tempfile.mkstemp(
+            suffix=".ps1",
+            prefix="install_coupuas_",
+            dir=str(self._secure_update_temp_dir()),
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as script_file:
+                script_file.write(script_content)
+            secure_file_permissions(script_path)
+            return script_path
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            Path(script_path).unlink(missing_ok=True)
+            raise
 
     def _create_update_script(self) -> str:
         script_content = """param(

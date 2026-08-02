@@ -21,6 +21,18 @@
       "dest": "/api/ai/thread-variants.mjs"
     },
     {
+      "src": "/api/notices",
+      "dest": "/api/notices.mjs"
+    },
+    {
+      "src": "/notices/?",
+      "dest": "/public/notices.html"
+    },
+    {
+      "src": "/(site|notices)\\.js",
+      "dest": "/public/$1.js"
+    },
+    {
       "handle": "filesystem"
     },
     {

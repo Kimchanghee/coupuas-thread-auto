@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Thread Auto 업데이트 공지와 이벤트 소식을 확인하세요." />
+    <meta name="theme-color" content="#f7f4ee" />
+    <title>공지사항 · Thread Auto</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #1d1c1a;
+        --muted: #666159;
+        --line: #d9d3ca;
+        --paper: #f7f4ee;
+        --card: #fffdf9;
+        --accent: #dc5f3f;
+        --accent-dark: #a43821;
+        --sage: #274c3c;
+        --sage-soft: #e2ebe5;
+        --yellow: #f3c759;
+        --shadow: 0 24px 70px rgba(43, 38, 31, 0.12);
+        font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--paper); }
+      a { color: inherit; }
+      button, a { -webkit-tap-highlight-color: transparent; }
+      :focus-visible { outline: 3px solid var(--yellow); outline-offset: 3px; }
+      .skip-link { position: fixed; left: 16px; top: -80px; z-index: 100; padding: 12px 18px; border-radius: 10px; background: var(--ink); color: white; transition: top .2s ease; }
+      .skip-link:focus { top: 16px; }
+      .shell { width: min(1160px, calc(100% - 40px)); margin: 0 auto; }
+      .site-header { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid rgba(217,211,202,.82); background: rgba(247,244,238,.94); backdrop-filter: blur(16px); }
+      .nav { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+      .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 900; text-decoration: none; letter-spacing: -.03em; }
+      .brand-mark { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--ink); color: white; font-size: 18px; }
+      .nav-links { display: flex; align-items: center; gap: 28px; }
+      .nav-links a { min-height: 44px; display: inline-flex; align-items: center; color: var(--muted); font-size: 14px; font-weight: 800; text-decoration: none; }
+      .nav-links a[aria-current="page"] { position: relative; color: var(--ink); }
+      .nav-links a[aria-current="page"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 7px; height: 2px; background: var(--accent); }
+      .button { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 21px; border: 1px solid var(--ink); border-radius: 12px; background: var(--ink); color: white !important; font-weight: 800; line-height: 1; text-decoration: none; box-shadow: 0 5px 0 rgba(29,28,26,.16); transition: transform .18s ease, box-shadow .18s ease; }
+      .button:hover { transform: translateY(-2px); box-shadow: 0 8px 0 rgba(29,28,26,.14); }
+      .button.accent { border-color: var(--accent-dark); background: var(--accent); }
+      .button.ghost { background: transparent; color: var(--ink) !important; box-shadow: none; }
+      .button.small { min-height: 40px; padding: 0 16px; border-radius: 10px; font-size: 14px; }
+      .desk-hero { padding: 84px 0 56px; border-bottom: 1px solid var(--line); }
+      .desk-head { display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: end; }
+      .kicker { margin: 0 0 14px; color: var(--accent-dark); font-size: 13px; font-weight: 950; letter-spacing: .14em; text-transform: uppercase; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { max-width: 780px; margin-bottom: 16px; font-size: clamp(40px, 6vw, 70px); line-height: 1.03; letter-spacing: -.065em; word-break: keep-all; }
+      .lead { max-width: 660px; margin-bottom: 0; color: var(--muted); font-size: 18px; line-height: 1.75; word-break: keep-all; }
+      .version-ticket { min-width: 210px; padding: 18px 20px; border: 1px solid var(--ink); background: var(--yellow); box-shadow: 5px 5px 0 var(--ink); transform: rotate(-1.5deg); }
+      .version-ticket small { display: block; margin-bottom: 5px; font-size: 11px; font-weight: 900; letter-spacing: .12em; }
+      .version-ticket strong { font-size: 24px; letter-spacing: -.04em; }
+      .board { padding: 56px 0 100px; }
+      .board-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 26px; }
+      .filters { display: flex; gap: 8px; overflow-x: auto; padding: 3px; }
+      .filter { min-width: 88px; min-height: 44px; padding: 0 18px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font: inherit; font-weight: 850; cursor: pointer; }
+      .filter[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: white; }
+      .author-link { color: var(--muted); font-size: 13px; font-weight: 800; }
+      .latest-card { display: grid; grid-template-columns: 1fr 290px; gap: 32px; min-height: 290px; margin-bottom: 28px; padding: 34px; border: 2px solid var(--accent-dark); border-radius: 22px; background: #fff7f2; box-shadow: 8px 8px 0 var(--accent); }
+      .latest-card h2 { margin: 14px 0 14px; font-size: clamp(28px, 4vw, 44px); line-height: 1.12; letter-spacing: -.055em; }
+      .latest-card p { max-width: 660px; color: var(--muted); line-height: 1.75; }
+      .latest-actions { display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 24px; border-left: 1px solid var(--line); }
+      .badge { display: inline-flex; width: fit-content; min-height: 28px; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--sage); border-radius: 999px; background: var(--sage-soft); color: var(--sage); font-size: 12px; font-weight: 950; }
+      .badge.event { border-color: #8b670a; background: var(--yellow); color: #5d4300; }
+      .badge.status { border-color: var(--line); background: var(--card); color: var(--muted); }
+      .post-list { display: grid; gap: 12px; }
+      .post-row { position: relative; display: grid; grid-template-columns: 130px 1fr auto; gap: 24px; align-items: center; min-height: 126px; padding: 24px 26px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); text-decoration: none; transition: transform .18s ease, border-color .18s ease; }
+      .post-row::before { content: ""; position: absolute; left: -1px; top: 18px; bottom: 18px; width: 3px; border-radius: 0 3px 3px 0; background: transparent; }
+      .post-row:hover { transform: translateY(-2px); border-color: #b9b0a4; }
+      .post-row:hover::before { background: var(--accent); }
+      .post-row h2 { margin: 0 0 8px; font-size: 21px; letter-spacing: -.035em; }
+      .post-row p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted); line-height: 1.6; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+      .post-meta { color: var(--muted); font-size: 13px; font-weight: 750; }
+      .post-arrow { font-size: 24px; }
+      .loading, .empty, .error { min-height: 220px; display: grid; place-items: center; padding: 30px; border: 1px dashed var(--line); border-radius: 18px; color: var(--muted); text-align: center; }
+      .article-wrap { width: min(760px, 100%); margin: 0 auto; }
+      .back-link { display: inline-flex; min-height: 44px; align-items: center; margin-bottom: 28px; color: var(--muted); font-weight: 800; text-decoration: none; }
+      .article { padding: 42px; border: 1px solid var(--line); border-radius: 22px; background: var(--card); box-shadow: var(--shadow); }
+      .article header { padding-bottom: 26px; border-bottom: 1px solid var(--line); }
+      .article h1 { margin: 16px 0; font-size: clamp(32px, 5vw, 52px); }
+      .article-meta { color: var(--muted); font-size: 14px; font-weight: 750; }
+      .article-body { padding: 30px 0 10px; font-size: 17px; line-height: 1.85; word-break: keep-all; }
+      .article-body h2 { margin: 34px 0 12px; font-size: 25px; }
+      .article-body h3 { margin: 26px 0 10px; font-size: 20px; }
+      .article-body ul { margin: 10px 0 24px; padding-left: 24px; }
+      .article-body li { margin: 8px 0; }
+      .article-cta { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: center; margin-top: 30px; padding: 24px; border: 1px solid var(--ink); border-radius: 16px; background: var(--yellow); }
+      .article-cta p { margin: 4px 0 0; color: #554d40; }
+      footer { padding: 28px 0 44px; border-top: 1px solid var(--line); }
+      .footer-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; color: var(--muted); font-size: 13px; }
+      .footer-links { display: flex; gap: 18px; }
+      [hidden] { display: none !important; }
+      @media (max-width: 760px) {
+        .shell { width: min(100% - 28px, 1160px); }
+        .nav-links { gap: 10px; }
+        .nav-links .desktop-link { display: none; }
+        .desk-hero { padding: 60px 0 42px; }
+        .desk-head, .latest-card { grid-template-columns: 1fr; }
+        .version-ticket { width: fit-content; }
+        .board-toolbar { align-items: flex-start; flex-direction: column; }
+        .latest-card { padding: 24px; box-shadow: 5px 5px 0 var(--accent); }
+        .latest-actions { padding: 20px 0 0; border-top: 1px solid var(--line); border-left: 0; }
+        .post-row { grid-template-columns: 1fr auto; gap: 12px; padding: 21px; }
+        .post-row .post-kind { grid-column: 1 / -1; }
+        .post-row .post-copy { grid-column: 1; }
+        .post-row .post-arrow { grid-column: 2; }
+        .article { padding: 25px 20px; }
+        .article-cta { grid-template-columns: 1fr; }
+        .footer-row { align-items: flex-start; flex-direction: column; }
+      }
+      @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; } }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 바로가기</a>
+    <header class="site-header">
+      <nav class="nav shell" aria-label="주요 메뉴">
+        <a class="brand" href="/" aria-label="Thread Auto 홈"><span class="brand-mark" aria-hidden="true">T</span><span>Thread Auto</span></a>
+        <div class="nav-links">
+          <a class="desktop-link" href="/#features">기능</a><a class="desktop-link" href="/#pricing">요금</a>
+          <a href="/notices" aria-current="page">공지</a>
+          <a class="button small" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows 다운로드</a>
+        </div>
+      </nav>
+    </header>
+    <main id="main">
+      <section class="desk-hero">
+        <div class="desk-head shell">
+          <div><p class="kicker">Notice desk</p><h1>업데이트와<br />운영 소식.</h1><p class="lead">새 버전의 주요 변경점, 설치 안내, 진행 중인 이벤트를 게시글 형식으로 확인할 수 있습니다.</p></div>
+          <div class="version-ticket" aria-live="polite"><small>NOW SHIPPING</small><strong data-latest-version>불러오는 중</strong></div>
+        </div>
+      </section>
+      <section class="board">
+        <div class="shell" id="board-list-view">
+          <div class="board-toolbar">
+            <div class="filters" role="group" aria-label="공지 필터">
+              <button class="filter" type="button" data-filter="all" aria-pressed="true">전체</button>
+              <button class="filter" type="button" data-filter="release" aria-pressed="false">업데이트</button>
+              <button class="filter" type="button" data-filter="event" aria-pressed="false">이벤트</button>
+            </div>
+            <a class="author-link" id="event-author-link" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new?template=event-post.yml">운영자 이벤트 글 작성 ↗</a>
+          </div>
+          <div id="latest-post" aria-live="polite"></div>
+          <div id="post-list" class="post-list" aria-live="polite"><div class="loading" role="status">공지사항을 불러오는 중입니다.</div></div>
+        </div>
+        <div class="shell" id="board-detail-view" hidden>
+          <div class="article-wrap"><a class="back-link" href="/notices">← 공지 목록으로</a><div id="post-detail" aria-live="polite"></div></div>
+        </div>
+      </section>
+    </main>
+    <footer><div class="shell footer-row"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">T</span><span>Thread Auto</span></a><div class="footer-links"><a href="/notices">공지사항</a><a href="https://github.com/Kimchanghee/coupuas-thread-auto/issues">고객 지원</a></div><span>© 2026 Thread Auto</span></div></footer>
+    <script src="/notices.js" defer></script>
+  </body>
+</html>

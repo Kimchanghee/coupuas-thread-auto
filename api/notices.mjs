@@ -1,0 +1,176 @@
+const GITHUB_OWNER = "Kimchanghee";
+const GITHUB_OWNER_ID = 9594198;
+const GITHUB_REPO = "coupuas-thread-auto";
+const API_ROOT = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+let cachedPayload = null;
+let cachedAt = 0;
+
+function text(value) {
+  return String(value ?? "").trim();
+}
+
+function firstUsefulLine(body) {
+  return text(body)
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^#{1,6}\s+/, "").replace(/^[-*]\s+/, "").trim())
+    .find((line) => line && !line.startsWith("<!--")) || "자세한 내용을 확인해 주세요.";
+}
+
+function findAsset(assets, name) {
+  const wanted = text(name).toLowerCase();
+  return (Array.isArray(assets) ? assets : []).find(
+    (asset) => text(asset?.name).toLowerCase() === wanted,
+  );
+}
+
+function extractSection(body, headings) {
+  const source = text(body);
+  if (!source) return "";
+  const names = headings.map((heading) => heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(
+    `(?:^|\\n)#{2,4}\\s*(?:${names.join("|")})\\s*\\n([\\s\\S]*?)(?=\\n#{2,4}\\s|$)`,
+    "i",
+  );
+  return text(source.match(pattern)?.[1]);
+}
+
+function releaseToPost(release) {
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  const installer = findAsset(assets, "CoupangThreadAutoSetup.exe");
+  const checksum = findAsset(assets, "CoupangThreadAutoSetup.exe.sha256");
+  const version = text(release?.tag_name).replace(/^v/i, "");
+  const body = text(release?.body) || `${version} 버전이 공개되었습니다.`;
+  return {
+    id: `release-${release.id}`,
+    kind: "release",
+    badge: "업데이트",
+    title: text(release?.name) || `Thread Auto v${version}`,
+    summary: firstUsefulLine(body),
+    body,
+    version,
+    publishedAt: release?.published_at || release?.created_at || null,
+    sourceUrl: release?.html_url || null,
+    downloadUrl:
+      installer?.browser_download_url ||
+      `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/CoupangThreadAutoSetup.exe`,
+    checksumUrl: checksum?.browser_download_url || null,
+    pinned: false,
+  };
+}
+
+function eventStatus(startsAt, endsAt) {
+  const now = Date.now();
+  const start = Date.parse(startsAt || "");
+  const end = Date.parse(endsAt || "");
+  if (Number.isFinite(end) && end < now) return "종료";
+  if (Number.isFinite(start) && start > now) return "예정";
+  return "진행 중";
+}
+
+function issueToPost(issue) {
+  const body = text(issue?.body);
+  const startsAt = extractSection(body, ["시작일", "이벤트 시작일", "시작"]);
+  const endsAt = extractSection(body, ["종료일", "이벤트 종료일", "종료"]);
+  const ctaUrl = extractSection(body, ["참여 링크", "버튼 링크", "CTA 링크"]);
+  const ctaLabel = extractSection(body, ["버튼 문구", "CTA 문구"]) || "이벤트 참여하기";
+  return {
+    id: `event-${issue.number}`,
+    kind: "event",
+    badge: "이벤트",
+    title: text(issue?.title).replace(/^\[EVENT\]\s*/i, "") || "Thread Auto 이벤트",
+    summary: extractSection(body, ["한 줄 소개", "요약"]) || firstUsefulLine(body),
+    body,
+    publishedAt: issue?.created_at || null,
+    updatedAt: issue?.updated_at || null,
+    sourceUrl: issue?.html_url || null,
+    startsAt: startsAt || null,
+    endsAt: endsAt || null,
+    eventStatus: eventStatus(startsAt, endsAt),
+    ctaUrl: /^https:\/\//i.test(ctaUrl) ? ctaUrl : null,
+    ctaLabel,
+    pinned: (issue?.labels || []).some((label) => text(label?.name).toLowerCase() === "pinned"),
+  };
+}
+
+async function githubJson(path) {
+  const token = text(process.env.GITHUB_TOKEN || process.env.GITHUB_READ_TOKEN);
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "Thread-Auto-Website",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_ROOT}${path}`, {
+    headers,
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub API ${response.status}`);
+  }
+  return response.json();
+}
+
+export function combineNoticePayload(releases, issues) {
+  const releasePosts = (Array.isArray(releases) ? releases : [])
+    .filter((release) => !release?.draft && !release?.prerelease)
+    .map(releaseToPost);
+  const eventPosts = (Array.isArray(issues) ? issues : [])
+    .filter((issue) => {
+      if (issue?.pull_request) return false;
+      const ownerMatch = Number(issue?.user?.id) === GITHUB_OWNER_ID || text(issue?.user?.login).toLowerCase() === GITHUB_OWNER.toLowerCase();
+      const eventLabel = (issue?.labels || []).some((label) => text(label?.name).toLowerCase() === "event");
+      return ownerMatch && eventLabel;
+    })
+    .map(issueToPost);
+
+  const posts = [...releasePosts, ...eventPosts].sort((a, b) => {
+    if (Boolean(a.pinned) !== Boolean(b.pinned)) return a.pinned ? -1 : 1;
+    return Date.parse(b.publishedAt || 0) - Date.parse(a.publishedAt || 0);
+  });
+  return {
+    latest: releasePosts[0] || null,
+    posts,
+    eventAuthorUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/new?template=event-post.yml`,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+async function loadPayload() {
+  if (cachedPayload && Date.now() - cachedAt < CACHE_TTL_MS) return cachedPayload;
+  const [releaseResult, issueResult] = await Promise.allSettled([
+    githubJson("/releases?per_page=100"),
+    githubJson("/issues?state=all&labels=event&per_page=100&sort=created&direction=desc"),
+  ]);
+  if (releaseResult.status === "rejected" && issueResult.status === "rejected") {
+    throw releaseResult.reason;
+  }
+  cachedPayload = combineNoticePayload(
+    releaseResult.status === "fulfilled" ? releaseResult.value : [],
+    issueResult.status === "fulfilled" ? issueResult.value : [],
+  );
+  cachedAt = Date.now();
+  return cachedPayload;
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  try {
+    const payload = await loadPayload();
+    const requestedId = text(req.query?.id);
+    res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=3600");
+    if (requestedId) {
+      const post = payload.posts.find((item) => item.id === requestedId);
+      if (!post) return res.status(404).json({ error: "Post not found" });
+      return res.status(200).json({ post, latest: payload.latest });
+    }
+    return res.status(200).json(payload);
+  } catch (error) {
+    return res.status(502).json({ error: "공지사항을 불러오지 못했습니다." });
+  }
+}

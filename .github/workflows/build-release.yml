@@ -19,6 +19,7 @@ on:
       - "build_exe.py"
       - "build_installer.py"
       - "installer/**"
+      - ".github/release.yml"
       - ".github/workflows/build-release.yml"
       - ".github/scripts/**"
   workflow_dispatch:
@@ -221,21 +222,8 @@ jobs:
         with:
           tag_name: ${{ needs.build.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Release ${{ needs.build.outputs.version }}
-          body: |
-            작업량·결제 보안을 강화하고 공식 제품 안내를 정비한 릴리스입니다.
-
-            ### 주요 변경 사항
-            - 별도 API 키 없이 관리형 AI로 네 가지 Threads 문안을 생성합니다.
-            - 월 5회 무료 작업과 주간 19,000원·월간 49,000원 이용권을 제공합니다.
-            - 작업량을 원자적으로 예약·확정·해제해 중복 차감과 확인 전용 우회를 차단합니다.
-            - 요금제에 맞춰 여러 Threads 계정의 대기열, 업로드 이력과 재개 상태를 관리합니다.
-            - 브라우저 로그인 세션을 사용자 PC에 암호화해 보관하고 보안 의존성을 갱신했습니다.
-
-            Windows 사용자는 설치형 파일을 받으면 됩니다.
-            - 설치형: `CoupangThreadAutoSetup.exe`
-            - 단독 실행형: `CoupangThreadAuto.exe`
-            - 각 파일의 SHA-256 체크섬을 함께 제공합니다.
+          name: Thread Auto ${{ needs.build.outputs.version }}
+          generate_release_notes: true
           draft: false
           prerelease: false
           files: |
@@ -246,19 +234,3 @@ jobs:
             dist/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Notify Thread Genius website
-        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3.0.0
-        with:
-          token: ${{ secrets.DISPATCH_TOKEN }}
-          repository: Kimchanghee/thread-genius
-          event-type: new-release
-          client-payload: >-
-            {
-              "tag_name": "${{ needs.build.outputs.version }}",
-              "release_name": "Release ${{ needs.build.outputs.version }}",
-              "body": "${{ needs.build.outputs.version }}: 별도 API 키 없는 관리형 AI, 월 5회 무료 작업, 원자적 작업량 처리, 결제·세션 보안 강화와 요금제별 계정 운영을 제공합니다.",
-              "installer_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
-              "standalone_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAuto.exe",
-              "metadata_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/latest.json"
-            }
