@@ -7,6 +7,19 @@ from src.services.link_history import LinkHistory
 from src.services.multi_account_runtime import MultiAccountRuntime
 
 
+def test_stop_and_join_confirms_worker_exit():
+    runtime = object.__new__(MultiAccountRuntime)
+    runtime._lock = threading.RLock()
+    stopped = threading.Event()
+    worker = threading.Thread(target=stopped.wait, daemon=True)
+    runtime._worker_thread = worker
+    runtime.stop_all = stopped.set
+    worker.start()
+
+    assert runtime.stop_and_join(1) is True
+    assert runtime.is_running is False
+
+
 class FakeConfig:
     def __init__(self, accounts):
         self.accounts = list(accounts)

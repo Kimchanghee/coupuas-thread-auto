@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
     QScrollArea, QTabBar, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl, QTimer
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QDesktopServices
 
 from src.ai_provider import (
@@ -5967,7 +5967,21 @@ class MainWindow(QMainWindow):
             return
         self._update_installing = True
         self.update_btn.setEnabled(False)
-        marker = self._prepare_update_resume(update_info) if resume_after else None
+        try:
+            marker = self._prepare_update_resume(update_info) if resume_after else None
+        except Exception as exc:
+            logger.exception("Failed to preserve work before update")
+            self._update_installing = False
+            self.update_btn.setEnabled(True)
+            saved_marker = self._update_resume_store.load()
+            if saved_marker:
+                self._resume_update_work(saved_marker)
+            show_error(
+                self,
+                "업데이트 준비 실패",
+                f"현재 작업을 안전하게 저장하지 못해 업데이트를 시작하지 않았습니다.\n{exc}",
+            )
+            return
 
         def worker():
             result = {"success": False, "resume_marker": marker, "message": "업데이트에 실패했습니다."}
@@ -5975,10 +5989,7 @@ class MainWindow(QMainWindow):
                 from src.auto_updater import AutoUpdater
 
                 runtime = getattr(self, "_multi_account_runtime", None)
-                deadline = time.monotonic() + 30
-                while runtime is not None and runtime.is_running and time.monotonic() < deadline:
-                    time.sleep(0.2)
-                if runtime is not None and runtime.is_running:
+                if runtime is not None and not runtime.stop_and_join(30):
                     raise RuntimeError("작업 중단이 완료되지 않아 업데이트를 취소했습니다.")
 
                 updater = AutoUpdater(self._app_version)
@@ -6014,8 +6025,26 @@ class MainWindow(QMainWindow):
         self._update_installing = False
         self.update_btn.setEnabled(True)
         if data.get("resume_marker"):
-            self._resume_update_work(data.get("resume_marker"))
+            self._resume_update_work_when_ready(data.get("resume_marker"))
         show_error(self, "업데이트 실패", str(data.get("message") or "잠시 후 다시 시도해 주세요."))
+
+    def _resume_update_work_when_ready(self, marker: dict, retries: int = 120) -> bool:
+        """Resume only after the previous upload worker has fully exited."""
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None and bool(getattr(runtime, "is_running", False)):
+            if retries <= 0:
+                show_warning(
+                    self,
+                    "작업 재개 대기",
+                    "기존 작업의 종료가 지연되어 재개 정보를 보존했습니다. 프로그램을 다시 실행하면 자동으로 이어집니다.",
+                )
+                return False
+            QTimer.singleShot(
+                1000,
+                lambda: self._resume_update_work_when_ready(marker, retries - 1),
+            )
+            return False
+        return self._resume_update_work(marker)
 
     def _resume_after_completed_update(self) -> None:
         marker = self._update_resume_store.load()
@@ -6030,11 +6059,13 @@ class MainWindow(QMainWindow):
                 "업데이트가 완료되지 않아 기존 버전으로 작업을 이어갑니다. 상단 업데이트 버튼이 표시되면 다시 시도해 주세요.",
             )
 
-    def _resume_update_work(self, marker: dict) -> None:
+    def _resume_update_work(self, marker: dict) -> bool:
         if not isinstance(marker, dict):
-            return
+            return False
         started = []
         runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None and bool(getattr(runtime, "is_running", False)):
+            return False
         try:
             if runtime is not None:
                 runtime.refresh_accounts()
@@ -6069,9 +6100,14 @@ class MainWindow(QMainWindow):
                 self.signals.status.emit("업데이트 완료 · 작업 자동 재개")
         except Exception:
             logger.exception("Failed to resume work after update")
-            show_warning(self, "작업 재개 확인", "업데이트는 완료됐지만 자동 재개에 실패했습니다. 대기열에서 다시 시작해 주세요.")
-        finally:
-            self._update_resume_store.clear()
+            show_warning(
+                self,
+                "작업 재개 확인",
+                "저장된 작업의 자동 재개에 실패했습니다. 재개 정보는 보존했으니 프로그램을 다시 실행하거나 대기열에서 시작해 주세요.",
+            )
+            return False
+        self._update_resume_store.clear()
+        return True
 
     def open_tutorial(self):
         logger.info("튜토리얼 열기 호출")

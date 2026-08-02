@@ -34,7 +34,12 @@ test("release notices expose the installer and ignore unpublished builds", () =>
   assert.equal(payload.posts.length, 1);
   assert.equal(payload.latest.version, "3.0.54");
   assert.equal(payload.latest.downloadUrl, "https://github.com/example/setup.exe");
+  assert.equal(
+    payload.latestDownloadUrl,
+    "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
+  );
   assert.match(payload.latest.body, /공지사항/);
+  assert.equal(payload.latest.summary, "공지사항을 추가했습니다.");
 });
 
 test("only owner-authored event issues are published", () => {
@@ -88,4 +93,17 @@ test("event CTA rejects non-HTTPS links", () => {
     },
   ]);
   assert.equal(payload.posts[0].ctaUrl, null);
+});
+
+test("event authorization requires the immutable owner id", () => {
+  const payload = combineNoticePayload([], [
+    {
+      number: 4,
+      title: "[EVENT] login spoof",
+      body: "### 한 줄 소개\n노출되면 안 됩니다.",
+      user: { id: 123, login: "Kimchanghee" },
+      labels: [{ name: "event" }],
+    },
+  ]);
+  assert.equal(payload.posts.length, 0);
 });

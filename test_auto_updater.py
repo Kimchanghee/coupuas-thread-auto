@@ -111,6 +111,46 @@ def test_check_for_updates_prefers_installer_asset(monkeypatch):
     assert info["checksum_asset_name"] == "CoupangThreadAutoSetup.exe.sha256"
 
 
+def test_check_for_updates_accepts_official_github_actions_release_author():
+    release_payload = {
+        "tag_name": "v3.0.56",
+        "author": {
+            "id": auto_updater.AutoUpdater.GITHUB_ACTIONS_BOT_ID,
+            "login": "github-actions[bot]",
+        },
+        "published_at": "2026-08-02T00:00:00Z",
+        "assets": [
+            {
+                "name": "CoupangThreadAutoSetup.exe",
+                "browser_download_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/download/v3.0.56/CoupangThreadAutoSetup.exe",
+                "size": 100,
+            },
+            {
+                "name": "CoupangThreadAutoSetup.exe.sha256",
+                "browser_download_url": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/download/v3.0.56/CoupangThreadAutoSetup.exe.sha256",
+                "size": 64,
+            },
+        ],
+    }
+    updater = auto_updater.AutoUpdater("3.0.55")
+    updater.session = _ReleaseSession(release_payload)
+
+    info = updater.check_for_updates()
+
+    assert info["version"] == "3.0.56"
+    assert info["asset_name"] == "CoupangThreadAutoSetup.exe"
+
+
+def test_release_author_requires_matching_trusted_id_and_login():
+    updater = auto_updater.AutoUpdater("3.0.55")
+    assert updater._verify_release_author(
+        {"author": {"id": auto_updater.AutoUpdater.GITHUB_ACTIONS_BOT_ID, "login": "attacker"}}
+    ) is False
+    assert updater._verify_release_author(
+        {"author": {"id": 123, "login": "github-actions[bot]"}}
+    ) is False
+
+
 def test_installer_update_uses_detached_runner_and_relaunches_app(monkeypatch, tmp_path):
     installer = tmp_path / "CoupangThreadAutoSetup.exe"
     installer.write_bytes(b"signed-installer-placeholder")
@@ -124,10 +164,14 @@ def test_installer_update_uses_detached_runner_and_relaunches_app(monkeypatch, t
     monkeypatch.setattr(auto_updater.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)))
 
     updater = auto_updater.AutoUpdater("3.0.54")
-    assert updater._run_installer_update(str(installer)) is True
+    expected_sha = "a" * 64
+    updater.trusted_thumbprints = {"B" * 40}
+    assert updater._run_installer_update(str(installer), expected_sha) is True
     args, kwargs = calls[0]
     assert args[:5] == ["powershell", "-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File"]
     assert "-AppExe" in args
+    assert args[args.index("-ExpectedSha256") + 1] == expected_sha
+    assert args[args.index("-TrustedThumbprints") + 1] == "B" * 40
     assert str(installer) in args
     assert kwargs["shell"] is False
     assert "creationflags" in kwargs
@@ -139,7 +183,23 @@ def test_installer_runner_waits_installs_relaunches_and_self_cleans(tmp_path, mo
     path = Path(updater._create_installer_update_script())
     content = path.read_text(encoding="utf-8")
     assert "Get-Process -Id $ParentPid" in content
+    assert "[System.IO.File]::Open" in content
+    assert "Get-FileHash -LiteralPath $Installer" in content
+    assert "Get-AuthenticodeSignature -FilePath $Installer" in content
+    assert "Installer signer thumbprint is not trusted" in content
     assert "Start-Process -FilePath $Installer" in content
     assert "Start-Process -FilePath $AppExe" in content
     assert "If setup fails, reopen the existing binary" in content
     assert "Remove-Item -LiteralPath $PSCommandPath" in content
+
+
+def test_standalone_runner_locks_update_during_verification(tmp_path, monkeypatch):
+    monkeypatch.setattr(auto_updater.AutoUpdater, "_secure_update_temp_dir", staticmethod(lambda: tmp_path))
+    updater = auto_updater.AutoUpdater("3.0.54")
+    path = Path(updater._create_update_script())
+    content = path.read_text(encoding="utf-8")
+
+    assert "$updateLock = [System.IO.File]::Open" in content
+    assert "[System.IO.FileShare]::Read" in content
+    assert "Get-FileHash -LiteralPath $UpdateFile" in content
+    assert "$updateLock.Dispose()" in content

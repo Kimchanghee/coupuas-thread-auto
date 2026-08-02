@@ -22,7 +22,12 @@ class AutoUpdater:
 
     GITHUB_OWNER = "Kimchanghee"
     GITHUB_OWNER_ID = 9594198
+    GITHUB_ACTIONS_BOT_ID = 41898282
     GITHUB_REPO = "coupuas-thread-auto"
+    TRUSTED_RELEASE_AUTHORS = {
+        (GITHUB_OWNER_ID, GITHUB_OWNER.lower()),
+        (GITHUB_ACTIONS_BOT_ID, "github-actions[bot]"),
+    }
 
     API_BASE = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
     RELEASES_URL = f"{API_BASE}/releases/latest"
@@ -153,7 +158,8 @@ class AutoUpdater:
     def _secure_update_temp_dir() -> Path:
         update_dir = Path.home() / ".shorts_thread_maker" / "updates"
         update_dir.mkdir(parents=True, exist_ok=True)
-        secure_dir_permissions(update_dir)
+        if not secure_dir_permissions(update_dir):
+            raise PermissionError("Unable to secure the update directory")
         return update_dir
 
     @staticmethod
@@ -180,13 +186,9 @@ class AutoUpdater:
         except (TypeError, ValueError):
             author_id = 0
         author_login = str(author.get("login", "")).strip().lower()
-        if not author_id and not author_login:
+        if not author_id or not author_login:
             return False
-        if author_id and author_id != int(self.GITHUB_OWNER_ID):
-            return False
-        if author_login and author_login != self.GITHUB_OWNER.lower():
-            return False
-        return True
+        return (author_id, author_login) in self.TRUSTED_RELEASE_AUTHORS
 
     def _is_version_allowed(self, latest_version: str) -> bool:
         latest = str(latest_version or "").lstrip("v").strip()
@@ -339,7 +341,9 @@ class AutoUpdater:
                 delete=False,
             ) as tmp:
                 temp_file = tmp.name
-            secure_file_permissions(temp_file)
+            if not secure_file_permissions(temp_file):
+                Path(temp_file).unlink(missing_ok=True)
+                raise PermissionError("Unable to secure the downloaded update")
 
             response = self.session.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
@@ -406,7 +410,7 @@ class AutoUpdater:
 
             update_asset_name = str(asset_name or self.last_update_asset_name or "").strip()
             if update_asset_name.lower() == self.INSTALLER_ASSET_NAME.lower():
-                return self._run_installer_update(update_file)
+                return self._run_installer_update(update_file, expected_sha)
 
             current_exe = sys.executable
 
@@ -449,7 +453,7 @@ class AutoUpdater:
             print(f"업데이트 설치 오류: {e}")
             return False
 
-    def _run_installer_update(self, installer_path: str) -> bool:
+    def _run_installer_update(self, installer_path: str, expected_sha256: str) -> bool:
         if os.name != "nt":
             print("설치형 업데이트는 Windows에서만 지원됩니다.")
             return False
@@ -472,6 +476,12 @@ class AutoUpdater:
                 str(sys.executable),
                 "-ParentPid",
                 str(os.getpid()),
+                "-ExpectedSha256",
+                str(expected_sha256),
+                "-TrustedThumbprints",
+                ",".join(sorted(self.trusted_thumbprints)),
+                "-TrustedPublishers",
+                ",".join(sorted(self.trusted_publishers)),
             ],
             shell=False,
             close_fds=True,
@@ -487,9 +497,42 @@ class AutoUpdater:
         script_content = f"""param(
     [Parameter(Mandatory=$true)][string]$Installer,
     [Parameter(Mandatory=$true)][string]$AppExe,
-    [Parameter(Mandatory=$true)][int]$ParentPid
+    [Parameter(Mandatory=$true)][int]$ParentPid,
+    [Parameter(Mandatory=$true)][string]$ExpectedSha256,
+    [string]$TrustedThumbprints = '',
+    [string]$TrustedPublishers = ''
 )
 $ErrorActionPreference = 'Stop'
+$installerLock = $null
+
+function Normalize-Identity([string]$value) {{
+    if (-not $value) {{ return '' }}
+    return [regex]::Replace($value.ToLowerInvariant(), '[^a-z0-9]+', '')
+}}
+
+function Parse-TrustedList([string]$value, [bool]$normalize) {{
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (-not $value) {{ return $set }}
+    foreach ($item in $value.Split(',')) {{
+        $candidate = $item.Trim()
+        if ($normalize) {{ $candidate = Normalize-Identity($candidate) }}
+        else {{ $candidate = $candidate.ToUpperInvariant() }}
+        if ($candidate) {{ [void]$set.Add($candidate) }}
+    }}
+    return $set
+}}
+
+function Get-SubjectIdentities([string]$subject) {{
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    if (-not $subject) {{ return $set }}
+    $matches = [regex]::Matches($subject, '(?:^|,\\s*)(CN|O|OU)\\s*=\\s*([^,]+)')
+    foreach ($match in $matches) {{
+        $normalized = Normalize-Identity($match.Groups[2].Value)
+        if ($normalized) {{ [void]$set.Add($normalized) }}
+    }}
+    return $set
+}}
+
 try {{
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) -and (Get-Date) -lt $deadline) {{
@@ -498,6 +541,51 @@ try {{
     if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {{
         throw 'Application did not stop before update deadline.'
     }}
+
+    # Hold a read handle that denies write/delete sharing from verification through setup exit.
+    $installerLock = [System.IO.File]::Open(
+        $Installer,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read
+    )
+    $actualHash = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $ExpectedSha256.ToLowerInvariant()) {{
+        throw 'Installer checksum mismatch.'
+    }}
+
+    $signature = Get-AuthenticodeSignature -FilePath $Installer
+    $certificate = $signature.SignerCertificate
+    if (-not $certificate) {{ throw 'Installer signer certificate is missing.' }}
+    $thumbprint = $certificate.Thumbprint.ToUpperInvariant()
+    $trustedThumbSet = Parse-TrustedList $TrustedThumbprints $false
+    if ($trustedThumbSet.Count -eq 0 -or -not $trustedThumbSet.Contains($thumbprint)) {{
+        throw 'Installer signer thumbprint is not trusted.'
+    }}
+    $trustedPublisherSet = Parse-TrustedList $TrustedPublishers $true
+    if ($trustedPublisherSet.Count -gt 0) {{
+        $publisherMatch = $false
+        foreach ($subjectId in (Get-SubjectIdentities $certificate.Subject)) {{
+            if ($trustedPublisherSet.Contains($subjectId)) {{
+                $publisherMatch = $true
+                break
+            }}
+        }}
+        if (-not $publisherMatch) {{ throw 'Installer signer publisher is not trusted.' }}
+    }}
+
+    $status = $signature.Status.ToString()
+    if ($status -ne 'Valid') {{
+        $statusMessage = [string]$signature.StatusMessage
+        $chainOnly = $status -eq 'NotTrusted' -or (
+            $status -eq 'UnknownError' -and
+            $statusMessage -match '(?i)not trusted|root certificate|trust provider'
+        )
+        if (-not $chainOnly) {{
+            throw ('Installer signature status is not allowed: ' + $status)
+        }}
+    }}
+
     $arguments = @({installer_args})
     $process = Start-Process -FilePath $Installer -ArgumentList $arguments -Wait -PassThru
     if ($process.ExitCode -notin @(0, 3010)) {{
@@ -508,6 +596,7 @@ try {{
     # If setup fails, reopen the existing binary so saved work can resume.
     if (Test-Path -LiteralPath $AppExe) {{ Start-Process -FilePath $AppExe }}
 }} finally {{
+    if ($installerLock) {{ $installerLock.Dispose() }}
     Remove-Item -LiteralPath $Installer -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }}
@@ -521,7 +610,8 @@ try {{
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as script_file:
                 script_file.write(script_content)
-            secure_file_permissions(script_path)
+            if not secure_file_permissions(script_path):
+                raise PermissionError("Unable to secure the installer update script")
             return script_path
         except Exception:
             try:
@@ -541,6 +631,7 @@ try {{
     [string]$TrustedPublishers = ''
 )
 $ErrorActionPreference = 'Stop'
+$updateLock = $null
 
 function Normalize-Identity([string]$value) {
     if (-not $value) { return '' }
@@ -577,6 +668,12 @@ try {
     if (-not (Test-Path -LiteralPath $UpdateFile)) {
         throw 'Update file is missing.'
     }
+    $updateLock = [System.IO.File]::Open(
+        $UpdateFile,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read
+    )
     if ($ExpectedSha256) {
         $actualHash = (Get-FileHash -LiteralPath $UpdateFile -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actualHash -ne $ExpectedSha256.ToLowerInvariant()) {
@@ -662,6 +759,9 @@ try {
     } catch {
     }
 } finally {
+    if ($updateLock) {
+        $updateLock.Dispose()
+    }
     if ($tempReplacement -and (Test-Path -LiteralPath $tempReplacement)) {
         Remove-Item -LiteralPath $tempReplacement -Force -ErrorAction SilentlyContinue
     }
@@ -678,7 +778,8 @@ try {
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as script_file:
                 script_file.write(script_content)
-            secure_file_permissions(script_path)
+            if not secure_file_permissions(script_path):
+                raise PermissionError("Unable to secure the update script")
             return script_path
         except Exception:
             try:

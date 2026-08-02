@@ -2,20 +2,34 @@ const GITHUB_OWNER = "Kimchanghee";
 const GITHUB_OWNER_ID = 9594198;
 const GITHUB_REPO = "coupuas-thread-auto";
 const API_ROOT = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}`;
+const LATEST_INSTALLER_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/CoupangThreadAutoSetup.exe`;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 let cachedPayload = null;
 let cachedAt = 0;
+let cachedReleases = [];
+let cachedIssues = [];
+let inFlightPayload = null;
 
 function text(value) {
   return String(value ?? "").trim();
 }
 
-function firstUsefulLine(body) {
-  return text(body)
+function firstUsefulLine(body, title = "") {
+  const normalizedTitle = text(title).toLocaleLowerCase();
+  const lines = text(body)
     .split(/\r?\n/)
-    .map((line) => line.replace(/^#{1,6}\s+/, "").replace(/^[-*]\s+/, "").trim())
-    .find((line) => line && !line.startsWith("<!--")) || "자세한 내용을 확인해 주세요.";
+    .map((raw) => ({
+      heading: /^#{1,6}\s+/.test(raw.trim()),
+      value: raw.replace(/^#{1,6}\s+/, "").replace(/^[-*]\s+/, "").trim(),
+    }))
+    .filter(({ value }) => value && !value.startsWith("<!--"));
+  const useful = lines.find(({ heading, value }) => {
+    const normalized = value.toLocaleLowerCase();
+    return !heading && normalized !== normalizedTitle &&
+      normalized !== "이번 버전에 포함된 주요 변경 사항입니다.";
+  });
+  return useful?.value || lines[0]?.value || "자세한 내용을 확인해 주세요.";
 }
 
 function findAsset(assets, name) {
@@ -47,23 +61,31 @@ function releaseToPost(release) {
     kind: "release",
     badge: "업데이트",
     title: text(release?.name) || `Thread Auto v${version}`,
-    summary: firstUsefulLine(body),
+    summary: firstUsefulLine(body, text(release?.name)),
     body,
     version,
     publishedAt: release?.published_at || release?.created_at || null,
     sourceUrl: release?.html_url || null,
     downloadUrl:
       installer?.browser_download_url ||
-      `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest/download/CoupangThreadAutoSetup.exe`,
+      LATEST_INSTALLER_URL,
     checksumUrl: checksum?.browser_download_url || null,
     pinned: false,
   };
 }
 
+function eventDate(value, endOfDay = false) {
+  const normalized = text(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return Date.parse(`${normalized}T${endOfDay ? "23:59:59.999" : "00:00:00"}+09:00`);
+  }
+  return Date.parse(normalized);
+}
+
 function eventStatus(startsAt, endsAt) {
   const now = Date.now();
-  const start = Date.parse(startsAt || "");
-  const end = Date.parse(endsAt || "");
+  const start = eventDate(startsAt);
+  const end = eventDate(endsAt, true);
   if (Number.isFinite(end) && end < now) return "종료";
   if (Number.isFinite(start) && start > now) return "예정";
   return "진행 중";
@@ -118,7 +140,7 @@ export function combineNoticePayload(releases, issues) {
   const eventPosts = (Array.isArray(issues) ? issues : [])
     .filter((issue) => {
       if (issue?.pull_request) return false;
-      const ownerMatch = Number(issue?.user?.id) === GITHUB_OWNER_ID || text(issue?.user?.login).toLowerCase() === GITHUB_OWNER.toLowerCase();
+      const ownerMatch = Number(issue?.user?.id) === GITHUB_OWNER_ID;
       const eventLabel = (issue?.labels || []).some((label) => text(label?.name).toLowerCase() === "event");
       return ownerMatch && eventLabel;
     })
@@ -130,6 +152,7 @@ export function combineNoticePayload(releases, issues) {
   });
   return {
     latest: releasePosts[0] || null,
+    latestDownloadUrl: LATEST_INSTALLER_URL,
     posts,
     eventAuthorUrl: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/issues/new?template=event-post.yml`,
     generatedAt: new Date().toISOString(),
@@ -138,19 +161,24 @@ export function combineNoticePayload(releases, issues) {
 
 async function loadPayload() {
   if (cachedPayload && Date.now() - cachedAt < CACHE_TTL_MS) return cachedPayload;
-  const [releaseResult, issueResult] = await Promise.allSettled([
-    githubJson("/releases?per_page=100"),
-    githubJson("/issues?state=all&labels=event&per_page=100&sort=created&direction=desc"),
-  ]);
-  if (releaseResult.status === "rejected" && issueResult.status === "rejected") {
-    throw releaseResult.reason;
+  if (inFlightPayload) return inFlightPayload;
+  inFlightPayload = (async () => {
+    const [releaseResult, issueResult] = await Promise.allSettled([
+      githubJson("/releases?per_page=100"),
+      githubJson("/issues?state=all&labels=event&per_page=100&sort=created&direction=desc"),
+    ]);
+    if (releaseResult.status === "fulfilled") cachedReleases = releaseResult.value;
+    if (issueResult.status === "fulfilled") cachedIssues = issueResult.value;
+    if (!cachedReleases.length) throw releaseResult.reason || new Error("No releases available");
+    cachedPayload = combineNoticePayload(cachedReleases, cachedIssues);
+    cachedAt = Date.now();
+    return cachedPayload;
+  })();
+  try {
+    return await inFlightPayload;
+  } finally {
+    inFlightPayload = null;
   }
-  cachedPayload = combineNoticePayload(
-    releaseResult.status === "fulfilled" ? releaseResult.value : [],
-    issueResult.status === "fulfilled" ? issueResult.value : [],
-  );
-  cachedAt = Date.now();
-  return cachedPayload;
 }
 
 export default async function handler(req, res) {
@@ -167,7 +195,11 @@ export default async function handler(req, res) {
     if (requestedId) {
       const post = payload.posts.find((item) => item.id === requestedId);
       if (!post) return res.status(404).json({ error: "Post not found" });
-      return res.status(200).json({ post, latest: payload.latest });
+      return res.status(200).json({
+        post,
+        latest: payload.latest,
+        latestDownloadUrl: payload.latestDownloadUrl,
+      });
     }
     return res.status(200).json(payload);
   } catch (error) {

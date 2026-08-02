@@ -5,11 +5,12 @@ async function refreshLatestRelease() {
     const payload = await response.json();
     const latest = payload.latest;
     if (!latest) return;
+    const latestDownloadUrl = payload.latestDownloadUrl || latest.downloadUrl;
     document.querySelectorAll("[data-latest-version]").forEach((node) => {
       node.textContent = `v${latest.version} · 최신 버전`;
     });
     document.querySelectorAll("[data-download-link]").forEach((node) => {
-      if (latest.downloadUrl) node.href = latest.downloadUrl;
+      if (latestDownloadUrl) node.href = latestDownloadUrl;
     });
     const list = document.getElementById("home-notice-list");
     if (!list) return;

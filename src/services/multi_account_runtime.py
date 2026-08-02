@@ -314,6 +314,22 @@ class MultiAccountRuntime:
             store.request_stop(True)
         self._coordinator.request_stop()
 
+    def wait_until_stopped(self, timeout: float) -> bool:
+        """Wait for the active worker without holding the runtime lock."""
+        with self._lock:
+            worker = self._worker_thread
+        if worker is None:
+            return True
+        if worker is threading.current_thread():
+            return False
+        worker.join(max(float(timeout), 0.0))
+        return not worker.is_alive()
+
+    def stop_and_join(self, timeout: float) -> bool:
+        """Request a cooperative stop and confirm the worker has exited."""
+        self.stop_all()
+        return self.wait_until_stopped(timeout)
+
     def _ensure_worker(self) -> None:
         with self._lock:
             if self._worker_thread is not None and self._worker_thread.is_alive():

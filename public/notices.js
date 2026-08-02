@@ -114,10 +114,11 @@ async function loadBoard() {
     if (!response.ok) throw new Error(String(response.status));
     const data = await response.json();
     const latest = data.latest || null;
+    const latestDownloadUrl = data.latestDownloadUrl || latest?.downloadUrl;
     if (latest?.version) document.querySelectorAll("[data-latest-version]").forEach((node) => { node.textContent = `v${latest.version}`; });
-    document.querySelectorAll("[data-download-link]").forEach((node) => { if (latest?.downloadUrl) node.href = latest.downloadUrl; });
+    document.querySelectorAll("[data-download-link]").forEach((node) => { if (latestDownloadUrl) node.href = latestDownloadUrl; });
     if (id) { renderDetail(data.post); return; }
-    state.latest = latest;
+    state.latest = latest ? { ...latest, downloadUrl: latestDownloadUrl } : null;
     state.posts = Array.isArray(data.posts) ? data.posts : [];
     const author = document.getElementById("event-author-link");
     if (author && data.eventAuthorUrl) author.href = data.eventAuthorUrl;

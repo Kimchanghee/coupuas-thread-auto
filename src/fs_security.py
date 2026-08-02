@@ -37,13 +37,13 @@ def _resolve_current_user_principal() -> str:
     return username
 
 
-def _apply_windows_acl(path: Path, is_dir: bool) -> None:
+def _apply_windows_acl(path: Path, is_dir: bool) -> bool:
     if not path.exists():
-        return
+        return False
 
     principal = _resolve_current_user_principal()
     if not principal:
-        return
+        return False
 
     user_acl = f"{principal}:(OI)(CI)F" if is_dir else f"{principal}:(F)"
     cmd = [
@@ -53,44 +53,46 @@ def _apply_windows_acl(path: Path, is_dir: bool) -> None:
         "/grant:r",
         user_acl,
         "/grant:r",
-        "SYSTEM:(F)",
+        "*S-1-5-18:(F)",
         "/grant:r",
-        "Administrators:(F)",
+        "*S-1-5-32-544:(F)",
     ]
     try:
-        subprocess.run(
+        completed = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=15,
             check=False,
         )
+        return completed.returncode == 0
     except Exception:
-        # Permission hardening is best-effort.
-        pass
+        return False
 
 
-def secure_dir_permissions(path: PathLike) -> None:
+def secure_dir_permissions(path: PathLike) -> bool:
     target = _to_path(path)
     if not target.exists():
-        return
+        return False
     try:
         if os.name == "nt":
-            _apply_windows_acl(target, is_dir=True)
+            return _apply_windows_acl(target, is_dir=True)
         else:
             os.chmod(target, 0o700)
+            return True
     except Exception:
-        pass
+        return False
 
 
-def secure_file_permissions(path: PathLike) -> None:
+def secure_file_permissions(path: PathLike) -> bool:
     target = _to_path(path)
     if not target.exists():
-        return
+        return False
     try:
         if os.name == "nt":
-            _apply_windows_acl(target, is_dir=False)
+            return _apply_windows_acl(target, is_dir=False)
         else:
             os.chmod(target, 0o600)
+            return True
     except Exception:
-        pass
+        return False
