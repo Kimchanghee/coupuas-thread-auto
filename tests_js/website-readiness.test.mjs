@@ -7,6 +7,7 @@ const read = (name) => fs.readFileSync(new URL(`../public/${name}`, import.meta.
 test("landing page publishes search, social, legal, and real purchase guidance", () => {
   const html = read("index.html");
   assert.match(html, /rel="canonical"/);
+  assert.match(html, /name="google-site-verification" content="[A-Za-z0-9_-]+"/);
   assert.match(html, /property="og:image"/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /앱에서 월 정기권 결제/);
