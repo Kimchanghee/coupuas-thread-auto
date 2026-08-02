@@ -95,6 +95,22 @@ function renderDetail(post) {
   document.getElementById("board-list-view").hidden = true;
   document.getElementById("board-detail-view").hidden = false;
   document.title = `${post.title} · Thread Auto`;
+  const description = document.querySelector('meta[name="description"]');
+  if (description) description.content = post.summary || "Thread Auto 공지사항";
+  const canonical = document.querySelector('link[rel="canonical"]');
+  const detailCanonical = `${location.origin}/notices?id=${encodeURIComponent(post.id)}`;
+  if (canonical) canonical.href = detailCanonical;
+  const socialValues = {
+    'meta[property="og:title"]': `${post.title} · Thread Auto`,
+    'meta[property="og:description"]': post.summary || "Thread Auto 공지사항",
+    'meta[property="og:url"]': detailCanonical,
+    'meta[name="twitter:title"]': `${post.title} · Thread Auto`,
+    'meta[name="twitter:description"]': post.summary || "Thread Auto 공지사항",
+  };
+  for (const [selector, value] of Object.entries(socialValues)) {
+    const node = document.querySelector(selector);
+    if (node) node.content = value;
+  }
   const header = el("header", {}, [badge(post), el("h1", { text: post.title }), el("div", { className: "article-meta", text: `${formatDate(post.publishedAt)}${post.version ? ` · v${post.version}` : ""}` })]);
   const body = el("div", { className: "article-body" });
   body.append(renderBody(post.body));

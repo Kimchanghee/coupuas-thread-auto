@@ -7,8 +7,47 @@
       name="description"
       content="상품 링크 하나로 Threads 문안 생성부터 여러 계정 업로드까지 자동화하는 Windows 앱, Thread Auto."
     />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+    <link rel="canonical" href="https://coupuas-thread-auto-three.vercel.app/" />
+    <meta property="og:locale" content="ko_KR" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Thread Auto" />
+    <meta property="og:title" content="Thread Auto — 상품 링크 하나로 Threads 운영 자동화" />
+    <meta property="og:description" content="관리형 AI 문안 4종, 계정별 대기열, 자동 업로드를 하나의 Windows 앱에서 시작하세요." />
+    <meta property="og:url" content="https://coupuas-thread-auto-three.vercel.app/" />
+    <meta property="og:image" content="https://coupuas-thread-auto-three.vercel.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Thread Auto — 링크 하나로 Threads 운영을 가볍게" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Thread Auto — Threads 상품 운영 자동화" />
+    <meta name="twitter:description" content="상품 링크 분석부터 4가지 문안, 계정별 대기열과 업로드까지." />
+    <meta name="twitter:image" content="https://coupuas-thread-auto-three.vercel.app/og-image.png" />
     <meta name="theme-color" content="#f7f4ee" />
     <title>Thread Auto — 상품 링크 하나로 Threads 운영을 가볍게</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Thread Auto",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Windows 10, Windows 11",
+        "description": "상품 링크 분석, Threads 문안 4종 생성, 계정별 대기열과 업로드를 지원하는 Windows 앱",
+        "url": "https://coupuas-thread-auto-three.vercel.app/",
+        "downloadUrl": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
+        "softwareHelp": "https://coupuas-thread-auto-three.vercel.app/support",
+        "publisher": {
+          "@type": "Organization",
+          "name": "와이엠",
+          "url": "https://coupuas-thread-auto-three.vercel.app/"
+        },
+        "offers": [
+          { "@type": "Offer", "name": "무료", "price": "0", "priceCurrency": "KRW" },
+          { "@type": "Offer", "name": "7일 이용권", "price": "19000", "priceCurrency": "KRW" },
+          { "@type": "Offer", "name": "월 정기 이용권", "price": "49000", "priceCurrency": "KRW" }
+        ]
+      }
+    </script>
     <style>
       :root {
         color-scheme: light;
@@ -167,6 +206,7 @@
       .plan-list { flex: 1; margin: 18px 0 28px; padding: 18px 0 0; border-top: 1px solid var(--line); list-style: none; }
       .plan-list li { margin-bottom: 12px; padding-left: 23px; position: relative; color: #4e4a44; }
       .plan-list li::before { content: "✓"; position: absolute; left: 0; color: var(--sage); font-weight: 900; }
+      .billing-note { margin: 22px 0 0; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: #eee9e0; color: var(--muted); line-height: 1.7; }
 
       .security-wrap { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 64px; align-items: center; padding: 48px; border-radius: 24px; background: var(--sage); color: white; }
       .security-wrap .section-kicker { color: #f2cc67; }
@@ -262,7 +302,7 @@
             <h1>링크 하나로,<br />운영은 가볍게.</h1>
             <p class="hero-copy">쿠팡 상품을 분석해 서로 다른 네 가지 문안을 만들고, 여러 Threads 계정의 대기열과 업로드 이력까지 한곳에서 관리하세요.</p>
             <div class="hero-actions">
-              <a class="button accent" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료로 시작하기 <span aria-hidden="true">→</span></a>
+              <a class="button accent" data-download-link data-analytics="hero-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료로 시작하기 <span aria-hidden="true">→</span></a>
               <a class="button ghost" href="#workflow">작동 방식 보기</a>
             </div>
             <ul class="proof" aria-label="제품 장점">
@@ -324,10 +364,11 @@
           <h2 class="section-title">필요한 만큼만 시작하세요.</h2>
           <p class="section-lead">처음에는 무료로 확인하고, 운영 주기와 계정 수에 맞는 이용권을 선택할 수 있습니다.</p>
           <div class="pricing-grid">
-            <article class="price-card"><div class="plan-tag">부담 없이 체험</div><h3>무료</h3><div class="price">0원 <small>/ 월</small></div><p class="price-copy">기본 자동화 흐름을 직접 확인해보세요.</p><ul class="plan-list"><li>매월 5회 작업</li><li>관리형 AI 문안 4종</li><li>기본 계정 운영</li></ul><a class="button ghost" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료 다운로드</a></article>
-            <article class="price-card"><div class="plan-tag">짧고 집중적인 운영</div><h3>주간 이용권</h3><div class="price">19,000원 <small>/ 7일</small></div><p class="price-copy">캠페인이나 집중 업로드 기간에 알맞습니다.</p><ul class="plan-list"><li>7일 동안 확장된 작업량</li><li>프로그램 내 Threads 계정 1개</li><li>대기열·업로드 이력 관리</li></ul><a class="button ghost" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new?title=%EC%A3%BC%EA%B0%84%20%EC%9D%B4%EC%9A%A9%EA%B6%8C%20%EB%AC%B8%EC%9D%98">주간 이용권 문의</a></article>
-            <article class="price-card featured"><div class="plan-tag">가장 꾸준한 선택 · 추천</div><h3>월간 이용권</h3><div class="price">49,000원 <small>/ 30일</small></div><p class="price-copy">매일 꾸준히 여러 계정을 운영할 때 알맞습니다.</p><ul class="plan-list"><li>30일 동안 확장된 작업량</li><li>프로그램 내 Threads 계정 최대 10개</li><li>우선적인 운영 문의</li></ul><a class="button accent" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new?title=%EC%9B%94%EA%B0%84%20%EC%9D%B4%EC%9A%A9%EA%B6%8C%20%EB%AC%B8%EC%9D%98">월간 이용권 문의</a></article>
+            <article class="price-card"><div class="plan-tag">부담 없이 체험</div><h3>무료</h3><div class="price">0원 <small>/ 월</small></div><p class="price-copy">기본 자동화 흐름을 직접 확인해보세요.</p><ul class="plan-list"><li>매월 5회 작업</li><li>관리형 AI 문안 4종</li><li>기본 계정 운영</li></ul><a class="button ghost" data-download-link data-analytics="pricing-free-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료 다운로드</a></article>
+            <article class="price-card"><div class="plan-tag">짧고 집중적인 운영</div><h3>7일 이용권</h3><div class="price">19,000원 <small>/ 7일</small></div><p class="price-copy">캠페인이나 집중 업로드 기간에 알맞습니다.</p><ul class="plan-list"><li>결제 승인 시점부터 7일</li><li>Threads 계정 1개</li><li>대기열·업로드 이력 관리</li></ul><a class="button ghost" data-download-link data-analytics="pricing-week-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 7일권 결제</a></article>
+            <article class="price-card featured"><div class="plan-tag">가장 꾸준한 선택 · 추천</div><h3>월 정기 이용권</h3><div class="price">49,000원 <small>/ 30일</small></div><p class="price-copy">매일 꾸준히 여러 계정을 운영할 때 알맞습니다.</p><ul class="plan-list"><li>30일마다 정기결제</li><li>Threads 계정 최대 10개</li><li>다음 결제 전 언제든 해지 요청</li></ul><a class="button accent" data-download-link data-analytics="pricing-month-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 월 정기권 결제</a></article>
           </div>
+          <p class="billing-note"><strong>결제 방법</strong> · 앱을 설치해 회원가입·로그인한 뒤 <strong>설정 → 구독 결제</strong>에서 휴대폰 번호를 입력하면 PayApp 보안 결제창이 열립니다. 승인된 이용 기간과 계정 한도는 서버에서 적용되며, 자세한 철회·해지 기준은 <a href="/refund">환불·해지 정책</a>에서 확인할 수 있습니다.</p>
         </div>
       </section>
 
@@ -353,14 +394,15 @@
         <div class="shell final-panel">
           <h2>다음 Threads 게시물,<br />링크 하나로 시작하세요.</h2>
           <p>Windows 설치 파일을 내려받고 매월 5회의 무료 작업으로 내 운영 방식에 맞는지 확인해보세요.</p>
-          <div class="final-actions"><a class="button" data-download-link href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows용 다운로드</a><a class="button ghost" href="https://github.com/Kimchanghee/coupuas-thread-auto/issues/new">문의하기</a></div>
+          <div class="final-actions"><a class="button" data-download-link data-analytics="footer-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">Windows용 다운로드</a><a class="button ghost" href="/support">구매·이용 안내</a></div>
         </div>
       </section>
     </main>
 
     <footer>
-      <div class="shell footer-row"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">T</span><span>Thread Auto</span></a><div class="footer-links"><a href="/notices">공지사항</a><a href="https://github.com/Kimchanghee/coupuas-thread-auto/releases">릴리스</a><a href="https://github.com/Kimchanghee/coupuas-thread-auto/issues">고객 지원</a></div><span>© 2026 Thread Auto</span></div>
+      <div class="shell footer-row"><a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">T</span><span>Thread Auto</span></a><div class="footer-links"><a href="/notices">공지사항</a><a href="/terms">이용약관</a><a href="/privacy">개인정보</a><a href="/refund">환불·해지</a><a href="/support">사업자·고객지원</a></div><span>© 2026 와이엠</span></div>
     </footer>
     <script src="/site.js" defer></script>
+    <script defer src="/_vercel/insights/script.js"></script>
   </body>
 </html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 1200px; height: 630px; margin: 0; overflow: hidden; }
+      body { position: relative; display: grid; grid-template-columns: 1.05fr .95fr; gap: 54px; align-items: center; padding: 72px 78px; background: #f7f4ee; color: #1d1c1a; font-family: "Arial", "Malgun Gothic", sans-serif; }
+      body::before { content: ""; position: absolute; width: 360px; height: 360px; right: -110px; top: -155px; border-radius: 50%; background: #f3c759; }
+      body::after { content: ""; position: absolute; width: 170px; height: 170px; left: -80px; bottom: -86px; border: 30px solid #dc5f3f; border-radius: 50%; }
+      .copy { position: relative; z-index: 1; }
+      .eyebrow { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; color: #a43821; font-size: 22px; font-weight: 900; }
+      .eyebrow::before { content: ""; width: 45px; height: 4px; background: currentColor; }
+      h1 { margin: 0 0 26px; font-size: 66px; line-height: 1.08; letter-spacing: -4px; }
+      p { margin: 0; color: #5c5750; font-size: 25px; line-height: 1.55; font-weight: 700; }
+      .window { position: relative; z-index: 1; padding: 14px; border: 2px solid #aaa195; border-radius: 26px; background: #dfd9cf; box-shadow: 18px 22px 0 rgba(29,28,26,.10); transform: rotate(2deg); }
+      .bar { height: 30px; display: flex; gap: 8px; align-items: center; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; background: #948c81; }
+      .panel { min-height: 378px; padding: 36px; border-radius: 16px; background: #171715; color: #f8f4ec; }
+      .label { color: #ef947a; font-size: 15px; font-weight: 900; letter-spacing: 2px; }
+      .title { margin: 12px 0 25px; font-size: 30px; font-weight: 900; }
+      .field { padding: 17px; border: 1px solid #4b4843; border-radius: 11px; color: #aaa49b; font-size: 15px; }
+      .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; margin-top: 15px; }
+      .card { padding: 15px; border: 1px solid #3c3935; border-radius: 10px; background: #242320; color: #ef947a; font-size: 14px; font-weight: 900; }
+      .cta { margin-top: 15px; padding: 14px; border-radius: 10px; background: #dc5f3f; text-align: center; font-weight: 900; }
+    </style>
+  </head>
+  <body>
+    <div class="copy"><div class="eyebrow">THREADS 상품 운영 자동화</div><h1>링크 하나로,<br />운영은 가볍게.</h1><p>문안 4종 · 계정별 대기열<br />별도 AI API 키 없이 시작</p></div>
+    <div class="window"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div><div class="panel"><div class="label">THREAD AUTO</div><div class="title">상품 문안 만들기</div><div class="field">https://link.coupang.com/...</div><div class="cards"><div class="card">타깃 직격</div><div class="card">편의 대비</div><div class="card">재미 반전</div><div class="card">사용 장면</div></div><div class="cta">4가지 문안 생성 완료</div></div></div>
+  </body>
+</html>

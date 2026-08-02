@@ -37,19 +37,47 @@
       "dest": "/api/notices.mjs"
     },
     {
+      "src": "/sitemap\\.xml",
+      "dest": "/api/sitemap.mjs"
+    },
+    {
+      "src": "/robots\\.txt",
+      "dest": "/public/robots.txt"
+    },
+    {
+      "src": "/31d40a5ce9c84f0f9f1f386ca9f96df6\\.txt",
+      "dest": "/public/31d40a5ce9c84f0f9f1f386ca9f96df6.txt"
+    },
+    {
       "src": "/notices/?",
       "dest": "/public/notices.html"
+    },
+    {
+      "src": "/(terms|privacy|refund|support)/?",
+      "dest": "/public/$1.html"
     },
     {
       "src": "/(site|notices)\\.js",
       "dest": "/public/$1.js"
     },
     {
+      "src": "/legal\\.css",
+      "dest": "/public/legal.css"
+    },
+    {
+      "src": "/og-image\\.png",
+      "dest": "/public/og-image.png"
+    },
+    {
+      "src": "/",
+      "dest": "/public/index.html"
+    },
+    {
       "handle": "filesystem"
     },
     {
       "src": "/(.*)",
-      "dest": "/public/index.html"
+      "dest": "/api/not-found.mjs"
     }
   ]
 }

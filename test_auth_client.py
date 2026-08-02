@@ -34,6 +34,18 @@ class _FakeSession:
         )
         return self.response
 
+    def get(self, url, params=None, timeout=None, headers=None):
+        self.calls.append(
+            {
+                "method": "GET",
+                "url": url,
+                "params": params or {},
+                "timeout": timeout,
+                "headers": headers or {},
+            }
+        )
+        return self.response
+
 
 class _SequenceSession:
     def __init__(self, outcomes):
@@ -60,13 +72,14 @@ class _SequenceSession:
         )
         return self._next()
 
-    def get(self, url, params=None, timeout=None):
+    def get(self, url, params=None, timeout=None, headers=None):
         self.calls.append(
             {
                 "method": "GET",
                 "url": url,
                 "params": params or {},
                 "timeout": timeout,
+                "headers": headers or {},
             }
         )
         return self._next()
@@ -601,6 +614,58 @@ def test_create_payapp_checkout_rejects_untrusted_payment_url(monkeypatch):
 
     assert result["success"] is False
     assert "신뢰할 수 없는 결제 URL" in result["message"]
+
+
+def test_subscription_status_sends_server_required_user_header(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "7001"
+    auth_client._auth_state["token"] = "server-token"
+    session = _FakeSession(
+        _FakeResponse(
+            200,
+            {
+                "success": True,
+                "is_trial": False,
+                "work_count": 100,
+                "work_used": 0,
+                "remaining": 100,
+                "can_work": True,
+                "plan_id": "stmaker_pro_month",
+                "account_limit": 10,
+            },
+        )
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.get_subscription_status()
+
+    assert result["success"] is True
+    sent = session.calls[-1]
+    assert sent["method"] == "GET"
+    assert sent["headers"]["Authorization"] == "Bearer server-token"
+    assert sent["headers"]["X-User-ID"] == "7001"
+
+
+def test_payapp_subscription_status_and_cancel_are_bound_to_session_user(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "7001"
+    auth_client._auth_state["token"] = "server-token"
+    session = _SequenceSession(
+        [
+            _FakeResponse(200, {"subscriptions": [{"rebill_no": "rebill-1", "status": "active"}]}),
+            _FakeResponse(200, {"success": True, "message": "cancelled"}),
+        ]
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    status = auth_client.get_payapp_subscriptions()
+    cancelled = auth_client.cancel_payapp_subscription("rebill-1")
+
+    assert status["success"] is True
+    assert cancelled["success"] is True
+    assert session.calls[0]["headers"]["X-User-ID"] == "7001"
+    assert session.calls[1]["headers"]["X-User-ID"] == "7001"
+    assert session.calls[1]["json"] == {"user_id": "7001", "rebill_no": "rebill-1"}
 
 
 def test_payment_url_helpers_allow_only_https_payapp():

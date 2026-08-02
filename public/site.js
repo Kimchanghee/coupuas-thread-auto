@@ -35,3 +35,11 @@ async function refreshLatestRelease() {
 }
 
 refreshLatestRelease();
+
+document.querySelectorAll("[data-analytics]").forEach((node) => {
+  node.addEventListener("click", () => {
+    if (typeof window.va === "function") {
+      window.va("event", { name: node.dataset.analytics });
+    }
+  });
+});

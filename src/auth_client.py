@@ -1184,6 +1184,76 @@ def create_payapp_subscription(
         }
 
 
+def get_payapp_subscriptions() -> Dict[str, Any]:
+    """Return recurring PayApp subscriptions owned by the logged-in user."""
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
+    user_id, token = _get_session_user_and_token()
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+    headers = _build_auth_headers(token)
+    headers["X-User-ID"] = str(user_id)
+    try:
+        resp = _request_with_retry(
+            "GET",
+            f"{API_SERVER_URL}/payments/payapp/subscribe/status",
+            headers=headers,
+            timeout=15,
+            retries=1,
+        )
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            payload.setdefault("success", True)
+            return payload
+        return {
+            "success": False,
+            "message": _extract_api_message(payload, f"정기결제 상태 조회 실패 ({resp.status_code})"),
+        }
+    except requests.exceptions.RequestException as exc:
+        return {
+            "success": False,
+            "message": _request_error_message(exc, default_message="정기결제 상태 조회 중 통신 오류가 발생했습니다."),
+        }
+
+
+def cancel_payapp_subscription(rebill_no: str) -> Dict[str, Any]:
+    """Cancel a recurring PayApp subscription after server-side ownership checks."""
+    err = _check_api_url()
+    if err:
+        return {"success": False, "message": err}
+    user_id, token = _get_session_user_and_token()
+    if not user_id or not token:
+        return {"success": False, "message": "로그인이 필요합니다."}
+    rebill_no = str(rebill_no or "").strip()
+    if not rebill_no or len(rebill_no) > 160:
+        return {"success": False, "message": "해지할 정기결제 정보가 없습니다."}
+    headers = _build_auth_headers(token)
+    headers["X-User-ID"] = str(user_id)
+    try:
+        resp = _request_with_retry(
+            "POST",
+            f"{API_SERVER_URL}/payments/payapp/subscribe/cancel",
+            json={"user_id": str(user_id), "rebill_no": rebill_no},
+            headers=headers,
+            timeout=20,
+            retries=1,
+        )
+        payload = _safe_json(resp)
+        if resp.status_code == 200:
+            payload.setdefault("success", True)
+            return payload
+        return {
+            "success": False,
+            "message": _extract_api_message(payload, f"정기결제 해지 실패 ({resp.status_code})"),
+        }
+    except requests.exceptions.RequestException as exc:
+        return {
+            "success": False,
+            "message": _request_error_message(exc, default_message="정기결제 해지 중 통신 오류가 발생했습니다."),
+        }
+
+
 def get_subscription_status() -> Dict[str, Any]:
     err = _check_api_url()
     if err:
@@ -1191,11 +1261,13 @@ def get_subscription_status() -> Dict[str, Any]:
     user_id, token = _get_session_user_and_token()
     if not user_id or not token:
         return {"success": False, "message": "로그인이 필요합니다."}
+    headers = _build_auth_headers(token)
+    headers["X-User-ID"] = str(user_id)
     try:
         resp = _request_with_retry(
             "GET",
             f"{API_SERVER_URL}/user/subscription/my-status",
-            headers=_build_auth_headers(token),
+            headers=headers,
             timeout=10,
             retries=1,
         )

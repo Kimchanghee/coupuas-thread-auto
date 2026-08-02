@@ -1773,6 +1773,11 @@ class MainWindow(QMainWindow):
         self._pay_hint_label.setGeometry(24, 116, 720, 20)
         self._pay_hint_label.setStyleSheet(_hint_lbl_style)
 
+        self._pay_cancel_btn = QPushButton("월 정기결제 해지", self._settings_payment_sec)
+        self._pay_cancel_btn.setGeometry(24, 142, 190, _control_h)
+        self._pay_cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pay_cancel_btn.clicked.connect(self._cancel_payapp_subscription)
+
         # ── Section 6: 실행 설정 ────────────────────────────
         self._settings_startup_sec = QFrame(content)
         self._settings_startup_sec.setFrameShape(QFrame.Shape.NoFrame)
@@ -3211,7 +3216,7 @@ class MainWindow(QMainWindow):
                 (self._settings_info_sec, 96),
             ),
             3: (
-                (self._settings_payment_sec, 164),
+                (self._settings_payment_sec, 198),
                 (self._settings_tutorial_sec, 104),
                 (self._settings_contact_sec, 108),
             ),
@@ -4134,6 +4139,55 @@ class MainWindow(QMainWindow):
         # for the normal one-minute heartbeat interval.
         for delay_ms in (5_000, 15_000, 30_000, 60_000, 120_000):
             QTimer.singleShot(delay_ms, self._send_heartbeat)
+
+    def _cancel_payapp_subscription(self):
+        choice = QMessageBox.question(
+            self,
+            "월 정기결제 해지",
+            "다음 자동결제를 중단하시겠습니까?\n현재 승인된 이용 기간은 만료일까지 유지됩니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if choice != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            from src import auth_client
+
+            status = auth_client.get_payapp_subscriptions()
+            if not isinstance(status, dict) or not status.get("success"):
+                message = str((status or {}).get("message") or "정기결제 상태를 확인하지 못했습니다.")
+                show_error(self, "정기결제 해지", message)
+                return
+            candidates = status.get("subscriptions") or status.get("items") or status.get("data") or []
+            if isinstance(candidates, dict):
+                candidates = candidates.get("subscriptions") or candidates.get("items") or [candidates]
+            if not isinstance(candidates, list):
+                candidates = []
+            active = next(
+                (
+                    item for item in candidates
+                    if isinstance(item, dict)
+                    and str(item.get("status") or item.get("rebill_status") or "active").lower()
+                    not in {"cancelled", "canceled", "expired", "failed"}
+                    and (item.get("rebill_no") or item.get("rebillNo"))
+                ),
+                None,
+            )
+            if not active:
+                show_info(self, "정기결제 해지", "해지할 활성 월 정기결제가 없습니다.")
+                return
+            rebill_no = str(active.get("rebill_no") or active.get("rebillNo") or "").strip()
+            result = auth_client.cancel_payapp_subscription(rebill_no)
+            if not isinstance(result, dict) or not result.get("success"):
+                message = str((result or {}).get("message") or "정기결제를 해지하지 못했습니다.")
+                show_error(self, "정기결제 해지", message)
+                return
+            self._log_user_activity("payment_subscription_cancelled", "status=success")
+            show_info(self, "정기결제 해지", "다음 자동결제가 중단되었습니다. 현재 이용 기간은 만료일까지 유지됩니다.")
+            self._send_heartbeat()
+        except Exception:
+            logger.exception("PayApp 정기결제 해지 중 오류가 발생했습니다.")
+            show_error(self, "정기결제 해지", "정기결제 해지 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
 
     def open_settings(self):
         """Switch to settings page (page 2) instead of opening dialog."""

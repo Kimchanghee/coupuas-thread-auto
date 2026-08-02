@@ -159,7 +159,7 @@ export function combineNoticePayload(releases, issues) {
   };
 }
 
-async function loadPayload() {
+export async function loadNoticePayload() {
   if (cachedPayload && Date.now() - cachedAt < CACHE_TTL_MS) return cachedPayload;
   if (inFlightPayload) return inFlightPayload;
   inFlightPayload = (async () => {
@@ -189,7 +189,7 @@ export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("X-Content-Type-Options", "nosniff");
   try {
-    const payload = await loadPayload();
+    const payload = await loadNoticePayload();
     const requestedId = text(req.query?.id);
     res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=3600");
     if (requestedId) {

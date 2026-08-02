@@ -239,3 +239,33 @@ jobs:
             dist/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify search engines with IndexNow
+        shell: bash
+        continue-on-error: true
+        env:
+          INDEXNOW_KEY: 31d40a5ce9c84f0f9f1f386ca9f96df6
+          SITE_URL: https://coupuas-thread-auto-three.vercel.app
+        run: |
+          payload="$(jq -nc \
+            --arg host "coupuas-thread-auto-three.vercel.app" \
+            --arg key "$INDEXNOW_KEY" \
+            --arg keyLocation "$SITE_URL/$INDEXNOW_KEY.txt" \
+            --arg home "$SITE_URL/" \
+            --arg notices "$SITE_URL/notices" \
+            --arg terms "$SITE_URL/terms" \
+            --arg privacy "$SITE_URL/privacy" \
+            --arg refund "$SITE_URL/refund" \
+            --arg support "$SITE_URL/support" \
+            '{host:$host,key:$key,keyLocation:$keyLocation,urlList:[$home,$notices,$terms,$privacy,$refund,$support]}')"
+          status="$(curl --silent --show-error --output indexnow-response.txt \
+            --write-out '%{http_code}' \
+            --request POST 'https://api.indexnow.org/indexnow' \
+            --header 'Content-Type: application/json; charset=utf-8' \
+            --data "$payload")"
+          if [[ "$status" != "200" && "$status" != "202" ]]; then
+            echo "IndexNow submission returned HTTP $status"
+            cat indexnow-response.txt
+            exit 1
+          fi
+          echo "IndexNow accepted the release URLs (HTTP $status)."
