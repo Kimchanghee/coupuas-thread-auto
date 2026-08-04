@@ -7,12 +7,34 @@ const VARIANT_IDS = Object.freeze([
 
 const AFFILIATE_DISCLOSURE =
   "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
+const GENERAL_AFFILIATE_DISCLOSURE =
+  "이 게시물에는 광고·제휴 링크가 포함될 수 있으며, 구매 시 작성자가 일정액의 수수료를 제공받을 수 있습니다.";
+
+const MARKETPLACES = Object.freeze([
+  { id: "coupang", label: "쿠팡", hosts: ["coupang.com"], disclosure: AFFILIATE_DISCLOSURE },
+  {
+    id: "naver",
+    label: "네이버쇼핑",
+    hosts: ["shopping.naver.com", "smartstore.naver.com", "brand.naver.com", "shoppinglive.naver.com", "naver.me"],
+    disclosure: GENERAL_AFFILIATE_DISCLOSURE,
+  },
+  {
+    id: "toss",
+    label: "토스쇼핑",
+    hosts: ["shopping.toss.im", "shopping-view.toss.im", "link.toss.im", "toss.im"],
+    disclosure: GENERAL_AFFILIATE_DISCLOSURE,
+  },
+  { id: "aliexpress", label: "AliExpress", hosts: ["aliexpress.com"], disclosure: GENERAL_AFFILIATE_DISCLOSURE },
+]);
 
 const BLOCKED_ROOT_PATTERNS = [
   /https?:\/\//i,
   /link\.coupang\.com/i,
   /www\.coupang\.com/i,
   /쿠팡\s*파트너스/i,
+  /(?:네이버|토스)\s*쇼핑/i,
+  /ali\s*express/i,
+  /광고[·\s]*제휴\s*링크/i,
   /수수료를\s*제공받/i,
 ];
 
@@ -26,7 +48,17 @@ const FORBIDDEN_CLAIM_PATTERNS = [
   /최저가\s*보장/i,
 ];
 
-export { AFFILIATE_DISCLOSURE, VARIANT_IDS };
+export { AFFILIATE_DISCLOSURE, GENERAL_AFFILIATE_DISCLOSURE, MARKETPLACES, VARIANT_IDS };
+
+function marketplaceForHost(hostname) {
+  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  return MARKETPLACES.find((marketplace) =>
+    marketplace.hosts.some((allowed) =>
+      host === allowed
+      || (["coupang", "aliexpress"].includes(marketplace.id) && host.endsWith(`.${allowed}`)),
+    ),
+  );
+}
 
 export function sanitizeText(value, maxLength = 500) {
   return String(value ?? "")
@@ -42,6 +74,7 @@ export function normalizeProduct(rawProduct) {
   const raw = rawProduct && typeof rawProduct === "object" ? rawProduct : {};
   const title = sanitizeText(raw.title, 300);
   const url = sanitizeText(raw.url, 1000);
+  const claimedMarketplace = sanitizeText(raw.marketplace, 40).toLowerCase();
   const keywords = sanitizeText(raw.keywords, 500);
   const featureSource = Array.isArray(raw.features) ? raw.features : [];
   const features = featureSource
@@ -58,10 +91,27 @@ export function normalizeProduct(rawProduct) {
   } catch {
     throw new ManagedAiError("INVALID_PRODUCT_FACTS", 422, "올바른 상품 링크가 필요합니다.");
   }
-  if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+  if (
+    parsedUrl.protocol !== "https:"
+    || parsedUrl.username
+    || parsedUrl.password
+    || (parsedUrl.port && parsedUrl.port !== "443")
+  ) {
     throw new ManagedAiError("INVALID_PRODUCT_FACTS", 422, "지원하지 않는 상품 링크입니다.");
   }
-  return { title, url: parsedUrl.toString(), keywords, features };
+  const marketplace = marketplaceForHost(parsedUrl.hostname);
+  if (!marketplace || (claimedMarketplace && claimedMarketplace !== marketplace.id)) {
+    throw new ManagedAiError("INVALID_PRODUCT_FACTS", 422, "지원하지 않는 상품 링크입니다.");
+  }
+  return {
+    title,
+    url: parsedUrl.toString(),
+    keywords,
+    features,
+    marketplace: marketplace.id,
+    marketplaceLabel: marketplace.label,
+    affiliateDisclosure: marketplace.disclosure,
+  };
 }
 
 export class ManagedAiError extends Error {
@@ -83,6 +133,7 @@ export function buildPrompt(product) {
 
 [검증된 상품 정보]
 상품명: ${product.title}
+쇼핑몰: ${product.marketplaceLabel}
 키워드: ${product.keywords || "없음"}
 확인된 특징:
 ${facts}
@@ -90,7 +141,7 @@ ${facts}
 [공통 규칙]
 - 한국어로만 작성한다.
 - 각 버전은 2~3문장, 45~150자다.
-- 첫 글에는 상품명 전체, URL, 구매 링크, 쿠팡, 파트너스, 수수료 고지를 넣지 않는다.
+- 첫 글에는 상품명 전체, URL, 상품·구매·제휴 링크, 쇼핑몰명, 광고·수수료 고지를 넣지 않는다.
 - 첫 글에는 이미지가 있다고 암시하거나 사진·영상 공개를 예고하지 않는다.
 - 확인되지 않은 가격, 할인율, 재고, 후기, 효능, 성능을 만들지 않는다.
 - 과장된 치료·보장·100% 표현을 쓰지 않는다.
@@ -230,7 +281,7 @@ export function validateVariants(rawValue, product) {
   const commentText = [
     `🔗 ${sanitizeText(product.title, 80)}`,
     product.url,
-    AFFILIATE_DISCLOSURE,
+    product.affiliateDisclosure,
   ].join("\n\n");
 
   return VARIANT_IDS.map((variantId) => ({

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AFFILIATE_DISCLOSURE,
+  GENERAL_AFFILIATE_DISCLOSURE,
   buildFallbackVariants,
   buildPrompt,
   extractReservationId,
@@ -51,6 +52,31 @@ test("rejects invalid product URLs", () => {
     () => normalizeProduct({ title: "상품", url: "javascript:alert(1)" }),
     /지원하지 않는 상품 링크/,
   );
+  assert.throws(
+    () => normalizeProduct({ title: "상품", url: "https://example.com/product/1" }),
+    /지원하지 않는 상품 링크/,
+  );
+  assert.throws(
+    () => normalizeProduct({ title: "상품", url: "http://smartstore.naver.com/store/products/1" }),
+    /지원하지 않는 상품 링크/,
+  );
+  assert.throws(
+    () => normalizeProduct({ title: "상품", url: "https://pay.toss.im/order/1" }),
+    /지원하지 않는 상품 링크/,
+  );
+});
+
+test("recognizes Naver Shopping and applies the general affiliate disclosure", () => {
+  const naverProduct = normalizeProduct({
+    title: "접이식 캠핑 의자",
+    url: "https://smartstore.naver.com/example/products/1234",
+    marketplace: "naver",
+  });
+  assert.equal(naverProduct.marketplace, "naver");
+  assert.equal(naverProduct.marketplaceLabel, "네이버쇼핑");
+  const result = validateVariants(validVariants, naverProduct);
+  assert.match(result[0].product_comment_text, new RegExp(GENERAL_AFFILIATE_DISCLOSURE));
+  assert.doesNotMatch(result[0].product_comment_text, /쿠팡 파트너스/);
 });
 
 test("builds four distinct Korean fallback variants from verified product facts", () => {

@@ -109,6 +109,7 @@ class ManagedAiClient:
             "product": {
                 "title": title[:300],
                 "url": url[:1000],
+                "marketplace": str(product_info.get("marketplace") or "")[:40],
                 "keywords": keywords[:500],
                 "features": self._normalize_features(product_info),
             },
