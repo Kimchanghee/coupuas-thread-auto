@@ -10,7 +10,10 @@ test("landing page publishes search, social, legal, and real purchase guidance",
   assert.match(html, /name="google-site-verification" content="[A-Za-z0-9_-]+"/);
   assert.match(html, /property="og:image"/);
   assert.match(html, /application\/ld\+json/);
-  assert.match(html, /앱에서 월 정기권 결제/);
+  assert.match(html, /앱에서 월간 쇼핑 프로 결제/);
+  for (const label of ["네이버쇼핑", "토스쇼핑", "AliExpress", "29,000원", "69,000원"]) {
+    assert.match(html, new RegExp(label));
+  }
   for (const path of ["/terms", "/privacy", "/refund", "/support"]) {
     assert.match(html, new RegExp(`href="${path}"`));
   }

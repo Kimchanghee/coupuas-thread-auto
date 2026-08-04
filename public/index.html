@@ -33,7 +33,7 @@
         "name": "Thread Auto",
         "applicationCategory": "BusinessApplication",
         "operatingSystem": "Windows 10, Windows 11",
-        "description": "상품 링크 분석, Threads 문안 4종 생성, 계정별 대기열과 업로드를 지원하는 Windows 앱",
+        "description": "쿠팡·네이버쇼핑·토스쇼핑·AliExpress 상품 링크 분석, Threads 문안 4종 생성, 계정별 대기열과 업로드를 지원하는 Windows 앱",
         "url": "https://coupuas-thread-auto-three.vercel.app/",
         "downloadUrl": "https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe",
         "softwareHelp": "https://coupuas-thread-auto-three.vercel.app/support",
@@ -44,8 +44,10 @@
         },
         "offers": [
           { "@type": "Offer", "name": "무료", "price": "0", "priceCurrency": "KRW" },
-          { "@type": "Offer", "name": "7일 이용권", "price": "19000", "priceCurrency": "KRW" },
-          { "@type": "Offer", "name": "월 정기 이용권", "price": "49000", "priceCurrency": "KRW" }
+          { "@type": "Offer", "name": "7일 쿠팡 기본", "price": "19000", "priceCurrency": "KRW" },
+          { "@type": "Offer", "name": "7일 쇼핑 프로", "price": "29000", "priceCurrency": "KRW" },
+          { "@type": "Offer", "name": "월간 쿠팡 기본", "price": "49000", "priceCurrency": "KRW" },
+          { "@type": "Offer", "name": "월간 쇼핑 프로", "price": "69000", "priceCurrency": "KRW" }
         ]
       }
     </script>
@@ -196,7 +198,14 @@
       .step h3 { font-size: 22px; }
       .step p { margin-bottom: 0; color: var(--muted); line-height: 1.7; }
 
-      .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: stretch; }
+      .free-tier { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 26px; padding: 24px 28px; border: 1px solid var(--line); border-radius: 18px; background: #eee9e0; }
+      .free-tier h3, .free-tier p { margin: 0; }
+      .free-tier p { color: var(--muted); line-height: 1.65; }
+      .pricing-group + .pricing-group { margin-top: 34px; }
+      .pricing-group-title { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+      .pricing-group-title h3 { margin: 0; font-size: 24px; }
+      .pricing-group-title span { color: var(--muted); font-size: 14px; }
+      .pricing-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; align-items: stretch; }
       .price-card { display: flex; flex-direction: column; padding: 30px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); }
       .price-card.featured { border: 2px solid var(--accent-dark); background: #fff7f2; box-shadow: 7px 7px 0 var(--accent); transform: translateY(-8px); }
       .plan-tag { min-height: 24px; margin-bottom: 24px; color: var(--accent-dark); font-size: 13px; font-weight: 900; }
@@ -245,6 +254,7 @@
         .hero-grid { gap: 56px; }
         .app-window { max-width: 620px; margin: 0 auto; }
         .feature-grid, .pricing-grid { grid-template-columns: 1fr; }
+        .free-tier, .pricing-group-title { align-items: flex-start; flex-direction: column; }
         .home-notice-list { grid-template-columns: 1fr; }
         .feature-card { min-height: auto; }
         .feature-number { margin-bottom: 28px; }
@@ -301,7 +311,7 @@
           <div>
             <p class="eyebrow">Threads 상품 운영 자동화</p>
             <h1>링크 하나로,<br />운영은 가볍게.</h1>
-            <p class="hero-copy">쿠팡 상품을 분석해 서로 다른 네 가지 문안을 만들고, 여러 Threads 계정의 대기열과 업로드 이력까지 한곳에서 관리하세요.</p>
+            <p class="hero-copy">쿠팡·네이버쇼핑·토스쇼핑·AliExpress 상품 링크를 분석해 서로 다른 네 가지 문안을 만들고, 여러 Threads 계정의 대기열과 업로드 이력까지 한곳에서 관리하세요.</p>
             <div class="hero-actions">
               <a class="button accent" data-download-link data-analytics="hero-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료로 시작하기 <span aria-hidden="true">→</span></a>
               <a class="button ghost" href="#workflow">작동 방식 보기</a>
@@ -319,7 +329,7 @@
               <div class="app-content">
                 <span class="app-label">MANAGED AI</span>
                 <div class="app-title">상품 문안 만들기</div>
-                <div class="link-field">https://link.coupang.com/...</div>
+                <div class="link-field">네이버 · 쿠팡 · 토스 · Ali 상품 링크</div>
                 <div class="variant-grid" aria-hidden="true">
                   <div class="variant"><strong>타깃 직격</strong><span></span><span></span></div>
                   <div class="variant"><strong>편의 대비</strong><span></span><span></span></div>
@@ -342,7 +352,7 @@
           <div class="feature-grid">
             <article class="feature-card"><span class="feature-number">01</span><h3>서로 다른 4가지 문안</h3><p>타깃 직격, 편의 대비, 재미 반전, 사용 장면을 바탕으로 반복감 없는 한국어 Threads 문안을 만듭니다.</p></article>
             <article class="feature-card"><span class="feature-number">02</span><h3>여러 계정을 한곳에서</h3><p>Threads 계정마다 브라우저 프로필, 대기열, 업로드 이력과 재개 상태를 분리해 운영합니다.</p></article>
-            <article class="feature-card"><span class="feature-number">03</span><h3>링크부터 업로드까지</h3><p>상품 정보 분석, 이미지 검색, 문안 생성, 업로드를 하나의 작업 흐름으로 이어 번거로운 복사를 줄입니다.</p></article>
+            <article class="feature-card"><span class="feature-number">03</span><h3>네 곳의 상품 링크</h3><p>쿠팡·네이버쇼핑·토스쇼핑·AliExpress의 링크를 같은 입력창에서 분석하고, 쇼핑몰에 맞는 광고·제휴 고지를 적용합니다.</p></article>
           </div>
         </div>
       </section>
@@ -352,7 +362,7 @@
           <p class="section-kicker">How it works</p>
           <h2 class="section-title">세 단계면 충분합니다.</h2>
           <div class="steps">
-            <article class="step"><b>STEP 01</b><h3>상품 링크 붙여넣기</h3><p>쿠팡 링크를 입력하면 상품명과 확인된 특징을 분석합니다.</p></article>
+            <article class="step"><b>STEP 01</b><h3>상품 링크 붙여넣기</h3><p>지원 쇼핑몰 링크를 입력하면 공개된 상품명과 확인 가능한 특징을 분석합니다.</p></article>
             <article class="step"><b>STEP 02</b><h3>마음에 드는 문안 고르기</h3><p>관리형 AI가 만든 네 가지 방향을 비교하고 사용할 문안을 선택합니다.</p></article>
             <article class="step"><b>STEP 03</b><h3>계정별로 안전하게 업로드</h3><p>저장된 Threads 세션과 계정별 대기열을 이용해 순서대로 게시합니다.</p></article>
           </div>
@@ -363,13 +373,18 @@
         <div class="shell">
           <p class="section-kicker">Simple pricing</p>
           <h2 class="section-title">필요한 만큼만 시작하세요.</h2>
-          <p class="section-lead">처음에는 무료로 확인하고, 운영 주기와 계정 수에 맞는 이용권을 선택할 수 있습니다.</p>
-          <div class="pricing-grid">
-            <article class="price-card"><div class="plan-tag">부담 없이 체험</div><h3>무료</h3><div class="price">0원 <small>/ 월</small></div><p class="price-copy">기본 자동화 흐름을 직접 확인해보세요.</p><ul class="plan-list"><li>매월 5회 작업</li><li>관리형 AI 문안 4종</li><li>기본 계정 운영</li></ul><a class="button ghost" data-download-link data-analytics="pricing-free-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료 다운로드</a></article>
-            <article class="price-card"><div class="plan-tag">짧고 집중적인 운영</div><h3>7일 이용권</h3><div class="price">19,000원 <small>/ 7일</small></div><p class="price-copy">캠페인이나 집중 업로드 기간에 알맞습니다.</p><ul class="plan-list"><li>결제 승인 시점부터 7일</li><li>Threads 계정 1개</li><li>대기열·업로드 이력 관리</li></ul><a class="button ghost" data-download-link data-analytics="pricing-week-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 7일권 결제</a></article>
-            <article class="price-card featured"><div class="plan-tag">가장 꾸준한 선택 · 추천</div><h3>월 정기 이용권</h3><div class="price">49,000원 <small>/ 30일</small></div><p class="price-copy">매일 꾸준히 여러 계정을 운영할 때 알맞습니다.</p><ul class="plan-list"><li>30일마다 정기결제</li><li>Threads 계정 최대 10개</li><li>다음 결제 전 언제든 해지 요청</li></ul><a class="button accent" data-download-link data-analytics="pricing-month-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 월 정기권 결제</a></article>
-          </div>
-          <p class="billing-note"><strong>결제 방법</strong> · 앱을 설치해 회원가입·로그인한 뒤 <strong>설정 → 구독 결제</strong>에서 휴대폰 번호를 입력하면 PayApp 보안 결제창이 열립니다. 승인된 이용 기간과 계정 한도는 서버에서 적용되며, 자세한 철회·해지 기준은 <a href="/refund">환불·해지 정책</a>에서 확인할 수 있습니다.</p>
+          <p class="section-lead">쿠팡만 운영한다면 기본, 네이버·토스·Ali까지 함께 운영한다면 쇼핑 프로가 알맞습니다.</p>
+          <div class="free-tier"><div><h3>무료 · 월 5회</h3><p>관리형 AI 문안 4종과 기본 자동화를 확인하고, 첫 작업 1회는 쇼핑 프로 링크도 체험할 수 있습니다.</p></div><a class="button ghost" data-download-link data-analytics="pricing-free-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">무료 다운로드</a></div>
+          <div class="pricing-group"><div class="pricing-group-title"><h3>7일 일회결제</h3><span>짧은 캠페인이나 집중 운영에 적합</span></div><div class="pricing-grid">
+            <article class="price-card"><div class="plan-tag">쿠팡만 운영</div><h3>7일 쿠팡 기본</h3><div class="price">19,000원 <small>/ 7일</small></div><p class="price-copy">쿠팡 상품 콘텐츠를 한 계정에서 집중 운영합니다.</p><ul class="plan-list"><li>쿠팡 상품 링크</li><li>Threads 발행 계정 1개</li><li>작업 최대 200회</li></ul><a class="button ghost" data-download-link data-analytics="pricing-week-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 7일 쿠팡권 결제</a></article>
+            <article class="price-card"><div class="plan-tag">여러 쇼핑몰 운영</div><h3>7일 쇼핑 프로</h3><div class="price">29,000원 <small>/ 7일</small></div><p class="price-copy">쿠팡·네이버·토스·Ali 상품을 세 계정에서 운영합니다.</p><ul class="plan-list"><li>지원 쇼핑몰 4곳</li><li>Threads 발행 계정 3개</li><li>작업 최대 200회</li></ul><a class="button ghost" data-download-link data-analytics="pricing-shopping-week-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 7일 쇼핑 프로 결제</a></article>
+          </div></div>
+          <div class="pricing-group"><div class="pricing-group-title"><h3>월간 정기결제</h3><span>30일마다 자동 결제 · 다음 결제 전 해지 가능</span></div><div class="pricing-grid">
+            <article class="price-card"><div class="plan-tag">쿠팡 다계정 운영</div><h3>월간 쿠팡 기본</h3><div class="price">49,000원 <small>/ 30일</small></div><p class="price-copy">쿠팡 콘텐츠를 여러 발행 계정에서 꾸준히 운영합니다.</p><ul class="plan-list"><li>쿠팡 상품 링크</li><li>Threads 발행 계정 최대 10개</li><li>작업 최대 500회</li></ul><a class="button ghost" data-download-link data-analytics="pricing-month-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 월간 쿠팡권 결제</a></article>
+            <article class="price-card featured"><div class="plan-tag">전체 기능 · 추천</div><h3>월간 쇼핑 프로</h3><div class="price">69,000원 <small>/ 30일</small></div><p class="price-copy">지원 쇼핑몰과 다계정 운영을 모두 사용하는 상품입니다.</p><ul class="plan-list"><li>쿠팡·네이버쇼핑·토스쇼핑·AliExpress</li><li>Threads 발행 계정 최대 10개</li><li>작업 최대 500회</li></ul><a class="button accent" data-download-link data-analytics="pricing-shopping-month-download" href="https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe">앱에서 월간 쇼핑 프로 결제</a></article>
+          </div></div>
+          <p class="billing-note"><strong>기존 유료 고객 혜택</strong> · 2026년 8월 5일 이전 가입한 활성 고객은 2026년 10월 4일 전까지 쇼핑 프로 기능을 추가 결제 없이 사용할 수 있습니다. 해당 기간에 전환하면 월 59,000원이 최대 6회 적용됩니다. 기존 월 정기결제는 먼저 해지해야 중복 결제 없이 전환할 수 있습니다.</p>
+          <p class="billing-note"><strong>결제 방법</strong> · 앱을 설치해 회원가입·로그인한 뒤 <strong>설정 → 구독 · 지원</strong>에서 휴대폰 번호를 입력하면 PayApp 보안 결제창이 열립니다. 승인된 가격·이용 기간·계정 한도는 서버에서 적용되며, 자세한 철회·해지 기준은 <a href="/refund">환불·해지 정책</a>에서 확인할 수 있습니다.</p>
         </div>
       </section>
 

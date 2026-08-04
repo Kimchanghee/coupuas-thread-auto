@@ -2,19 +2,22 @@
 
 쓰레드(Threads) 플랫폼에 글을 자동으로 업로드하는 Windows용 Python 애플리케이션입니다.
 
-**현재 버전: v3.0.54** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
+**현재 버전: v3.0.60** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
 
 ## 이용권
 
-- **무료**: 매월 5회 작업
-- **주간 이용권**: 7일 19,000원
-- **월간 이용권**: 30일 49,000원
+- **무료**: 매월 5회 작업, 첫 작업 1회 쇼핑 프로 링크 체험
+- **7일 쿠팡 기본**: 19,000원 · Threads 발행 계정 1개
+- **7일 쇼핑 프로**: 29,000원 · Threads 발행 계정 3개
+- **월간 쿠팡 기본**: 49,000원/30일 정기결제 · Threads 발행 계정 최대 10개
+- **월간 쇼핑 프로**: 69,000원/30일 정기결제 · Threads 발행 계정 최대 10개
 
 이용권별 계정 수와 작업량은 앱의 결제 화면에 표시되는 최신 정책을 따릅니다. 결제 또는 이용 문의는 [GitHub Issues](https://github.com/Kimchanghee/coupuas-thread-auto/issues)에서 남길 수 있습니다.
 
 ## 주요 기능
 
-- **AI 기반 상품 분석/문구 생성**: 쿠팡 링크를 분석하고 Threads용 짧은 홍보 문구를 생성
+- **멀티 쇼핑몰 상품 분석**: 쿠팡·네이버쇼핑·토스쇼핑·AliExpress 링크를 API 연동 없이 공개 상품 페이지에서 분석
+- **AI 기반 문구 생성**: 쇼핑몰별 광고·제휴 고지를 포함한 Threads용 짧은 홍보 문구를 생성
 - **상품 이미지 검색**: 1688 이미지 검색 결과를 캐시에 저장해 첫 번째 게시글에 첨부
 - **브라우저 세션 기반 업로드**: Playwright로 Threads 웹을 제어하고 로그인 세션을 암호화 저장
 - **Supabase 기반 회원 DB**: 회원가입, 로그인, 작업량과 결제 상태는 운영 인증 API를 통해 Supabase PostgreSQL에서 관리
@@ -96,7 +99,7 @@ python login_main.py
 3. **저장** 버튼을 눌러 설정을 반영합니다.
 
 ### 6. 링크 입력 및 업로드
-1. **링크 입력** 화면에 쿠팡 파트너스 URL을 붙여넣습니다.
+1. **링크 입력** 화면에 쿠팡·네이버쇼핑·토스쇼핑·AliExpress 상품 URL을 붙여넣습니다.
 2. **자동화 시작** 버튼을 누릅니다.
 3. 앱이 링크 분석, 이미지 검색, 문구 생성, Threads 업로드를 순서대로 진행합니다.
 4. 이미 업로드된 링크는 이력 기준으로 자동 스킵됩니다.
@@ -109,13 +112,14 @@ coupuas-thread-auto/
 │   ├── __init__.py
 │   ├── config.py                      # 설정 관리
 │   ├── auth_client.py                 # 인증/작업량 API 클라이언트
-│   ├── coupang_uploader.py            # 쿠팡 링크 처리 및 업로드 파이프라인
+│   ├── coupang_uploader.py            # 쇼핑 상품 처리 및 업로드 파이프라인
 │   ├── computer_use_agent.py          # 브라우저 세션/Computer Use 에이전트
 │   ├── threads_playwright_helper.py   # Playwright 직접 제어 헬퍼
 │   ├── threads_navigation.py          # Threads 접속 도메인 폴백
 │   ├── main_window.py                 # 메인 GUI
 │   └── services/
-│       ├── coupang_parser.py          # 쿠팡 링크 분석
+│       ├── coupang_parser.py          # 지원 쇼핑몰 링크 분석
+│       ├── marketplaces.py            # 쇼핑몰 판별·URL·광고 고지 정책
 │       ├── image_search.py            # 1688 이미지 검색/캐시
 │       ├── aggro_generator.py         # Threads 문구 생성
 │       └── link_history.py            # 업로드 이력 관리
@@ -181,6 +185,11 @@ python setup_login.py
 - 방화벽이나 보안 소프트웨어 확인
 
 ## 최근 업데이트
+
+### 2026-08-05 쇼핑 프로
+- 쿠팡·네이버쇼핑·토스쇼핑·AliExpress 상품 링크를 한 입력창에서 처리합니다.
+- 쇼핑 프로 7일권·월간권과 Threads 다계정 한도를 결제 서버 권한에 연결했습니다.
+- 기존 유료 고객에게 한시적 무료 확장과 전환 혜택을 서버에서 판정합니다.
 
 ### 2026-05-27 버그 수정
 - 중복 업로드 방지: 메인 업로드 화면에서도 업로드 이력을 확인해 이미 처리한 쿠팡 링크를 건너뜁니다.
@@ -264,7 +273,7 @@ python build_installer.py
 - [ ] 예약 업로드 기능
 - [x] 업로드 기록 저장 및 관리
 - [ ] 다크 모드 지원
-- [ ] 여러 계정 관리
+- [x] 여러 Threads 계정 관리
 - [ ] Headless 모드 옵션 (브라우저 숨김)
 
 ## 추가 문서
