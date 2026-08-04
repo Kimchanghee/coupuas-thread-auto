@@ -110,6 +110,23 @@ def test_product_post_keeps_link_only_in_second_post():
     assert AggroGenerator.COUPANG_DISCLOSURE in second_text
 
 
+def test_product_post_uses_general_disclosure_for_naver():
+    from src.services.marketplaces import GENERAL_AFFILIATE_DISCLOSURE
+
+    generator = AggroGenerator()
+    result = generator.generate_product_post(
+        {
+            "title": "접이식 캠핑 의자",
+            "search_keywords": "캠핑 의자",
+            "original_url": "https://smartstore.naver.com/example/products/123",
+            "marketplace": "naver",
+            "affiliate_disclosure": GENERAL_AFFILIATE_DISCLOSURE,
+        }
+    )
+    assert GENERAL_AFFILIATE_DISCLOSURE in result["second_post"]["text"]
+    assert AggroGenerator.COUPANG_DISCLOSURE not in result["second_post"]["text"]
+
+
 def test_product_post_exposes_fixed_root_and_product_comment_payload():
     generator = AggroGenerator()
     result = generator.generate_product_post(

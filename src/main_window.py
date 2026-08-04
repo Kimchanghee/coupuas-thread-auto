@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-쿠팡 파트너스 스레드 자동화 - 메인 윈도우 (PyQt6)
+멀티 쇼핑몰 스레드 자동화 - 메인 윈도우 (PyQt6)
 Stitch Blue 디자인 - 사이드바 + 스택 페이지 레이아웃
 좌표 기반 배치 (setGeometry), 레이아웃 매니저 없음
 """
@@ -27,7 +27,15 @@ from PyQt6.QtWidgets import (
     QScrollArea, QTabBar, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl, QTimer
-from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QDesktopServices
+from PyQt6.QtCore import QRegularExpression
+from PyQt6.QtGui import (
+    QColor,
+    QPainter,
+    QLinearGradient,
+    QPen,
+    QDesktopServices,
+    QRegularExpressionValidator,
+)
 
 from src.ai_provider import (
     AI_PROVIDER_GEMINI,
@@ -44,6 +52,10 @@ from src.gemini_keys import (
     select_working_gemini_api_key,
 )
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
+from src.services.marketplaces import (
+    extract_supported_product_links,
+    marketplace_for_url,
+)
 from src.services.thread_payload import build_product_thread_payload
 from src.services.account_queue import AccountQueueStore
 from src.services.multi_account_runtime import MultiAccountRuntime
@@ -213,14 +225,13 @@ class SectionFrame(QFrame):
 # ─── MainWindow ─────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
-    """쿠팡 파트너스 스레드 자동화 메인 윈도우 - 사이드바 레이아웃."""
+    """멀티 쇼핑몰 스레드 자동화 메인 윈도우 - 사이드바 레이아웃."""
 
     MAX_LOG_LINES = 2000
 
-    COUPANG_LINK_PATTERN = re.compile(
-        r'https?://link\.coupang\.com/[^\s<>"\']*',
-        re.IGNORECASE
-    )
+    PRODUCT_LINK_PATTERN = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
+    # Compatibility for tests/extensions that referenced the old constant.
+    COUPANG_LINK_PATTERN = PRODUCT_LINK_PATTERN
 
     # Sidebar menu items
     _SIDEBAR_ITEMS = [
@@ -239,7 +250,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Coupang Partners Thread Automation")
+        self.setWindowTitle("Thread Auto - Multi-market Shopping Automation")
         self.setFixedSize(WIN_W, WIN_H)
 
         self.pipeline = CoupangPartnersPipeline(
@@ -453,7 +464,11 @@ class MainWindow(QMainWindow):
             ("threads_login_btn", "settings_threads_login"),
             ("check_login_btn", "settings_threads_login_check"),
             ("_add_gemini_key_btn", "settings_add_gemini_key"),
+            ("_pay_weekly_btn", "settings_pay_weekly_basic"),
             ("_pay_monthly_btn", "settings_pay_monthly"),
+            ("_pay_shopping_weekly_btn", "settings_pay_weekly_shopping_pro"),
+            ("_pay_shopping_monthly_btn", "settings_pay_monthly_shopping_pro"),
+            ("_pay_refresh_btn", "settings_payment_refresh"),
             ("_tutorial_settings_btn", "settings_tutorial_replay"),
             ("_contact_btn", "settings_contact"),
             ("_settings_save_btn", "settings_save"),
@@ -955,11 +970,11 @@ class MainWindow(QMainWindow):
 
         cy += 38
 
-        # Coupang Partners hyperlink (top right)
+        # Supported marketplaces summary (top right)
         self._coupang_link = QLabel(
-            '<a href="https://partners.coupang.com/" '
+            '<a href="https://coupuas-thread-auto-three.vercel.app/support" '
             'style="color: #3B7BFF; text-decoration: none; font-weight: 600;">'
-            '쿠팡 파트너스 바로가기 →</a>',
+            '지원 쇼핑몰 안내 →</a>',
             page
         )
         self._coupang_link.setGeometry(CONTENT_W - 28 - 220, 28, 220, 24)
@@ -968,7 +983,7 @@ class MainWindow(QMainWindow):
         self._coupang_link.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self._coupang_link.setStyleSheet("background: transparent;")
         self._coupang_link.linkActivated.connect(
-            lambda href: self._open_external_link(href, "page_links_coupang_partners")
+            lambda href: self._open_external_link(href, "page_links_supported_marketplaces")
         )
 
         # Link count badge
@@ -976,7 +991,10 @@ class MainWindow(QMainWindow):
         self.link_count_badge.setGeometry(CONTENT_W - 28 - 220 - 100, 28, 90, 24)
 
         # Hint text
-        hint = QLabel("아래에 쿠팡 파트너스 URL을 붙여넣기 하세요 (한 줄에 하나씩)", page)
+        hint = QLabel(
+            "상품 링크를 한 줄에 하나씩 붙여넣으세요 · 쿠팡 외 쇼핑몰은 쇼핑 프로에서 지원",
+            page,
+        )
         hint.setGeometry(28, cy, 700, 20)
         hint.setStyleSheet(muted_text_style("9pt"))
 
@@ -985,7 +1003,8 @@ class MainWindow(QMainWindow):
         self.links_text.setGeometry(28, cy + 24, 944, 160)
         self.links_text.setPlaceholderText(
             "https://link.coupang.com/a/xxx\n"
-            "https://link.coupang.com/a/yyy"
+            "https://smartstore.naver.com/.../products/...\n"
+            "https://www.aliexpress.com/item/...html"
         )
         self.links_text.textChanged.connect(self._update_link_count)
 
@@ -1734,49 +1753,123 @@ class MainWindow(QMainWindow):
         dev_label.setGeometry(24, 62, 420, 16)
         dev_label.setStyleSheet(_hint_lbl_style)
 
-        # ── Section 5: 구독 결제 ───────────────────────────
+        # ── Section 5: 이용권 · 결제 ───────────────────────
         self._settings_payment_sec = QFrame(content)
         self._settings_payment_sec.setFrameShape(QFrame.Shape.NoFrame)
         self._settings_payment_sec.setStyleSheet(_section_style)
 
-        payment_title = QLabel("구독 결제", self._settings_payment_sec)
+        payment_title = QLabel("이용권 선택", self._settings_payment_sec)
         payment_title.setGeometry(24, 14, 220, 22)
         payment_title.setStyleSheet(_section_title_style)
 
-        payment_desc = QLabel("무료 월 5회 · 7일권 프로그램 내 1계정 · 월 정기권 다계정", self._settings_payment_sec)
-        payment_desc.setGeometry(24, 42, 560, 20)
+        payment_desc = QLabel(
+            "쿠팡 기본 또는 네이버쇼핑·토스쇼핑·AliExpress까지 지원하는 쇼핑 프로를 선택하세요.",
+            self._settings_payment_sec,
+        )
+        payment_desc.setGeometry(24, 40, 880, 20)
         payment_desc.setStyleSheet("color: #B8B8B8; font-size: 12px; font-weight: 500; background: transparent; border: none;")
 
-        self._pay_phone_edit = QLineEdit(self._settings_payment_sec)
-        self._pay_phone_edit.setGeometry(24, 70, 250, _control_h)
-        self._pay_phone_edit.setPlaceholderText("휴대폰 번호 (예: 01012345678)")
-        self._pay_phone_edit.setStyleSheet(_input_style)
+        self._shopping_offer_label = QLabel(
+            "무료 첫 작업에서 쇼핑 프로를 체험할 수 있습니다.",
+            self._settings_payment_sec,
+        )
+        self._shopping_offer_label.setGeometry(24, 66, 880, 30)
+        self._shopping_offer_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._shopping_offer_label.setStyleSheet(
+            "QLabel { background-color: rgba(250, 204, 21, 0.10); color: #FDE68A;"
+            " border: 1px solid rgba(250, 204, 21, 0.28); border-radius: 7px;"
+            " padding: 0 12px; font-size: 11px; font-weight: 700; }"
+        )
 
-        self._pay_weekly_btn = QPushButton("7일 19,000원 · 1계정", self._settings_payment_sec)
-        self._pay_weekly_btn.setGeometry(286, 70, 220, _control_h)
+        phone_label = QLabel("결제 휴대폰 번호", self._settings_payment_sec)
+        phone_label.setGeometry(24, 106, 150, 18)
+        phone_label.setStyleSheet(_hint_lbl_style)
+
+        self._pay_phone_edit = QLineEdit(self._settings_payment_sec)
+        self._pay_phone_edit.setGeometry(24, 128, 250, _control_h)
+        self._pay_phone_edit.setPlaceholderText("01012345678")
+        self._pay_phone_edit.setStyleSheet(_input_style)
+        self._pay_phone_edit.setMaxLength(11)
+        self._pay_phone_edit.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"01[016789]?\d{0,8}"), self._pay_phone_edit)
+        )
+        self._pay_phone_edit.setAccessibleName("결제 휴대폰 번호")
+        self._pay_phone_edit.setAccessibleDescription("PayApp 결제창을 받을 본인 휴대폰 번호")
+        phone_label.setBuddy(self._pay_phone_edit)
+
+        basic_label = QLabel("쿠팡 기본", self._settings_payment_sec)
+        basic_label.setGeometry(296, 106, 300, 18)
+        basic_label.setStyleSheet("color: #D1D5DB; font-size: 11px; font-weight: 800;")
+
+        pro_label = QLabel("쇼핑 프로 · 전체 쇼핑몰", self._settings_payment_sec)
+        pro_label.setGeometry(296, 180, 320, 18)
+        pro_label.setStyleSheet("color: #FF9CAF; font-size: 11px; font-weight: 800;")
+
+        self._pay_weekly_btn = QPushButton("7일 19,000원 · Threads 1개", self._settings_payment_sec)
+        self._pay_weekly_btn.setGeometry(296, 128, 306, _control_h)
         self._pay_weekly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pay_weekly_btn.clicked.connect(
             lambda: self._request_payapp_checkout("stmaker_pro_week")
         )
 
-        self._pay_monthly_btn = QPushButton("월 49,000원 · 다계정", self._settings_payment_sec)
-        self._pay_monthly_btn.setGeometry(518, 70, 220, _control_h)
+        self._pay_monthly_btn = QPushButton("월 49,000원 · Threads 10개", self._settings_payment_sec)
+        self._pay_monthly_btn.setGeometry(614, 128, 306, _control_h)
         self._pay_monthly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pay_monthly_btn.clicked.connect(
             lambda: self._request_payapp_checkout("stmaker_pro_month")
         )
 
-        self._pay_hint_label = QLabel(
-            "7일권은 1회 결제, 월 이용권은 매달 정기결제입니다. 결제 승인 후 권한이 자동 반영됩니다.",
+        self._pay_shopping_weekly_btn = QPushButton(
+            "7일 29,000원 · Threads 3개",
             self._settings_payment_sec,
         )
-        self._pay_hint_label.setGeometry(24, 116, 720, 20)
+        self._pay_shopping_weekly_btn.setGeometry(296, 202, 306, _control_h)
+        self._pay_shopping_weekly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pay_shopping_weekly_btn.clicked.connect(
+            lambda: self._request_payapp_checkout("stmaker_shopping_pro_week")
+        )
+
+        self._pay_shopping_monthly_btn = QPushButton(
+            "월 69,000원 · Threads 10개",
+            self._settings_payment_sec,
+        )
+        self._pay_shopping_monthly_btn.setGeometry(614, 202, 306, _control_h)
+        self._pay_shopping_monthly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pay_shopping_monthly_btn.clicked.connect(
+            lambda: self._request_payapp_checkout(self._shopping_pro_month_plan_id())
+        )
+
+        for button, accessible_name in (
+            (self._pay_weekly_btn, "7일 쿠팡 이용권 결제"),
+            (self._pay_monthly_btn, "월간 쿠팡 기본 이용권 결제"),
+            (self._pay_shopping_weekly_btn, "7일 쇼핑 프로 이용권 결제"),
+            (self._pay_shopping_monthly_btn, "월간 쇼핑 프로 이용권 결제"),
+        ):
+            button.setAccessibleName(accessible_name)
+
+        self._pay_hint_label = QLabel(
+            "7일권은 일회결제, 월간은 30일마다 정기결제됩니다. 쇼핑 프로는 쿠팡·네이버·토스·Ali 링크를 지원합니다.",
+            self._settings_payment_sec,
+        )
+        self._pay_hint_label.setGeometry(24, 258, 900, 20)
         self._pay_hint_label.setStyleSheet(_hint_lbl_style)
 
+        self._pay_status_label = QLabel("이용권을 선택하면 PayApp 보안 결제창이 열립니다.", self._settings_payment_sec)
+        self._pay_status_label.setGeometry(24, 284, 900, 24)
+        self._pay_status_label.setStyleSheet(
+            "color: #93C5FD; font-size: 11px; font-weight: 600; background: transparent; border: none;"
+        )
+        self._pay_status_label.setAccessibleName("결제 진행 상태")
+
         self._pay_cancel_btn = QPushButton("월 정기결제 해지", self._settings_payment_sec)
-        self._pay_cancel_btn.setGeometry(24, 142, 190, _control_h)
+        self._pay_cancel_btn.setGeometry(24, 316, 190, _control_h)
         self._pay_cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pay_cancel_btn.clicked.connect(self._cancel_payapp_subscription)
+
+        self._pay_refresh_btn = QPushButton("결제 상태 새로고침", self._settings_payment_sec)
+        self._pay_refresh_btn.setGeometry(226, 316, 190, _control_h)
+        self._pay_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pay_refresh_btn.clicked.connect(self._send_heartbeat)
 
         # ── Section 6: 실행 설정 ────────────────────────────
         self._settings_startup_sec = QFrame(content)
@@ -1833,7 +1926,12 @@ class MainWindow(QMainWindow):
         self._settings_save_btn.clicked.connect(self._save_settings)
 
         self.threads_login_btn.setStyleSheet(_primary_btn_style)
-        self._pay_monthly_btn.setStyleSheet(_primary_btn_style)
+        self._pay_weekly_btn.setStyleSheet(_ghost_btn_style)
+        self._pay_monthly_btn.setStyleSheet(_ghost_btn_style)
+        self._pay_shopping_weekly_btn.setStyleSheet(_ghost_btn_style)
+        self._pay_shopping_monthly_btn.setStyleSheet(_primary_btn_style)
+        self._pay_cancel_btn.setStyleSheet(_ghost_btn_style)
+        self._pay_refresh_btn.setStyleSheet(_ghost_btn_style)
         self._settings_save_btn.setStyleSheet(_primary_btn_style)
         self.check_login_btn.setStyleSheet(_ghost_btn_style)
         self._add_gemini_key_btn.setStyleSheet(_ghost_btn_style)
@@ -1843,7 +1941,12 @@ class MainWindow(QMainWindow):
         for btn in (
             self.threads_login_btn,
             self.check_login_btn,
+            self._pay_weekly_btn,
             self._pay_monthly_btn,
+            self._pay_shopping_weekly_btn,
+            self._pay_shopping_monthly_btn,
+            self._pay_cancel_btn,
+            self._pay_refresh_btn,
             self._tutorial_settings_btn,
             self._contact_btn,
             self._add_gemini_key_btn,
@@ -2366,18 +2469,14 @@ class MainWindow(QMainWindow):
 
     def _update_link_count(self):
         content = self.links_text.toPlainText()
-        links = self.COUPANG_LINK_PATTERN.findall(content)
-        unique_links = list(dict.fromkeys(links))
-        count = len(unique_links)
+        count = len(extract_supported_product_links(content))
         if count > 0:
             self.link_count_badge.update_style(Colors.ACCENT, f"{count}개 링크")
         else:
             self.link_count_badge.update_style(Colors.TEXT_MUTED, "0개 링크")
 
     def _extract_links(self, content: str) -> list:
-        links = self.COUPANG_LINK_PATTERN.findall(content)
-        unique_links = list(dict.fromkeys(links))
-        return [(url, None) for url in unique_links]
+        return [(url, None) for url in extract_supported_product_links(content)]
 
     def _normalize_link_data(self, link_data) -> list:
         normalized = []
@@ -2394,13 +2493,45 @@ class MainWindow(QMainWindow):
                 keyword = None
             if not url or url in seen:
                 continue
-            parsed = urlparse(url)
-            if (parsed.hostname or "").strip().lower() != "link.coupang.com":
-                logger.warning("파트너스 단축 링크가 아닌 URL을 건너뜁니다: %s", url[:80])
+            if marketplace_for_url(url) is None:
+                logger.warning("지원하지 않는 상품 링크를 건너뜁니다: %s", url[:80])
                 continue
             seen.add(url)
             normalized.append((url, keyword))
         return normalized
+
+    def _ensure_marketplace_links_allowed(self, link_data) -> bool:
+        """Fail closed when the server entitlement does not cover a marketplace."""
+        try:
+            from src import auth_client
+            from src.subscription_plans import marketplace_access_decision
+
+            state = auth_client.get_auth_state()
+        except Exception:
+            logger.exception("쇼핑몰 이용권 상태를 확인하지 못했습니다.")
+            show_warning(self, "이용권 확인", "쇼핑몰 이용권 상태를 확인하지 못했습니다.")
+            return False
+
+        for item in link_data or []:
+            url = str(item[0] if isinstance(item, tuple) else item or "").strip()
+            allowed, message = marketplace_access_decision(state, url)
+            if allowed:
+                continue
+            show_warning(
+                self,
+                "쇼핑 프로 이용권 필요",
+                f"{message}\n\n설정 → 구독 · 지원에서 쇼핑 프로 이용권을 선택해주세요.",
+            )
+            self.open_settings()
+            if hasattr(self, "_settings_tab_bar"):
+                self._settings_tab_bar.setCurrentIndex(3)
+            self._log_user_activity(
+                "marketplace_access_blocked",
+                f"marketplace={getattr(marketplace, 'marketplace_id', 'unknown')}; label={label}",
+                level="WARNING",
+            )
+            return False
+        return True
 
     @staticmethod
     def _is_resume_unfinished(status: str) -> bool:
@@ -2775,7 +2906,9 @@ class MainWindow(QMainWindow):
     ) -> bool:
         link_data = self._normalize_link_data(link_data)
         if not link_data:
-            show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "지원하는 상품 링크를 찾을 수 없습니다.")
+            return False
+        if not self._ensure_marketplace_links_allowed(link_data):
             return False
         if self.is_running:
             show_warning(self, "알림", "이미 업로드 작업이 실행 중입니다.")
@@ -3216,7 +3349,7 @@ class MainWindow(QMainWindow):
                 (self._settings_info_sec, 96),
             ),
             3: (
-                (self._settings_payment_sec, 198),
+                (self._settings_payment_sec, 374),
                 (self._settings_tutorial_sec, 104),
                 (self._settings_contact_sec, 108),
             ),
@@ -3875,6 +4008,7 @@ class MainWindow(QMainWindow):
         subscription_status = None
         expires_at = None
         remaining_count = None
+        state = dict(auth)
 
         # Resolve from auth_client state if not in auth_data
         try:
@@ -3923,9 +4057,15 @@ class MainWindow(QMainWindow):
         if paid_account is None:
             paid_account = False
 
+        from src.subscription_plans import resolve_plan
+
+        resolved_plan = resolve_plan(state)
+        paid_plan_label = resolved_plan.label if resolved_plan else "유료 계정"
+        header_plan_label = "쇼핑 프로" if resolved_plan and resolved_plan.is_shopping_pro else paid_plan_label
+
         # Header plan badge
         if paid_account:
-            self._plan_badge.setText("유료계정")
+            self._plan_badge.setText(header_plan_label)
             self._plan_badge.setStyleSheet(
                 "QPushButton {"
                 " background-color: rgba(227, 22, 57, 0.14);"
@@ -3992,7 +4132,7 @@ class MainWindow(QMainWindow):
         self._acct_work_label.setText(f"{work_used} / {work_count} 회 사용")
 
         if paid_account:
-            self._acct_plan_badge.setText("프로 구독")
+            self._acct_plan_badge.setText(paid_plan_label)
             self._acct_plan_badge.setStyleSheet(
                 f"QLabel {{ background-color: rgba(13, 89, 242, 0.15);"
                 f" color: {Colors.ACCENT_LIGHT}; border: 1px solid rgba(13, 89, 242, 0.3);"
@@ -4008,6 +4148,36 @@ class MainWindow(QMainWindow):
             self._acct_plan_badge.setToolTip(f"만료: {expires_at}")
         else:
             self._acct_plan_badge.setToolTip("")
+
+        if hasattr(self, "_shopping_offer_label"):
+            offer_eligible = bool(state.get("offer_eligible"))
+            trial_ends_at = str(state.get("shopping_trial_ends_at") or "").strip()
+            offer_price = int(state.get("offer_price_krw") or 59_000)
+            offer_cycles = int(state.get("offer_cycles") or 6)
+            if resolved_plan and resolved_plan.is_shopping_pro:
+                offer_text = "현재 쇼핑 프로 이용 중 · 쿠팡·네이버·토스·Ali 상품 링크 지원"
+            elif str(state.get("commerce_scope") or "").lower() == "multi" and trial_ends_at:
+                trial_date = trial_ends_at[:10]
+                offer_text = f"기존 고객 · {trial_date} 전까지 쇼핑 프로 무료"
+                if offer_eligible:
+                    offer_text += f" · 이후 월 {offer_price:,}원×최대 {offer_cycles}회 · 월간권 해지 후 전환"
+            elif offer_eligible:
+                offer_text = (
+                    f"기존 고객 · 월 {offer_price:,}원×최대 {offer_cycles}회 · "
+                    "이후 월 69,000원 · 월간권 해지 후 전환"
+                )
+            else:
+                offer_text = "무료 계정도 첫 작업 1회는 모든 쇼핑몰 링크를 체험할 수 있습니다."
+            self._shopping_offer_label.setText(offer_text)
+
+        if hasattr(self, "_pay_shopping_monthly_btn"):
+            pro_month_price = int(state.get("offer_price_krw") or 59_000) if state.get("offer_eligible") else 69_000
+            self._pay_shopping_monthly_btn.setText(
+                f"월간 쇼핑 프로  {pro_month_price:,}원\n10개 Threads 계정 · 정기결제"
+            )
+
+        if hasattr(self, "_pay_cancel_btn"):
+            self._pay_cancel_btn.setVisible(bool(paid_account and state.get("is_recurring")))
 
         self._relayout_header_account_card()
 
@@ -4027,6 +4197,31 @@ class MainWindow(QMainWindow):
         if not self._open_external_link(kakao_url, "settings_kakao_contact"):
             show_error(self, "문의하기", f"카카오톡 문의 페이지를 열지 못했습니다.\n{kakao_url}")
 
+    def _shopping_pro_month_plan_id(self):
+        from src import auth_client
+        from src.subscription_plans import (
+            SHOPPING_PRO_FOUNDER_MONTHLY_PLAN_ID,
+            SHOPPING_PRO_MONTHLY_PLAN_ID,
+        )
+
+        state = auth_client.get_auth_state()
+        if state.get("offer_eligible"):
+            return str(state.get("offer_plan_id") or SHOPPING_PRO_FOUNDER_MONTHLY_PLAN_ID)
+        return SHOPPING_PRO_MONTHLY_PLAN_ID
+
+    def _set_payment_busy(self, busy, status=""):
+        for widget_name in (
+            "_pay_weekly_btn",
+            "_pay_monthly_btn",
+            "_pay_shopping_weekly_btn",
+            "_pay_shopping_monthly_btn",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setEnabled(not busy)
+        if status and hasattr(self, "_pay_status_label"):
+            self._pay_status_label.setText(status)
+
     def _request_payapp_checkout(self, plan_id="stmaker_pro_week"):
         phone = re.sub(r"[^0-9]", "", self._pay_phone_edit.text().strip())
         phone_masked = phone
@@ -4043,11 +4238,15 @@ class MainWindow(QMainWindow):
                 level="WARNING",
             )
             show_warning(self, "결제 요청", "휴대폰 번호를 입력해주세요. (예: 01012345678)")
+            self._set_payment_busy(False, "휴대폰 번호를 확인해주세요.")
             return
 
+        self._set_payment_busy(True, "안전한 결제 페이지를 준비하고 있습니다…")
         try:
             from src import auth_client
-            if plan_id == "stmaker_pro_month":
+            from src.subscription_plans import RECURRING_PLAN_IDS
+
+            if plan_id in RECURRING_PLAN_IDS:
                 result = auth_client.create_payapp_subscription(phone, plan_id=plan_id)
             else:
                 result = auth_client.create_payapp_checkout(phone, plan_id=plan_id)
@@ -4055,11 +4254,15 @@ class MainWindow(QMainWindow):
             self._log_user_activity("payment_checkout_request_failed", "reason=api_exception", level="ERROR")
             logger.exception("PayApp 결제 요청 중 예외가 발생했습니다.")
             show_error(self, "결제 요청 실패", "결제 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
+            self._set_payment_busy(False, "결제 요청에 실패했습니다. 잠시 후 다시 시도해주세요.")
             return
+
+        self._set_payment_busy(False)
 
         if not isinstance(result, dict):
             self._log_user_activity("payment_checkout_request_failed", "reason=invalid_response", level="ERROR")
             show_error(self, "결제 요청 실패", "결제 서버 응답 형식이 올바르지 않습니다.")
+            self._set_payment_busy(False, "결제 서버 응답을 확인하지 못했습니다.")
             return
 
         success = bool(result.get("success"))
@@ -4072,6 +4275,7 @@ class MainWindow(QMainWindow):
             message = str(result.get("message") or "결제 요청에 실패했습니다.").strip()
             show_error(self, "결제 요청 실패", message)
             logger.warning("결제 요청 실패: %s", message)
+            self._set_payment_busy(False, message)
             return
 
         server_plan_id = str(result.get("plan_id") or "").strip()
@@ -4092,6 +4296,7 @@ class MainWindow(QMainWindow):
                 "결제 요청 실패",
                 "결제 서버 플랜 매핑이 올바르지 않습니다. 관리자에게 문의해주세요.",
             )
+            self._set_payment_busy(False, "결제 요금제 확인에 실패했습니다.")
             return
 
         pay_url = ""
@@ -4109,6 +4314,7 @@ class MainWindow(QMainWindow):
             )
             show_error(self, "결제 요청 실패", "결제 URL을 받지 못했습니다. 관리자에게 문의해주세요.")
             logger.warning("결제 성공 응답에 URL 누락: %s", result)
+            self._set_payment_busy(False, "결제 페이지 주소를 받지 못했습니다.")
             return
 
         if not auth_client.is_trusted_payment_url(pay_url):
@@ -4123,6 +4329,7 @@ class MainWindow(QMainWindow):
                 "결제 요청 실패",
                 "신뢰할 수 없는 결제 URL이 감지되어 결제창을 열지 않았습니다.",
             )
+            self._set_payment_busy(False, "안전하지 않은 결제 주소가 차단되었습니다.")
             return
 
         safe_pay_url = auth_client.safe_url_for_log(pay_url)
@@ -4131,10 +4338,12 @@ class MainWindow(QMainWindow):
         if not opened:
             self._log_user_activity("payment_checkout_open_failed", f"url={safe_pay_url}", level="WARNING")
             show_error(self, "결제 요청 실패", f"결제 페이지를 열지 못했습니다.\n{safe_pay_url}")
+            self._set_payment_busy(False, "결제 페이지를 열지 못했습니다.")
             return
 
         self._log_user_activity("payment_checkout_opened", f"url={safe_pay_url}")
         self.signals.log.emit(f"PayApp 결제 페이지가 열렸습니다: {safe_pay_url}")
+        self._set_payment_busy(False, "결제 페이지가 열렸습니다. 결제 후 ‘상태 새로고침’을 눌러주세요.")
         # Refresh entitlement shortly after PayApp approval instead of waiting
         # for the normal one-minute heartbeat interval.
         for delay_ms in (5_000, 15_000, 30_000, 60_000, 120_000):
@@ -4742,7 +4951,7 @@ class MainWindow(QMainWindow):
                 return
             self._log_user_activity("batch_start_blocked", "reason=empty_links_input", level="WARNING")
             logger.warning("업로드 시작 차단: 내용이 비어 있습니다")
-            show_warning(self, "알림", "쿠팡 파트너스 링크를 입력하세요.")
+            show_warning(self, "알림", "상품 링크를 입력하세요.")
             return
 
         config.load()
@@ -4763,7 +4972,9 @@ class MainWindow(QMainWindow):
         if not link_data:
             self._log_user_activity("batch_start_blocked", "reason=no_valid_links", level="WARNING")
             logger.warning("업로드 시작 차단: 유효한 링크가 없습니다")
-            show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "지원하는 상품 링크를 찾을 수 없습니다.")
+            return
+        if not self._ensure_marketplace_links_allowed(link_data):
             return
 
         selected_account = self.selected_threads_account()
@@ -4896,7 +5107,9 @@ class MainWindow(QMainWindow):
         if not link_data:
             self._log_user_activity("queue_add_links_blocked", "reason=no_valid_links", level="WARNING")
             logger.warning("링크 큐 추가 차단: 유효한 링크가 없습니다")
-            show_warning(self, "알림", "유효한 쿠팡 파트너스 단축 링크를 찾을 수 없습니다.")
+            show_warning(self, "알림", "지원하는 상품 링크를 찾을 수 없습니다.")
+            return
+        if not self._ensure_marketplace_links_allowed(link_data):
             return
 
         runtime = getattr(self, "_multi_account_runtime", None)

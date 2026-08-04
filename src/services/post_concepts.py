@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Post writing concept definitions for Coupang Threads copy."""
+"""Post writing concept definitions for shopping-product Threads copy."""
 
 from __future__ import annotations
 

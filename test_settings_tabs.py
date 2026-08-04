@@ -53,6 +53,16 @@ def test_settings_page_uses_four_category_tabs(monkeypatch):
     assert not window._settings_contact_sec.isHidden()
     assert window._settings_startup_sec.isHidden()
 
+    assert window._pay_phone_edit.accessibleName() == "결제 휴대폰 번호"
+    assert window._pay_phone_edit.maxLength() == 11
+    assert "19,000원" in window._pay_weekly_btn.text()
+    assert "49,000원" in window._pay_monthly_btn.text()
+    assert "29,000원" in window._pay_shopping_weekly_btn.text()
+    assert "69,000원" in window._pay_shopping_monthly_btn.text()
+    assert window._pay_shopping_weekly_btn.accessibleName() == "7일 쇼핑 프로 이용권 결제"
+    assert window._pay_shopping_monthly_btn.accessibleName() == "월간 쇼핑 프로 이용권 결제"
+    assert window._settings_payment_sec.height() >= 360
+
     assert window._settings_save_btn.parent() is window._pages[2]
     assert window._settings_scroll.geometry().bottom() < window._settings_save_btn.y()
 

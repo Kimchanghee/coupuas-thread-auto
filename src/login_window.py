@@ -173,7 +173,7 @@ class LoginWindow(QMainWindow):
         # Tagline
         painter.setPen(QColor(255, 255, 255, 230))
         painter.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
-        painter.drawText(0, 352, panel_w, 40, Qt.AlignmentFlag.AlignCenter, "쿠팡 파트너스 Threads\n자동 업로드 솔루션")
+        painter.drawText(0, 352, panel_w, 40, Qt.AlignmentFlag.AlignCenter, "멀티 쇼핑 Threads\n자동 업로드 솔루션")
 
         # Features
         painter.setPen(QColor(255, 255, 255, 200))

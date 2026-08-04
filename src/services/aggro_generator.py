@@ -21,6 +21,7 @@ from src.services.post_concepts import (
     normalize_concept_id,
 )
 from src.services.trending_news import fetch_korean_issue_headlines
+from src.services.marketplaces import COUPANG_DISCLOSURE, GENERAL_AFFILIATE_DISCLOSURE
 
 
 _AI_PROVIDER_TEMPLATE = "template"
@@ -29,10 +30,8 @@ _AI_PROVIDER_TEMPLATE = "template"
 class AggroGenerator:
     """Create ad-like short copy and multi-post payloads."""
 
-    COUPANG_DISCLOSURE = (
-        "이 포스팅은 쿠팡 파트너스 활동의 일환으로, "
-        "이에 따른 일정액의 수수료를 제공받습니다."
-    )
+    COUPANG_DISCLOSURE = COUPANG_DISCLOSURE
+    GENERAL_AFFILIATE_DISCLOSURE = GENERAL_AFFILIATE_DISCLOSURE
 
     ACTIVITY_WARNING = (
         "*파트너스 활동 주의사항*\n\n"
@@ -175,6 +174,7 @@ class AggroGenerator:
                     "second_post": product_comment,
                     "product_title": title,
                     "original_url": original_url,
+                    "marketplace": product_info.get("marketplace"),
                     "post_concept": selected_concept_id,
                     "hook_variant": variant.variant_id,
                     "managed_ai": True,
@@ -478,7 +478,7 @@ class AggroGenerator:
                 f"{issue_context}\n\n"
                 "Threads 첫 번째 글에 들어갈 초강력 호기심 유발 문구 2줄을 작성해줘.\n"
                 "규칙:\n"
-                "- 이 글은 첫 번째 글이다. URL, 쿠팡 링크, 구매 링크, 광고 고지 문구는 절대 넣지 마\n"
+                "- 이 글은 첫 번째 글이다. URL, 상품·구매·제휴 링크, 광고 고지 문구는 절대 넣지 마\n"
                 "- 1줄차: 상품의 실제 사용 장면과 불편함을 뒤집는 어그로 훅 (35~65자)\n"
                 "- 2줄차: 더 보고 싶게 만드는 짧은 보조 문장 (20~45자)\n"
                 "- 이모지 1~2개를 자연스럽게 넣어. 너무 많이 넣지 마\n"
@@ -521,13 +521,19 @@ class AggroGenerator:
             )
 
     @classmethod
-    def _build_second_post_text(cls, original_url: str, title: str, keywords: str) -> str:
+    def _build_second_post_text(
+        cls,
+        original_url: str,
+        title: str,
+        keywords: str,
+        disclosure: str = "",
+    ) -> str:
         token = cls._select_core_keyword(title, keywords)
         compact_title = cls._trim_line(title or token, 28)
         lines = [
             f"🔗 {compact_title} 확인 링크",
             original_url,
-            cls.COUPANG_DISCLOSURE,
+            str(disclosure or cls.COUPANG_DISCLOSURE).strip(),
         ]
         return "\n".join(lines)
 
@@ -568,7 +574,12 @@ class AggroGenerator:
         )
         media_path = video_path if video_path else image_path
 
-        second_text = self._build_second_post_text(original_url, title, keywords)
+        second_text = self._build_second_post_text(
+            original_url,
+            title,
+            keywords,
+            str(product_info.get("affiliate_disclosure") or self.COUPANG_DISCLOSURE),
+        )
 
         root_post = {
             "text": aggro_text,
@@ -589,6 +600,7 @@ class AggroGenerator:
             "second_post": product_comment,
             "product_title": title,
             "original_url": original_url,
+            "marketplace": product_info.get("marketplace"),
             "post_concept": selected_concept_id,
             "hook_variant": self.get_hook_variant(
                 variant_id or product_info.get("hook_variant")

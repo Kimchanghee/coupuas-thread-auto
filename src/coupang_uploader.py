@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-쿠팡 파트너스 전용 Threads 업로더
+쇼핑 상품 Threads 업로더
 고정 2단 형식 (본문 + 상품 댓글)으로 업로드합니다.
 """
 import time
@@ -23,11 +23,11 @@ class CancelledException(Exception):
 
 class CoupangThreadsUploader:
     """
-    쿠팡 파트너스 전용 업로더
+    쇼핑 상품 업로더
 
     각 상품마다:
     1. 본문: 선택한 작성 방식의 상품 기반 훅 + 이미지/영상
-    2. 상품 댓글: 상품 링크 + 쿠팡 파트너스 고지
+    2. 상품 댓글: 상품 링크 + 쇼핑몰별 광고·제휴 고지
     """
 
     def __init__(self, google_api_key: str = ""):
@@ -360,9 +360,9 @@ class CoupangThreadsUploader:
 
 class CoupangPartnersPipeline:
     """
-    쿠팡 파트너스 자동화 파이프라인
+    쇼핑 상품 자동화 파이프라인
 
-    1. 쿠팡 링크 파싱
+    1. 지원 쇼핑몰 링크 파싱
     2. 어그로 문구 생성
     3. Threads 업로드
     """
@@ -478,7 +478,11 @@ class CoupangPartnersPipeline:
             self._image_search = ImageSearchService()
         return self._image_search
 
-    def _normalize_second_post_disclosure(self, post_data: Optional[Dict]) -> Optional[Dict]:
+    def _normalize_second_post_disclosure(
+        self,
+        post_data: Optional[Dict],
+        product_info: Optional[Dict] = None,
+    ) -> Optional[Dict]:
         """Ensure required disclosure line is always at the top of second post."""
         if not isinstance(post_data, dict):
             return post_data
@@ -487,7 +491,9 @@ class CoupangPartnersPipeline:
         if not isinstance(second_post, dict):
             return post_data
 
-        disclosure = str(getattr(self.aggro_generator, "COUPANG_DISCLOSURE", "") or "").strip()
+        disclosure = str((product_info or {}).get("affiliate_disclosure") or "").strip()
+        if not disclosure:
+            disclosure = str(getattr(self.aggro_generator, "COUPANG_DISCLOSURE", "") or "").strip()
         if not disclosure:
             return post_data
 
@@ -505,25 +511,35 @@ class CoupangPartnersPipeline:
             second_post["text"] = disclosure
         return post_data
 
-    def process_link(self, coupang_url: str, user_keywords: str = None) -> Optional[Dict]:
-        """단일 쿠팡 링크 처리
+    def process_link(self, product_url: str, user_keywords: str = None) -> Optional[Dict]:
+        """단일 상품 링크 처리
 
         Args:
-            coupang_url: 쿠팡 파트너스 링크
+            product_url: 지원 쇼핑몰 상품 링크
             user_keywords: 사용자 제공 검색 키워드 (옵션)
-                - 쿠팡 봇 탐지로 상품명 추출이 어려워 사용자가 직접 키워드 입력 가능
+                - 상품명 추출이 어려울 때 사용자가 직접 키워드 입력 가능
 
         Returns:
             게시물 데이터 또는 None
         """
         self._check_cancelled()
 
-        print(f"\n  링크 처리 중: {coupang_url[:50]}...")
+        from src import auth_client
+        from src.subscription_plans import marketplace_access_decision
 
-        print("  [1단계] 쿠팡 링크 분석...")
+        allowed, access_message = marketplace_access_decision(
+            auth_client.get_auth_state(),
+            product_url,
+        )
+        if not allowed:
+            raise PermissionError(access_message)
+
+        print(f"\n  링크 처리 중: {product_url[:50]}...")
+
+        print("  [1단계] 상품 링크 분석...")
         try:
             product_info = self.coupang_parser.parse_link(
-                coupang_url,
+                product_url,
                 cancel_check=self._is_cancelled,
             )
         except OperationCancelled as exc:
@@ -542,7 +558,11 @@ class CoupangPartnersPipeline:
             print(f"  상품명: {product_info.get('title', '')[:40]}...")
         else:
             print(f"  상품명 없음 (상품 번호만 추출됨)")
-            product_info['title'] = f"쿠팡 상품 #{product_info.get('product_id', '')}"
+            marketplace_label = str(product_info.get("marketplace_label") or "쇼핑몰")
+            product_id = str(product_info.get("product_id") or "").strip()
+            product_info['title'] = (
+                f"{marketplace_label} 상품 #{product_id}" if product_id else f"{marketplace_label} 상품"
+            )
 
         self._check_cancelled()
 
@@ -578,7 +598,7 @@ class CoupangPartnersPipeline:
             api_key=self._resolve_google_api_key(),
             concept_id=post_concept,
         )
-        post_data = self._normalize_second_post_disclosure(post_data)
+        post_data = self._normalize_second_post_disclosure(post_data, product_info)
         print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")
 
         return post_data
@@ -587,7 +607,7 @@ class CoupangPartnersPipeline:
                            progress_callback: Callable = None,
                            cancel_check: Callable[[], bool] = None) -> Dict:
         """
-        쿠팡 링크를 하나씩 처리하고 업로드 (파싱 → 업로드 → 대기 순서)
+        상품 링크를 하나씩 처리하고 업로드 (파싱 → 업로드 → 대기 순서)
 
         Args:
             link_data: [(url, keyword), ...] 형식의 링크 데이터
@@ -724,7 +744,7 @@ class CoupangPartnersPipeline:
                     continue
 
                 # 1. 상품 파싱
-                log("1단계: 상품 분석", "쿠팡 상품 정보 추출 중...")
+                log("1단계: 상품 분석", "쇼핑몰 상품 정보 추출 중...")
                 try:
                     post_data = self.process_link(url, user_keywords=keyword)
 
