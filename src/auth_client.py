@@ -21,6 +21,12 @@ import requests
 from dotenv import load_dotenv
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
+from src.subscription_plans import (
+    MONTHLY_PLAN_ID,
+    ONE_TIME_PLAN_IDS,
+    RECURRING_PLAN_IDS,
+    WEEKLY_PLAN_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +78,10 @@ API_SERVER_URL = _normalize_api_server_url(
 )
 PROGRAM_TYPE = "stmaker"
 _DEFAULT_FREE_TRIAL_WORK_COUNT = 5
-_WEEKLY_PAYAPP_PLAN_ID = "stmaker_pro_week"
-_MONTHLY_PAYAPP_PLAN_ID = "stmaker_pro_month"
+_WEEKLY_PAYAPP_PLAN_ID = WEEKLY_PLAN_ID
+_MONTHLY_PAYAPP_PLAN_ID = MONTHLY_PLAN_ID
+_ONE_TIME_PAYAPP_PLAN_IDS = ONE_TIME_PLAN_IDS
+_RECURRING_PAYAPP_PLAN_IDS = RECURRING_PLAN_IDS
 _ALLOWED_PAYAPP_PAYMENT_TYPES = frozenset(
     {
         "card",
@@ -689,6 +697,12 @@ _auth_state: Dict[str, Any] = {
     "account_limit": 1,
     "billing_interval": None,
     "is_recurring": False,
+    "commerce_scope": "coupang",
+    "shopping_trial_ends_at": None,
+    "offer_eligible": False,
+    "offer_plan_id": None,
+    "offer_price_krw": None,
+    "offer_cycles": None,
     "is_paid": None,
     "subscription_status": None,
     "expires_at": None,
@@ -718,6 +732,12 @@ def _clear_auth_state_memory() -> None:
         _auth_state["account_limit"] = 1
         _auth_state["billing_interval"] = None
         _auth_state["is_recurring"] = False
+        _auth_state["commerce_scope"] = "coupang"
+        _auth_state["shopping_trial_ends_at"] = None
+        _auth_state["offer_eligible"] = False
+        _auth_state["offer_plan_id"] = None
+        _auth_state["offer_price_krw"] = None
+        _auth_state["offer_cycles"] = None
         _auth_state["is_paid"] = None
         _auth_state["subscription_status"] = None
         _auth_state["expires_at"] = None
@@ -769,7 +789,16 @@ def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
         return None
 
     candidate_maps = [payload]
-    for container_key in ("data", "account", "subscription", "profile", "billing", "payment"):
+    for container_key in (
+        "data",
+        "account",
+        "subscription",
+        "profile",
+        "billing",
+        "payment",
+        "promotion",
+        "shopping_promotion",
+    ):
         container = payload.get(container_key)
         if isinstance(container, dict):
             candidate_maps.insert(0, container)
@@ -853,6 +882,30 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
         is_recurring = _coerce_bool(_extract_state_value(payload, "is_recurring"))
         if is_recurring is not None:
             _auth_state["is_recurring"] = is_recurring
+
+        commerce_scope = _extract_state_value(payload, "commerce_scope")
+        if isinstance(commerce_scope, str) and commerce_scope.strip().lower() in {"coupang", "multi"}:
+            _auth_state["commerce_scope"] = commerce_scope.strip().lower()
+
+        shopping_trial_ends_at = _extract_state_value(payload, "shopping_trial_ends_at")
+        if isinstance(shopping_trial_ends_at, str):
+            _auth_state["shopping_trial_ends_at"] = shopping_trial_ends_at.strip() or None
+
+        offer_eligible = _coerce_bool(_extract_state_value(payload, "offer_eligible"))
+        if offer_eligible is not None:
+            _auth_state["offer_eligible"] = offer_eligible
+
+        offer_plan_id = _extract_state_value(payload, "offer_plan_id")
+        if isinstance(offer_plan_id, str):
+            _auth_state["offer_plan_id"] = offer_plan_id.strip() or None
+
+        for source_key, state_key in (
+            ("offer_price_krw", "offer_price_krw"),
+            ("offer_cycles", "offer_cycles"),
+        ):
+            value = _extract_state_value(payload, source_key)
+            if isinstance(value, (int, float)):
+                _auth_state[state_key] = int(value)
 
         subscription_status = _extract_state_value(payload, "subscription_status", "plan_status", "status")
         if isinstance(subscription_status, str) and subscription_status.strip():
@@ -1010,8 +1063,8 @@ def create_payapp_checkout(
         return {"success": False, "message": "휴대폰 번호를 정확히 입력해주세요. (예: 01012345678)"}
 
     resolved_plan_id = str(plan_id or _resolve_default_payapp_plan_id()).strip()
-    if resolved_plan_id != _WEEKLY_PAYAPP_PLAN_ID:
-        return {"success": False, "message": "7일 이용권만 일반 결제를 사용할 수 있습니다."}
+    if resolved_plan_id not in _ONE_TIME_PAYAPP_PLAN_IDS:
+        return {"success": False, "message": "선택한 요금제는 일회 결제를 사용할 수 없습니다."}
     if not resolved_plan_id:
         return {"success": False, "message": "결제 플랜 정보가 없습니다."}
 
@@ -1137,8 +1190,9 @@ def create_payapp_subscription(
     phone_digits = _normalize_phone_number(phone)
     if not re.fullmatch(r"01[016789]\d{7,8}", phone_digits):
         return {"success": False, "message": "휴대폰 번호를 정확히 입력해주세요."}
-    if str(plan_id) != _MONTHLY_PAYAPP_PLAN_ID:
-        return {"success": False, "message": "월 정기권만 정기결제를 사용할 수 있습니다."}
+    resolved_plan_id = str(plan_id or "").strip()
+    if resolved_plan_id not in _RECURRING_PAYAPP_PLAN_IDS:
+        return {"success": False, "message": "선택한 요금제는 월 정기결제를 사용할 수 없습니다."}
 
     headers = _build_auth_headers(token)
     headers["X-User-ID"] = str(user_id)
@@ -1146,7 +1200,7 @@ def create_payapp_subscription(
     body = {
         "user_id": str(user_id),
         "phone": phone_digits,
-        "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+        "plan_id": resolved_plan_id,
         "cycle_type": "Month",
         "cycle_day": day if day <= 28 else 90,
     }
@@ -1162,25 +1216,25 @@ def create_payapp_subscription(
         payload = _safe_json(resp)
         if resp.status_code == 200:
             payload.setdefault("success", bool(payload.get("payurl")))
-            payload.setdefault("plan_id", _MONTHLY_PAYAPP_PLAN_ID)
+            payload.setdefault("plan_id", resolved_plan_id)
             payurl = str(payload.get("payurl") or "").strip()
             if payurl and not is_trusted_payment_url(payurl):
                 return {
                     "success": False,
                     "message": "결제 서버가 신뢰할 수 없는 URL을 반환했습니다.",
-                    "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+                    "plan_id": resolved_plan_id,
                 }
             return payload
         return {
             "success": False,
             "message": _extract_api_message(payload, f"정기결제 요청 실패 ({resp.status_code})"),
-            "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+            "plan_id": resolved_plan_id,
         }
     except requests.exceptions.RequestException as exc:
         return {
             "success": False,
             "message": _request_error_message(exc, default_message="정기결제 요청 중 통신 오류가 발생했습니다."),
-            "plan_id": _MONTHLY_PAYAPP_PLAN_ID,
+            "plan_id": resolved_plan_id,
         }
 
 

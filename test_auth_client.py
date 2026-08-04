@@ -97,6 +97,17 @@ def _reset_auth_state():
             "remaining_count": None,
             "user_type": None,
             "plan_type": None,
+            "plan_id": None,
+            "plan_name": None,
+            "account_limit": 1,
+            "billing_interval": None,
+            "is_recurring": False,
+            "commerce_scope": "coupang",
+            "shopping_trial_ends_at": None,
+            "offer_eligible": False,
+            "offer_plan_id": None,
+            "offer_price_krw": None,
+            "offer_cycles": None,
             "is_paid": None,
             "subscription_status": None,
             "expires_at": None,
@@ -614,6 +625,79 @@ def test_create_payapp_checkout_rejects_untrusted_payment_url(monkeypatch):
 
     assert result["success"] is False
     assert "신뢰할 수 없는 결제 URL" in result["message"]
+
+
+def test_create_payapp_checkout_routes_shopping_pro_week_plan(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "7001"
+    auth_client._auth_state["token"] = "server-token"
+    session = _FakeSession(
+        _FakeResponse(
+            200,
+            {
+                "success": True,
+                "plan_id": "stmaker_shopping_pro_week",
+                "payurl": "https://payapp.kr/pro-week",
+            },
+        )
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.create_payapp_checkout(
+        "01012345678",
+        plan_id="stmaker_shopping_pro_week",
+    )
+
+    assert result["success"] is True
+    assert session.calls[-1]["json"]["plan_id"] == "stmaker_shopping_pro_week"
+
+
+def test_create_payapp_subscription_routes_shopping_pro_month_plan(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "7001"
+    auth_client._auth_state["token"] = "server-token"
+    session = _FakeSession(
+        _FakeResponse(
+            200,
+            {
+                "success": True,
+                "plan_id": "stmaker_shopping_pro_month",
+                "payurl": "https://payapp.kr/pro-month",
+            },
+        )
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.create_payapp_subscription(
+        "01012345678",
+        plan_id="stmaker_shopping_pro_month",
+    )
+
+    assert result["success"] is True
+    assert session.calls[-1]["json"]["plan_id"] == "stmaker_shopping_pro_month"
+
+
+def test_merge_account_state_includes_server_shopping_entitlement():
+    _reset_auth_state()
+
+    auth_client._merge_account_state(
+        {
+            "commerce_scope": "multi",
+            "shopping_trial_ends_at": "2026-10-04T00:00:00+00:00",
+            "shopping_promotion": {
+                "offer_eligible": True,
+                "offer_plan_id": "stmaker_shopping_pro_founder_month",
+                "offer_price_krw": 59_000,
+                "offer_cycles": 6,
+            },
+        }
+    )
+
+    state = auth_client.get_auth_state()
+    assert state["commerce_scope"] == "multi"
+    assert state["offer_eligible"] is True
+    assert state["offer_price_krw"] == 59_000
+    assert state["offer_cycles"] == 6
 
 
 def test_subscription_status_sends_server_required_user_header(monkeypatch):
