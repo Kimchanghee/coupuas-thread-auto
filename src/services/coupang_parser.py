@@ -9,6 +9,7 @@ import requests
 import base64
 import json
 import time
+from html.parser import HTMLParser
 from typing import Callable, Optional, Dict
 from urllib.parse import urlparse, parse_qs, urljoin
 
@@ -18,6 +19,10 @@ from src.gemini_keys import (
     is_retryable_gemini_model_error,
 )
 from src.services.cancellation import check_cancelled, is_cancelled_exception
+from src.services.marketplaces import (
+    marketplace_for_url,
+    normalize_product_url,
+)
 
 # Gemini API 재시도 설정
 MAX_RETRIES = 5
@@ -25,6 +30,67 @@ RETRY_DELAY = 60  # 1분
 PARTNER_LINK_HOST = "link.coupang.com"
 ALLOWED_COUPANG_DOMAINS = ("coupang.com",)
 MAX_REDIRECT_HOPS = 5
+MAX_PRODUCT_HTML_BYTES = 2_000_000
+
+
+class _ProductMetadataParser(HTMLParser):
+    """Small dependency-free parser for public product-page metadata."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.meta: dict[str, str] = {}
+        self.title_parts: list[str] = []
+        self.json_ld_parts: list[str] = []
+        self._in_title = False
+        self._in_json_ld = False
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        values = {str(key).lower(): str(value or "") for key, value in attrs}
+        lowered = str(tag or "").lower()
+        if lowered == "title":
+            self._in_title = True
+        elif lowered == "meta":
+            key = (
+                values.get("property")
+                or values.get("name")
+                or values.get("itemprop")
+            ).strip().lower()
+            content = values.get("content", "").strip()
+            if key and content and key not in self.meta:
+                self.meta[key] = content
+        elif lowered == "script" and "ld+json" in values.get("type", "").lower():
+            self._in_json_ld = True
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = str(tag or "").lower()
+        if lowered == "title":
+            self._in_title = False
+        elif lowered == "script":
+            self._in_json_ld = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title_parts.append(data)
+        elif self._in_json_ld:
+            self.json_ld_parts.append(data)
+
+
+def _find_product_json(value: object) -> dict:
+    if isinstance(value, dict):
+        raw_type = value.get("@type")
+        types = raw_type if isinstance(raw_type, list) else [raw_type]
+        if any(str(item or "").lower() == "product" for item in types):
+            return value
+        for child in value.values():
+            found = _find_product_json(child)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_product_json(child)
+            if found:
+                return found
+    return {}
 
 
 def _redact_api_key(value: object) -> str:
@@ -33,7 +99,11 @@ def _redact_api_key(value: object) -> str:
 
 
 class CoupangParser:
-    """쿠팡 파트너스 링크 파서 (스크린샷 + AI Vision 방식)"""
+    """상품 링크 파서.
+
+    기존 클래스 이름은 호환성을 위해 유지하며 쿠팡, 네이버쇼핑,
+    토스쇼핑, AliExpress 상품 링크를 공통 결과 형식으로 반환합니다.
+    """
 
     def __init__(self, google_api_key: str = None):
         self.google_api_key = google_api_key
@@ -100,33 +170,31 @@ class CoupangParser:
         url: str,
         cancel_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[Dict]:
-        """
-        쿠팡 파트너스 링크에서 상품 정보 추출
-
-        쿠팡 봇 탐지 우회를 위해 리다이렉트와 이미지 URL만 추출합니다.
-        상품명/키워드는 1688 이미지 검색에서 처리합니다.
-
-        Args:
-            url: 쿠팡 파트너스 링크 (link.coupang.com/a/xxx 형식)
-
-        Returns:
-            상품 정보 딕셔너리 또는 None
-        """
+        """지원 쇼핑몰 상품 링크에서 공개 상품 정보를 추출합니다."""
         try:
             check_cancelled(cancel_check)
-            url = self._normalize_url(url)
-            if not self._is_partner_link_url(url):
-                print("  [!] Invalid or non-partner Coupang URL")
+            url = normalize_product_url(url)
+            marketplace = marketplace_for_url(url)
+            if not url or marketplace is None:
+                print("  [!] 지원하지 않는 상품 URL")
                 return None
 
-            print(f"  [Parse] Parsing Coupang link...")
+            print(f"  [Parse] {marketplace.label} 상품 링크 분석 중...")
 
-            # 파서로 정보 추출 시도
-            result = self._parse_with_playwright(url, cancel_check=cancel_check)
+            if marketplace.marketplace_id == "coupang" and self._is_partner_link_url(url):
+                result = self._parse_with_playwright(url, cancel_check=cancel_check)
+            else:
+                result = self._parse_marketplace_page(
+                    url,
+                    marketplace.marketplace_id,
+                    cancel_check=cancel_check,
+                )
             if result:
                 result['original_url'] = url
+                result['marketplace'] = marketplace.marketplace_id
+                result['marketplace_label'] = marketplace.label
+                result['affiliate_disclosure'] = marketplace.disclosure
 
-                # 이미지 URL이 있으면 성공으로 간주
                 if result.get('image_url'):
                     print(f"  [Parse] Successfully extracted image URL")
                 elif result.get('product_id'):
@@ -142,6 +210,154 @@ class CoupangParser:
                 raise
             print(f"  [!] Parse error: {e}")
             return None
+
+    def _parse_marketplace_page(
+        self,
+        url: str,
+        marketplace_id: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> Optional[Dict]:
+        """Extract public metadata, then use URL Context as an optional fallback."""
+        final_url, html = self._fetch_supported_html(url, cancel_check=cancel_check)
+        info = self._metadata_from_html(html, final_url) if html else {}
+        info["final_url"] = final_url or url
+
+        product_id = self._product_id_from_url(final_url or url, marketplace_id)
+        if product_id:
+            info["product_id"] = product_id
+
+        if self.google_api_key and not (info.get("title") and info.get("image_url")):
+            ai_result = self._fetch_with_gemini_url_context(
+                final_url or url,
+                cancel_check=cancel_check,
+                marketplace_id=marketplace_id,
+            )
+            if ai_result:
+                for key in ("title", "keywords", "image_url", "price"):
+                    if ai_result.get(key) and not info.get(
+                        "search_keywords" if key == "keywords" else key
+                    ):
+                        info["search_keywords" if key == "keywords" else key] = ai_result[key]
+
+        title = str(info.get("title") or "").strip()
+        if title and not info.get("search_keywords"):
+            info["search_keywords"] = self._extract_keywords(title)
+        return info if title or info.get("image_url") else None
+
+    def _fetch_supported_html(
+        self,
+        url: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> tuple[str, str]:
+        """Fetch a supported public page while validating every redirect hop."""
+        initial_marketplace = marketplace_for_url(url)
+        if initial_marketplace is None:
+            return "", ""
+
+        current_url = normalize_product_url(url)
+        try:
+            for _ in range(MAX_REDIRECT_HOPS + 1):
+                check_cancelled(cancel_check)
+                response = self.session.get(
+                    current_url,
+                    allow_redirects=False,
+                    timeout=15,
+                )
+                status = int(response.status_code or 0)
+                if 300 <= status < 400:
+                    location = str(response.headers.get("Location", "") or "").strip()
+                    next_url = normalize_product_url(urljoin(current_url, location))
+                    next_marketplace = marketplace_for_url(next_url)
+                    if (
+                        not next_url
+                        or next_marketplace is None
+                        or next_marketplace.marketplace_id != initial_marketplace.marketplace_id
+                    ):
+                        return "", ""
+                    current_url = next_url
+                    continue
+                if status < 200 or status >= 400:
+                    return "", ""
+                content = bytes(getattr(response, "content", b"") or b"")[:MAX_PRODUCT_HTML_BYTES]
+                encoding = str(getattr(response, "encoding", "") or "utf-8")
+                try:
+                    return current_url, content.decode(encoding, errors="replace")
+                except LookupError:
+                    return current_url, content.decode("utf-8", errors="replace")
+            return "", ""
+        except Exception as exc:
+            if is_cancelled_exception(exc):
+                raise
+            print(f"  [!] 상품 페이지 메타데이터 요청 실패: {exc}")
+            return current_url, ""
+
+    @classmethod
+    def _metadata_from_html(cls, html: str, final_url: str) -> Dict:
+        parser = _ProductMetadataParser()
+        try:
+            parser.feed(str(html or ""))
+        except Exception:
+            return {}
+
+        product_json: dict = {}
+        for raw in parser.json_ld_parts:
+            try:
+                product_json = _find_product_json(json.loads(raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if product_json:
+                break
+
+        title = str(
+            parser.meta.get("og:title")
+            or parser.meta.get("twitter:title")
+            or product_json.get("name")
+            or " ".join(parser.title_parts)
+            or ""
+        ).strip()
+        image_value = (
+            parser.meta.get("og:image")
+            or parser.meta.get("twitter:image")
+            or product_json.get("image")
+            or ""
+        )
+        if isinstance(image_value, list):
+            image_value = image_value[0] if image_value else ""
+        if isinstance(image_value, dict):
+            image_value = image_value.get("url") or image_value.get("contentUrl") or ""
+        image_url = str(image_value or "").strip()
+        if image_url:
+            image_url = urljoin(final_url, image_url)
+            if not image_url.startswith("https://"):
+                image_url = ""
+
+        offers = product_json.get("offers") if isinstance(product_json, dict) else None
+        if isinstance(offers, list):
+            offers = offers[0] if offers else {}
+        price = (
+            parser.meta.get("product:price:amount")
+            or parser.meta.get("og:price:amount")
+            or (offers.get("price") if isinstance(offers, dict) else None)
+        )
+        return {
+            "title": title[:300],
+            "image_url": image_url,
+            "price": price,
+        }
+
+    @staticmethod
+    def _product_id_from_url(url: str, marketplace_id: str) -> str:
+        patterns = {
+            "coupang": (r"/products/(\d+)",),
+            "naver": (r"/products/(\d+)", r"/catalog/(\d+)"),
+            "toss": (r"/products?/(\d+)", r"[?&]productId=(\d+)"),
+            "aliexpress": (r"/item/(\d+)\.html", r"[?&]productId=(\d+)"),
+        }
+        for pattern in patterns.get(str(marketplace_id or ""), ()):
+            match = re.search(pattern, str(url or ""), re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return ""
 
     def _parse_with_playwright(
         self,
@@ -198,8 +414,9 @@ class CoupangParser:
         self,
         url: str,
         cancel_check: Optional[Callable[[], bool]] = None,
+        marketplace_id: str = "coupang",
     ) -> Optional[Dict]:
-        """Gemini URL Context API로 웹페이지 내용 가져오기 (재시도 로직 포함)"""
+        """Gemini URL Context API로 공개 상품 정보를 보완합니다."""
         if not self.google_api_key:
             return None
 
@@ -221,7 +438,9 @@ class CoupangParser:
                 # URL Context 도구 설정
                 tools = [{"url_context": {}}]
 
-                prompt = f"""다음 쿠팡 상품 페이지에서 정보를 추출해주세요: {url}
+                marketplace = marketplace_for_url(url)
+                marketplace_label = marketplace.label if marketplace else marketplace_id
+                prompt = f"""다음 {marketplace_label} 상품 페이지에서 공개된 정보를 추출해주세요: {url}
 
 다음 JSON 형식으로 응답해주세요:
 {{
@@ -263,7 +482,11 @@ JSON만 출력하세요."""
 
             except ImportError:
                 print(f"  [!] google-genai not installed, trying REST API...")
-                return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
+                return self._fetch_with_gemini_rest_api(
+                    url,
+                    cancel_check=cancel_check,
+                    marketplace_id=marketplace_id,
+                )
             except Exception as e:
                 if is_cancelled_exception(e):
                     raise
@@ -272,7 +495,11 @@ JSON만 출력하세요."""
 
                 if is_retryable_gemini_model_error(e):
                     print(f"  [!] Gemini URL Context model error: {e}")
-                    return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
+                    return self._fetch_with_gemini_rest_api(
+                        url,
+                        cancel_check=cancel_check,
+                        marketplace_id=marketplace_id,
+                    )
 
                 # 서버 오류인 경우에만 재시도
                 if any(err in error_str for err in ['500', '503', 'server', 'overloaded', 'rate', 'quota', 'timeout']):
@@ -286,16 +513,25 @@ JSON만 출력하세요."""
                 else:
                     # 서버 오류가 아니면 바로 REST API 시도
                     print(f"  [!] Gemini URL Context error: {e}")
-                    return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
+                    return self._fetch_with_gemini_rest_api(
+                        url,
+                        cancel_check=cancel_check,
+                        marketplace_id=marketplace_id,
+                    )
 
         # 모든 재시도 실패
         print(f"  [!] Gemini {MAX_RETRIES}회 재시도 모두 실패")
-        return self._fetch_with_gemini_rest_api(url, cancel_check=cancel_check)
+        return self._fetch_with_gemini_rest_api(
+            url,
+            cancel_check=cancel_check,
+            marketplace_id=marketplace_id,
+        )
 
     def _fetch_with_gemini_rest_api(
         self,
         url: str,
         cancel_check: Optional[Callable[[], bool]] = None,
+        marketplace_id: str = "coupang",
     ) -> Optional[Dict]:
         """Gemini REST API로 URL Context 사용 (SDK 없이)"""
         if not self.google_api_key:
@@ -305,7 +541,9 @@ JSON만 출력하세요."""
             check_cancelled(cancel_check)
             print(f"  [Parse] Using Gemini REST API with URL Context...")
 
-            prompt = f"""다음 쿠팡 상품 페이지에서 정보를 추출해주세요: {url}
+            marketplace = marketplace_for_url(url)
+            marketplace_label = marketplace.label if marketplace else marketplace_id
+            prompt = f"""다음 {marketplace_label} 상품 페이지에서 공개된 정보를 추출해주세요: {url}
 
 다음 JSON 형식으로 응답해주세요:
 {{
