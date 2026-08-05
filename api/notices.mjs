@@ -1,3 +1,5 @@
+import { request as httpsRequest } from "node:https";
+
 const GITHUB_OWNER = "Kimchanghee";
 const GITHUB_OWNER_ID = 9594198;
 const GITHUB_REPO = "coupuas-thread-auto";
@@ -116,7 +118,7 @@ function issueToPost(issue) {
   };
 }
 
-async function githubJson(path) {
+export function githubRequestConfig(path) {
   const token = text(process.env.GITHUB_TOKEN || process.env.GITHUB_READ_TOKEN);
   const headers = {
     Accept: "application/vnd.github+json",
@@ -124,13 +126,44 @@ async function githubJson(path) {
     "X-GitHub-Api-Version": "2022-11-28",
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_ROOT}${path}`, {
-    headers,
+  return {
+    url: new URL(`${API_ROOT}${path}`),
+    options: { method: "GET", headers },
+  };
+}
+
+async function githubJson(path) {
+  const { url, options } = githubRequestConfig(path);
+  return new Promise((resolve, reject) => {
+    const request = httpsRequest(url, options, (response) => {
+      const chunks = [];
+      let receivedBytes = 0;
+      response.on("data", (chunk) => {
+        receivedBytes += chunk.length;
+        if (receivedBytes > 8 * 1024 * 1024) {
+          request.destroy(new Error("GitHub API response too large"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("end", () => {
+        const status = Number(response.statusCode || 0);
+        if (status < 200 || status >= 300) {
+          reject(new Error(`GitHub API ${status}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+        } catch {
+          reject(new Error("GitHub API returned invalid JSON"));
+        }
+      });
+      response.on("error", reject);
+    });
+    request.setTimeout(12_000, () => request.destroy(new Error("GitHub API timeout")));
+    request.on("error", reject);
+    request.end();
   });
-  if (!response.ok) {
-    throw new Error(`GitHub API ${response.status}`);
-  }
-  return response.json();
 }
 
 export function combineNoticePayload(releases, issues) {

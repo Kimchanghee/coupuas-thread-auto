@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { combineNoticePayload } from "../api/notices.mjs";
+import { combineNoticePayload, githubRequestConfig } from "../api/notices.mjs";
 
 const owner = { id: 9594198, login: "Kimchanghee" };
+
+test("GitHub notice requests use the WHATWG URL API", () => {
+  const { url, options } = githubRequestConfig("/releases?per_page=100");
+  assert.ok(url instanceof URL);
+  assert.equal(url.protocol, "https:");
+  assert.equal(url.hostname, "api.github.com");
+  assert.equal(url.pathname, "/repos/Kimchanghee/coupuas-thread-auto/releases");
+  assert.equal(options.method, "GET");
+});
 
 test("release notices expose the installer and ignore unpublished builds", () => {
   const payload = combineNoticePayload(
