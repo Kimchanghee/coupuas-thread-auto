@@ -65,7 +65,7 @@ from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
-VERSION = "v3.0.60"
+VERSION = "v3.0.61"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -310,7 +310,7 @@ def main():
 
     # Resolve system fonts for consistent rendering (fixes broken font-family in QSS)
     resolve_fonts()
-    base_font = QFont(Typography.FAMILY, 12)
+    base_font = QFont(Typography.FAMILY, 10)
     base_font.setHintingPreference(QFont.HintingPreference.PreferDefaultHinting)
     app.setFont(base_font)
 
