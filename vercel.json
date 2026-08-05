@@ -1,16 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "builds": [
-    {
-      "src": "api/**/*.mjs",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "public/**",
-      "use": "@vercel/static"
-    }
-  ],
   "routes": [
     {
       "src": "/(.*)",
@@ -25,59 +15,27 @@
       "continue": true
     },
     {
-      "src": "/api/health",
-      "dest": "/api/health.mjs"
-    },
-    {
-      "src": "/api/ai/thread-variants",
-      "dest": "/api/ai/thread-variants.mjs"
-    },
-    {
-      "src": "/api/notices",
-      "dest": "/api/notices.mjs"
-    },
-    {
       "src": "/sitemap\\.xml",
-      "dest": "/api/sitemap.mjs"
-    },
-    {
-      "src": "/robots\\.txt",
-      "dest": "/public/robots.txt"
-    },
-    {
-      "src": "/31d40a5ce9c84f0f9f1f386ca9f96df6\\.txt",
-      "dest": "/public/31d40a5ce9c84f0f9f1f386ca9f96df6.txt"
+      "dest": "/api/sitemap"
     },
     {
       "src": "/notices/?",
-      "dest": "/public/notices.html"
+      "dest": "/notices.html"
     },
     {
       "src": "/(terms|privacy|refund|support)/?",
-      "dest": "/public/$1.html"
-    },
-    {
-      "src": "/(site|notices)\\.js",
-      "dest": "/public/$1.js"
-    },
-    {
-      "src": "/legal\\.css",
-      "dest": "/public/legal.css"
-    },
-    {
-      "src": "/og-image\\.png",
-      "dest": "/public/og-image.png"
+      "dest": "/$1.html"
     },
     {
       "src": "/",
-      "dest": "/public/index.html"
+      "dest": "/index.html"
     },
     {
       "handle": "filesystem"
     },
     {
       "src": "/(.*)",
-      "dest": "/api/not-found.mjs"
+      "dest": "/api/not-found"
     }
   ]
 }
