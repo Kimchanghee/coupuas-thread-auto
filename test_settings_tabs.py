@@ -20,28 +20,38 @@ def test_settings_page_uses_four_category_tabs(monkeypatch):
     window = MainWindow()
     tab_bar = window._settings_tab_bar
 
+    assert window._sidebar_buttons[0].shortcut().toString() == "Alt+1"
+    assert window._sidebar_buttons[1].shortcut().toString() == "Alt+2"
+    assert window.tutorial_btn.shortcut().toString() == "F1"
+    assert window.log_text.tabChangesFocus()
+
     assert window._ai_provider_combo.count() == 1
     assert window._ai_provider_combo.currentData() == AI_PROVIDER_MANAGED
 
     assert [tab_bar.tabText(index) for index in range(tab_bar.count())] == [
+        "업로드 · 글쓰기",
         "계정 · 연결",
-        "작성 · AI",
-        "앱 설정",
+        "AI · 앱",
         "구독 · 지원",
     ]
-    assert not window._settings_account_sec.isHidden()
-    assert not window._settings_threads_sec.isHidden()
-    assert window._settings_concept_sec.isHidden()
+    assert not window._settings_automation_sec.isHidden()
+    assert window._settings_account_sec.isHidden()
+    assert window._settings_threads_sec.isHidden()
     assert window._settings_api_sec.isHidden()
+    assert not hasattr(window, "post_concept_combo")
+    assert window.hour_spin.parent() is window._settings_automation_sec
+    assert window.video_check.parent() is window._settings_automation_sec
+    assert window.settings_post_concept_combo.parent() is window._settings_automation_sec
 
     tab_bar.setCurrentIndex(1)
     app.processEvents()
-    assert not window._settings_concept_sec.isHidden()
-    assert not window._settings_api_sec.isHidden()
-    assert window._settings_account_sec.isHidden()
+    assert not window._settings_account_sec.isHidden()
+    assert not window._settings_threads_sec.isHidden()
+    assert window._settings_automation_sec.isHidden()
 
     tab_bar.setCurrentIndex(2)
     app.processEvents()
+    assert not window._settings_api_sec.isHidden()
     assert not window._settings_startup_sec.isHidden()
     assert not window._settings_info_sec.isHidden()
     assert window._settings_payment_sec.isHidden()
@@ -63,8 +73,15 @@ def test_settings_page_uses_four_category_tabs(monkeypatch):
     assert window._pay_shopping_monthly_btn.accessibleName() == "월간 쇼핑 프로 이용권 결제"
     assert window._settings_payment_sec.height() >= 360
 
-    assert window._settings_save_btn.parent() is window._pages[2]
+    assert window._settings_save_btn.parent() is window._pages[1]
     assert window._settings_scroll.geometry().bottom() < window._settings_save_btn.y()
+
+    window._switch_page(0)
+    window.open_tutorial()
+    app.processEvents()
+    assert window._inline_help_enabled is True
+    assert window._link_help_panel.isVisible() is window.isVisible()
+    assert window.tutorial_btn.text() == "도움말"
 
     window.deleteLater()
     app.processEvents()

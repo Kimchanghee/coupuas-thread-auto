@@ -1,19 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-High-DPI / 화면 맞춤 스케일 유틸.
+High-DPI and monitor-aware window sizing utilities.
 
-어떤 모니터 해상도·배율(100/125/150%)·작은 노트북 화면에서도
-UI가 "동일한 비율"로 보이고, 창이 화면을 벗어나 텍스트/버튼이
-잘리는 문제가 없도록 보장한다.
-
-핵심 아이디어:
-- 절대좌표(setGeometry) + 고정크기 창은 큰 화면 기준(1280x800)으로
-  만들어져 있어, 작은/고배율 화면에선 아래쪽이 잘린다.
-- QApplication 생성 "전에" 화면 작업영역에 맞춘 글로벌 스케일
-  팩터(QT_SCALE_FACTOR)를 계산해 적용하면, 페인팅/폰트/좌표가
-  한꺼번에 동일 비율로 축소되어 어디서나 같은 모습으로 들어맞는다.
-
-모든 함수는 실패 시 조용히 무시(=축소 없음)하여 항상 안전하다.
+Qt already renders in device-independent pixels.  The previous implementation
+also forced ``QT_SCALE_FACTOR`` down to 50%, which made type and click targets
+unreadably small on compact or high-DPI monitors.  We now keep native Qt DPI
+scaling and choose a bounded, monitor-aware logical window size instead.
 """
 import os
 import sys
@@ -71,19 +63,13 @@ def compute_fit_scale_factor() -> float:
 def configure_high_dpi() -> None:
     """
     QApplication 생성 "전에" 호출해야 한다.
-    - 하이DPI 스케일 환경변수 설정
-    - 작은/고배율 화면이면 화면 맞춤 글로벌 스케일(QT_SCALE_FACTOR) 적용
-    - 분수 배율(125/150%)도 반올림 없이 그대로 반영(PassThrough)
+    - enable Qt High-DPI rendering
+    - preserve fractional monitor scaling with PassThrough rounding
+    - never force a global application shrink factor
     """
     if sys.platform == "win32":
         os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
         os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
-        # 사용자가 직접 지정한 QT_SCALE_FACTOR는 존중
-        if "QT_SCALE_FACTOR" not in os.environ:
-            factor = compute_fit_scale_factor()
-            if factor < 0.999:
-                os.environ["QT_SCALE_FACTOR"] = f"{factor:.3f}"
-                logger.info("화면 맞춤 UI 스케일 적용: %.3f", factor)
 
     try:
         from PyQt6.QtWidgets import QApplication
@@ -103,6 +89,45 @@ def configure_high_dpi() -> None:
             QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     except Exception:
         logger.debug("High-DPI 속성 설정 실패", exc_info=True)
+
+
+def recommended_window_size(available_width: int, available_height: int) -> tuple[int, int]:
+    """Return a stable logical window size that fits the current work area.
+
+    The maximum keeps the interface from becoming excessively stretched on 4K
+    and ultrawide displays.  The lower bound is used only when the monitor has
+    enough room; very small work areas always win so the window stays visible.
+    """
+    width = max(640, int(available_width or 0))
+    height = max(480, int(available_height or 0))
+    safe_width = max(640, width - 32)
+    safe_height = max(480, height - 32)
+    target_width = min(1360, max(960, round(width * 0.88)))
+    target_height = min(900, max(640, round(height * 0.88)))
+    return min(target_width, safe_width), min(target_height, safe_height)
+
+
+def apply_window_size_policy(win) -> tuple[int, int]:
+    """Resize a window for its monitor without applying an artificial UI zoom."""
+    try:
+        from PyQt6.QtGui import QGuiApplication
+
+        screen = win.screen() if hasattr(win, "screen") else None
+        screen = screen or QGuiApplication.primaryScreen()
+        if screen is None:
+            size = (1280, 800)
+        else:
+            available = screen.availableGeometry()
+            size = recommended_window_size(available.width(), available.height())
+        min_width = min(760, size[0])
+        min_height = min(560, size[1])
+        win.setMinimumSize(min_width, min_height)
+        win.resize(*size)
+        return size
+    except Exception:
+        logger.debug("모니터 맞춤 창 크기 적용 실패", exc_info=True)
+        win.resize(1280, 800)
+        return 1280, 800
 
 
 def center_window(win) -> None:

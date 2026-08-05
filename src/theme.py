@@ -1,68 +1,60 @@
-"""
-Coupang Partners Thread Auto - Design System
-"Claude Dark" Theme — warm charcoal + coral
+"""Thread Auto desktop design system.
 
-Inspired by Claude.ai's signature warm palette.
-Centralized color tokens, typography, spacing, gradients,
-and reusable QSS helpers.
+The palette deliberately uses neutral midnight surfaces and a restrained
+teal accent.  Keeping every widget on the same token set avoids the old
+mixture of coral, bright red and saturated blue controls.
 """
 
 
 class Colors:
-    """Color palette — Claude Dark (warm charcoal + coral)."""
+    """Midnight Workshop palette with WCAG-friendly text contrast."""
 
-    # ── Surfaces (warm charcoal stack) ───────────────────────
-    BG_DARK = "#1F1E1B"        # app background
-    BG_CARD = "#2A2825"        # cards / elevated panels
-    BG_INPUT = "#262420"       # input fields
-    BG_ELEVATED = "#322F2A"    # hover / elevated states
-    BG_HOVER = "#3A3631"
-    BG_TERMINAL = "#161513"    # deepest (logs)
-    BG_SURFACE = "#252320"     # subtle card surfaces
-    BG_SIDEBAR = "#1A1916"     # left rail (slightly darker than BG_DARK)
-    BG_HEADER = "#23211E"      # top bar
+    BG_DARK = "#0A0F1C"
+    BG_CARD = "#141D2D"
+    BG_INPUT = "#0F1726"
+    BG_ELEVATED = "#1B273A"
+    BG_HOVER = "#24334B"
+    BG_TERMINAL = "#070B13"
+    BG_SURFACE = "#111827"
+    BG_SIDEBAR = "#0C1424"
+    BG_HEADER = "#0F1829"
 
-    # ── Accent (Claude Coral) ────────────────────────────────
-    ACCENT = "#D97757"
-    ACCENT_LIGHT = "#E89175"
-    ACCENT_DARK = "#B85F3F"
-    ACCENT_GLOW = "rgba(217, 119, 87, 0.15)"
-    ACCENT_SHADOW = "rgba(217, 119, 87, 0.30)"
-    ACCENT_SUBTLE = "rgba(217, 119, 87, 0.08)"
+    ACCENT = "#2DD4BF"
+    ACCENT_LIGHT = "#5EEAD4"
+    ACCENT_DARK = "#14B8A6"
+    ACCENT_GLOW = "rgba(45, 212, 191, 0.18)"
+    ACCENT_SHADOW = "rgba(45, 212, 191, 0.32)"
+    ACCENT_SUBTLE = "rgba(45, 212, 191, 0.10)"
 
-    # ── Semantic (warm-tuned) ────────────────────────────────
-    SUCCESS = "#7AB87A"
-    SUCCESS_BG = "rgba(122, 184, 122, 0.10)"
-    SUCCESS_BORDER = "rgba(122, 184, 122, 0.28)"
-    WARNING = "#E0A062"
-    WARNING_BG = "rgba(224, 160, 98, 0.10)"
-    WARNING_BORDER = "rgba(224, 160, 98, 0.28)"
-    ERROR = "#D86A65"
-    ERROR_BG = "rgba(216, 106, 101, 0.10)"
-    ERROR_BORDER = "rgba(216, 106, 101, 0.28)"
-    INFO = "#88A8D4"
-    INFO_BG = "rgba(136, 168, 212, 0.10)"
-    INFO_BORDER = "rgba(136, 168, 212, 0.28)"
+    SUCCESS = "#3DDC97"
+    SUCCESS_BG = "rgba(61, 220, 151, 0.10)"
+    SUCCESS_BORDER = "rgba(61, 220, 151, 0.30)"
+    WARNING = "#F6C65B"
+    WARNING_BG = "rgba(246, 198, 91, 0.10)"
+    WARNING_BORDER = "rgba(246, 198, 91, 0.30)"
+    ERROR = "#FF6B7A"
+    ERROR_BG = "rgba(255, 107, 122, 0.10)"
+    ERROR_BORDER = "rgba(255, 107, 122, 0.30)"
+    INFO = "#55B6FF"
+    INFO_BG = "rgba(85, 182, 255, 0.10)"
+    INFO_BORDER = "rgba(85, 182, 255, 0.30)"
 
-    # ── Text (warm whites) ───────────────────────────────────
-    TEXT_PRIMARY = "#F5F4ED"
-    TEXT_SECONDARY = "#D6D3CC"
-    TEXT_MUTED = "#9A968F"
-    TEXT_PLACEHOLDER = "#6E6A63"
-    TEXT_ACCENT = "#E89175"
-    TEXT_BRIGHT = "#FAF9F5"
+    TEXT_PRIMARY = "#F8FAFC"
+    TEXT_SECONDARY = "#CDD6E5"
+    TEXT_MUTED = "#8C9AAF"
+    TEXT_PLACEHOLDER = "#5E6B80"
+    TEXT_ACCENT = "#7DEBDD"
+    TEXT_BRIGHT = "#FFFFFF"
 
-    # ── Borders (warm subtle) ────────────────────────────────
-    BORDER = "#3A3833"
-    BORDER_LIGHT = "#4D4A44"
-    BORDER_ACTIVE = "#D97757"
-    BORDER_SUBTLE = "#2C2A26"
+    BORDER = "#25344C"
+    BORDER_LIGHT = "#3A4B68"
+    BORDER_ACTIVE = "#2DD4BF"
+    BORDER_SUBTLE = "#1B283C"
 
-    # ── Misc ─────────────────────────────────────────────────
-    SCROLLBAR = "#3A3833"
-    SCROLLBAR_HOVER = "#5A574F"
-    SHADOW = "rgba(0, 0, 0, 0.5)"
-    OVERLAY = "rgba(31, 30, 27, 0.92)"
+    SCROLLBAR = "#2B3A53"
+    SCROLLBAR_HOVER = "#465A7A"
+    SHADOW = "rgba(0, 0, 0, 0.55)"
+    OVERLAY = "rgba(10, 15, 28, 0.92)"
 
 
 class Typography:
@@ -70,22 +62,22 @@ class Typography:
     FAMILY = "Segoe UI"
     FAMILY_MONO = "Consolas"
 
-    TITLE_XL = f"font-family: {FAMILY}; font-size: 24pt; font-weight: 700; letter-spacing: -0.6px;"
-    TITLE_LG = f"font-family: {FAMILY}; font-size: 18pt; font-weight: 700; letter-spacing: -0.4px;"
-    TITLE_MD = f"font-family: {FAMILY}; font-size: 14pt; font-weight: 600; letter-spacing: -0.2px;"
-    TITLE_SM = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 600;"
-    BODY = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 400;"
-    BODY_SM = f"font-family: {FAMILY}; font-size: 11pt; font-weight: 400;"
-    CAPTION = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 500; letter-spacing: 0.3px;"
-    MONO = f"font-family: {FAMILY_MONO}; font-size: 11pt;"
+    TITLE_XL = f"font-family: {FAMILY}; font-size: 22pt; font-weight: 700; letter-spacing: -0.5px;"
+    TITLE_LG = f"font-family: {FAMILY}; font-size: 17pt; font-weight: 700; letter-spacing: -0.35px;"
+    TITLE_MD = f"font-family: {FAMILY}; font-size: 13pt; font-weight: 650; letter-spacing: -0.2px;"
+    TITLE_SM = f"font-family: {FAMILY}; font-size: 11pt; font-weight: 650;"
+    BODY = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 400;"
+    BODY_SM = f"font-family: {FAMILY}; font-size: 9.5pt; font-weight: 400;"
+    CAPTION = f"font-family: {FAMILY}; font-size: 9pt; font-weight: 500; letter-spacing: 0.2px;"
+    MONO = f"font-family: {FAMILY_MONO}; font-size: 9pt;"
 
 
 class Radius:
     SM = "6px"
-    MD = "10px"   # softer corners (Claude aesthetic)
-    LG = "14px"
-    XL = "18px"
-    XXL = "22px"
+    MD = "8px"
+    LG = "12px"
+    XL = "16px"
+    XXL = "20px"
     PILL = "100px"
 
 
@@ -111,20 +103,20 @@ class Shadows:
 
 
 class Gradients:
-    """QSS gradient definitions (Claude Dark — warm, low-saturation)."""
+    """Low-contrast gradients used only for hierarchy, never decoration."""
 
     # Buttons — flat coral with subtle warm shift
     ACCENT_BTN = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 {Colors.ACCENT_LIGHT}, stop:1 {Colors.ACCENT})"
+        f"stop:0 #38DDC8, stop:1 {Colors.ACCENT})"
     )
     ACCENT_BTN_HOVER = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 #F0A088, stop:1 {Colors.ACCENT_LIGHT})"
+        f"stop:0 #64EBD7, stop:1 #38DDC8)"
     )
     ACCENT_BTN_PRESSED = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 {Colors.ACCENT}, stop:1 {Colors.ACCENT_DARK})"
+        f"stop:0 {Colors.ACCENT_DARK}, stop:1 #0F9F90)"
     )
 
     # Header — warm charcoal, near-flat
@@ -134,8 +126,8 @@ class Gradients:
     )
     HEADER_ACCENT = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 rgba(217, 119, 87, 0), stop:0.3 {Colors.ACCENT}, "
-        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(232, 145, 117, 0))"
+        f"stop:0 rgba(45, 212, 191, 0), stop:0.3 {Colors.ACCENT}, "
+        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(94, 234, 212, 0))"
     )
 
     # Progress
@@ -153,7 +145,7 @@ class Gradients:
     # Login splash — warm coral wash
     LOGIN_SPLASH = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-        f"stop:0 #1A1916, stop:0.45 #2A2520, stop:0.85 #6B3A28, stop:1 #B85F3F)"
+        f"stop:0 #090E1A, stop:0.48 #102332, stop:0.82 #155E61, stop:1 #0F766E)"
     )
 
 
@@ -478,7 +470,7 @@ def window_control_btn_style(is_close=False):
 
 
 def global_stylesheet():
-    """Application-wide base stylesheet — Claude Dark."""
+    """Application-wide base stylesheet — Midnight Workshop."""
     c = Colors
     r = Radius
     t = Typography
@@ -490,7 +482,7 @@ def global_stylesheet():
         }}
         QWidget {{
             font-family: {t.FAMILY};
-            font-size: 12pt;
+            font-size: 10pt;
             color: {c.TEXT_PRIMARY};
         }}
         QLabel {{
@@ -545,7 +537,7 @@ def global_stylesheet():
             selection-background-color: {c.ACCENT};
             selection-color: {c.TEXT_BRIGHT};
             font-family: {t.FAMILY_MONO};
-            font-size: 11pt;
+            font-size: 9pt;
         }}
         QTextEdit:focus, QPlainTextEdit:focus {{
             border-color: {c.ACCENT};
@@ -557,7 +549,7 @@ def global_stylesheet():
             border-radius: {r.MD};
             padding: 10px 14px;
             color: {c.TEXT_PRIMARY};
-            font-size: 12pt;
+            font-size: 10pt;
         }}
         QLineEdit:focus {{
             border-color: {c.ACCENT};
@@ -578,9 +570,10 @@ def global_stylesheet():
             color: {c.TEXT_BRIGHT};
             border: none;
             border-radius: {r.MD};
-            padding: 11px 28px;
-            font-weight: 600;
-            font-size: 12pt;
+            padding: 9px 18px;
+            min-height: 22px;
+            font-weight: 650;
+            font-size: 10pt;
         }}
         QPushButton:hover {{
             background: {g.ACCENT_BTN_HOVER};
@@ -855,8 +848,9 @@ def resolve_fonts():
     from PyQt6.QtGui import QFontDatabase
     available = set(QFontDatabase.families())
 
-    ui_candidates = ["Pretendard", "맑은 고딕", "Malgun Gothic",
-                     "Apple SD Gothic Neo", "Inter", "Segoe UI"]
+    ui_candidates = ["Pretendard", "SUIT", "Noto Sans KR", "맑은 고딕",
+                     "Malgun Gothic", "Apple SD Gothic Neo", "Inter",
+                     "Segoe UI Variable", "Segoe UI"]
     for name in ui_candidates:
         if name in available:
             Typography.FAMILY = name
@@ -870,11 +864,11 @@ def resolve_fonts():
 
     f = Typography.FAMILY
     fm = Typography.FAMILY_MONO
-    Typography.TITLE_XL = f"font-family: {f}; font-size: 24pt; font-weight: 700; letter-spacing: -0.6px;"
-    Typography.TITLE_LG = f"font-family: {f}; font-size: 18pt; font-weight: 700; letter-spacing: -0.4px;"
-    Typography.TITLE_MD = f"font-family: {f}; font-size: 14pt; font-weight: 600; letter-spacing: -0.2px;"
-    Typography.TITLE_SM = f"font-family: {f}; font-size: 12pt; font-weight: 600;"
-    Typography.BODY = f"font-family: {f}; font-size: 12pt; font-weight: 400;"
-    Typography.BODY_SM = f"font-family: {f}; font-size: 11pt; font-weight: 400;"
-    Typography.CAPTION = f"font-family: {f}; font-size: 10pt; font-weight: 500; letter-spacing: 0.3px;"
-    Typography.MONO = f"font-family: {fm}; font-size: 11pt;"
+    Typography.TITLE_XL = f"font-family: {f}; font-size: 22pt; font-weight: 700; letter-spacing: -0.5px;"
+    Typography.TITLE_LG = f"font-family: {f}; font-size: 17pt; font-weight: 700; letter-spacing: -0.35px;"
+    Typography.TITLE_MD = f"font-family: {f}; font-size: 13pt; font-weight: 650; letter-spacing: -0.2px;"
+    Typography.TITLE_SM = f"font-family: {f}; font-size: 11pt; font-weight: 650;"
+    Typography.BODY = f"font-family: {f}; font-size: 10pt; font-weight: 400;"
+    Typography.BODY_SM = f"font-family: {f}; font-size: 9.5pt; font-weight: 400;"
+    Typography.CAPTION = f"font-family: {f}; font-size: 9pt; font-weight: 500; letter-spacing: 0.2px;"
+    Typography.MONO = f"font-family: {fm}; font-size: 9pt;"

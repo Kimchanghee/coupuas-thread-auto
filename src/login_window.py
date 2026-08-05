@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 로그인/회원가입 윈도우 (PyQt6)
-쇼츠스레드메이커 전용 - Stitch Blue 테마
+쇼츠스레드메이커 전용 - Midnight Workshop 테마
 """
 import re
 import logging
@@ -9,7 +9,7 @@ import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
     QPushButton, QCheckBox, QStackedWidget,
-    QVBoxLayout, QHBoxLayout, QApplication
+    QVBoxLayout, QHBoxLayout, QApplication, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
 from PyQt6.QtGui import (
@@ -80,7 +80,16 @@ class LoginWindow(QMainWindow):
 
     def _setup_ui(self):
         self.setWindowTitle("쇼츠스레드메이커 - 로그인")
-        self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setMinimumSize(420, 560)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(
+                min(WINDOW_WIDTH, max(420, available.width() - 32)),
+                min(WINDOW_HEIGHT, max(560, available.height() - 32)),
+            )
+        else:
+            self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         apply_window_icon(self)
 
@@ -97,9 +106,22 @@ class LoginWindow(QMainWindow):
         self.right_panel.setStyleSheet(f"background-color: {Colors.BG_DARK};")
 
         # Stacked widget for login / register
-        self.stack = QStackedWidget(self.right_panel)
-        self.stack.setGeometry(0, 0, RIGHT_PANEL_WIDTH, WINDOW_HEIGHT)
+        self._form_scroll = QScrollArea(self.right_panel)
+        self._form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._form_scroll.setStyleSheet(
+            f"QScrollArea {{ background-color: {Colors.BG_DARK}; border: none; }}"
+            f"QScrollBar:vertical {{ background: {Colors.BG_DARK}; width: 10px; }}"
+            f"QScrollBar::handle:vertical {{ background: {Colors.BORDER_LIGHT}; border-radius: 5px; min-height: 28px; }}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        )
+        self._form_scroll.viewport().setStyleSheet(f"background-color: {Colors.BG_DARK};")
+
+        self.stack = QStackedWidget()
+        self.stack.setFixedSize(RIGHT_PANEL_WIDTH, WINDOW_HEIGHT)
         self.stack.setStyleSheet("background: transparent;")
+        self._form_scroll.setWidget(self.stack)
 
         self._build_login_page()
         self._build_register_page()
@@ -118,6 +140,29 @@ class LoginWindow(QMainWindow):
         self.btn_close.setStyleSheet(window_control_btn_style(is_close=True))
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.clicked.connect(self._close_app)
+        self._relayout_window()
+
+    def _relayout_window(self):
+        """Keep login usable on narrow or short logical work areas."""
+        width = self.centralWidget().width() if self.centralWidget() else self.width()
+        height = self.centralWidget().height() if self.centralWidget() else self.height()
+        show_brand = width >= 680
+        left_width = max(240, width - RIGHT_PANEL_WIDTH) if show_brand else 0
+        right_width = min(RIGHT_PANEL_WIDTH, width)
+        right_x = left_width if show_brand else max(0, (width - right_width) // 2)
+        self._left_panel_width = left_width
+        self.left_panel.setVisible(show_brand)
+        self.left_panel.setGeometry(0, 0, left_width, height)
+        self.right_panel.setGeometry(right_x, 0, right_width, height)
+        self._form_scroll.setGeometry(0, 0, right_width, height)
+        self.btn_minimize.move(width - 50, 8)
+        self.btn_close.move(width - 26, 8)
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_form_scroll"):
+            self._relayout_window()
 
     # ─── Left Panel Paint ───────────────────────────────────
     def paintEvent(self, event):
@@ -127,29 +172,30 @@ class LoginWindow(QMainWindow):
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         fn = _get_font()
-        panel_w = LEFT_PANEL_WIDTH
+        panel_w = int(getattr(self, "_left_panel_width", LEFT_PANEL_WIDTH))
         panel_h = self.height()
+        if panel_w <= 0:
+            return
 
-        # Gradient background — Claude Dark warm coral wash (matches main app palette)
+        # Midnight navy with a restrained teal edge.
         grad = QLinearGradient(0, 0, panel_w, panel_h)
-        grad.setColorAt(0, QColor("#1A1916"))
-        grad.setColorAt(0.4, QColor("#2A2520"))
-        grad.setColorAt(0.75, QColor("#6B3A28"))
+        grad.setColorAt(0, QColor(Colors.BG_SIDEBAR))
+        grad.setColorAt(0.55, QColor(Colors.BG_ELEVATED))
         grad.setColorAt(1, QColor(Colors.ACCENT_DARK))
         painter.fillRect(0, 0, panel_w, panel_h, grad)
 
-        # Top accent line — coral
+        # Top accent line
         top_grad = QLinearGradient(0, 0, panel_w, 0)
-        top_grad.setColorAt(0, QColor(217, 119, 87, 0))
+        top_grad.setColorAt(0, QColor(45, 212, 191, 0))
         top_grad.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
-        top_grad.setColorAt(1, QColor(217, 119, 87, 0))
+        top_grad.setColorAt(1, QColor(45, 212, 191, 0))
         painter.fillRect(0, 0, panel_w, 2, top_grad)
 
         # Brand icon
         painter.setPen(Qt.PenStyle.NoPen)
         cx, cy = panel_w // 2, 180
-        # Glow — coral light
-        painter.setBrush(QColor(232, 145, 117, 38))
+        # Glow
+        painter.setBrush(QColor(45, 212, 191, 38))
         painter.drawEllipse(cx - 50, cy - 50, 100, 100)
         # Ring
         painter.setPen(QPen(QColor(Colors.ACCENT_LIGHT), 3))
@@ -277,7 +323,7 @@ class LoginWindow(QMainWindow):
                 color: #FFFFFF; background: transparent;
                 border: 2px solid {Colors.ACCENT_LIGHT}; border-radius: 8px;
             }}
-            QPushButton:hover {{ background: rgba(217, 119, 87, 0.15); }}
+            QPushButton:hover {{ background: {Colors.ACCENT_SUBTLE}; }}
         """)
         self.btn_go_register.clicked.connect(lambda: self.stack.setCurrentIndex(1))
 
