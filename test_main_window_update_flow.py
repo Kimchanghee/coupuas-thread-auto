@@ -5,9 +5,48 @@ from src.update_resume import UpdateResumeStore
 class _Button:
     def __init__(self):
         self.enabled = True
+        self.visible = False
+        self.text = ""
 
     def setEnabled(self, value):
         self.enabled = bool(value)
+
+    def setVisible(self, value):
+        self.visible = bool(value)
+
+    def setText(self, value):
+        self.text = str(value)
+
+
+def test_background_update_check_only_offers_update_until_user_clicks():
+    class FakeWindow:
+        _closed = False
+        _update_check_in_flight = True
+        _update_installing = False
+        _update_notice_version = None
+        _pending_update_info = None
+        update_btn = _Button()
+
+        def _relayout_header_account_card(self):
+            pass
+
+        def _has_active_update_work(self):
+            return False
+
+        def _run_auto_update_flow(self, *_args, **_kwargs):
+            raise AssertionError("background checks must not start installation")
+
+    window = FakeWindow()
+    main_window.MainWindow._apply_update_check_result(
+        window,
+        {"update_info": {"version": "3.1.0", "download_url": "https://example.test"}},
+    )
+
+    assert window._update_check_in_flight is False
+    assert window._pending_update_info["version"] == "3.1.0"
+    assert window.update_btn.visible is True
+    assert window.update_btn.enabled is True
+    assert window.update_btn.text.endswith("3.1.0")
 
 
 def test_update_does_not_start_when_resume_state_cannot_be_saved(monkeypatch, tmp_path):

@@ -469,6 +469,30 @@ def test_login_success_keeps_user_id_when_backend_uses_user_id_field(monkeypatch
     assert auth_client.is_logged_in() is True
 
 
+def test_login_promotion_id_never_overwrites_account_identity(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(
+        200,
+        {
+            "status": True,
+            "key": "token-account-owner",
+            "shopping_promotion": {
+                "id": "shopping-pro-existing-customer-2026",
+                "offer_eligible": True,
+            },
+        },
+    )
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("account_owner", "SamplePass123")
+
+    assert result["status"] is True
+    state = auth_client.get_auth_state()
+    assert state["user_id"] == "account_owner"
+    assert state["username"] == "account_owner"
+
+
 def test_login_success_accepts_token_field_when_key_missing(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(

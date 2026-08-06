@@ -263,7 +263,11 @@ def _show(parent, title: str, message: str, kind: str) -> None:
         kind=kind,
         ask_yes_no=False,
     )
-    dialog.exec()
+    try:
+        dialog.exec()
+    finally:
+        dialog.setParent(None)
+        dialog.deleteLater()
 
 
 def show_info(parent, title: str, message: str) -> None:
@@ -287,7 +291,11 @@ def ask_yes_no(parent, title: str, message: str, default_yes: bool = True) -> bo
         ask_yes_no=True,
         default_yes=default_yes,
     )
-    return dialog.ask()
+    try:
+        return dialog.ask()
+    finally:
+        dialog.setParent(None)
+        dialog.deleteLater()
 
 
 

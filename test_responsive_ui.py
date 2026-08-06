@@ -59,6 +59,82 @@ def test_main_window_reflows_at_compact_and_wide_sizes():
     app.processEvents()
 
 
+def test_header_update_button_expands_for_version_text():
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.resize(900, 620)
+    window.show()
+    window.update_btn.setText("업데이트 3.0.62")
+    window.update_btn.setVisible(True)
+    window._relayout_header_account_card()
+    app.processEvents()
+
+    assert window.update_btn.width() >= window.update_btn.sizeHint().width()
+    assert window.update_btn.geometry().right() < window.centralWidget().width()
+
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_header_username_is_elided_with_full_value_in_tooltip():
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.resize(1280, 800)
+    window.show()
+    full_username = "very_long_account_identifier_that_must_remain_readable"
+    window._auth_data = {"username": full_username}
+    window._update_account_display()
+    app.processEvents()
+
+    visible_text = window._header_username_label.text()
+    assert window._header_username_label.toolTip() == full_username
+    assert visible_text == full_username or "…" in visible_text
+    assert (
+        window._header_username_label.fontMetrics().horizontalAdvance(visible_text)
+        <= window._header_username_label.width()
+    )
+
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_header_controls_never_overlap_when_update_is_available():
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.show()
+    window.update_btn.setText("업데이트 3.0.62")
+    window.update_btn.setVisible(True)
+    window._header_username_full_text = "very_long_account_identifier_that_must_remain_readable"
+
+    for width in (900, 1110, 1280, 1360):
+        window.resize(width, 800)
+        window._relayout_header_account_card()
+        app.processEvents()
+        controls = [
+            window._work_label,
+            window._header_username_label,
+            window._online_dot,
+            window._connection_label,
+            window._plan_badge,
+            window.update_btn,
+            window.tutorial_btn,
+            window.logout_btn,
+        ]
+        visible_controls = sorted((item for item in controls if item.isVisible()), key=lambda item: item.x())
+        for left, right in zip(visible_controls, visible_controls[1:]):
+            assert left.geometry().right() < right.x(), (
+                width,
+                left.objectName() or left.text(),
+                right.objectName() or right.text(),
+            )
+
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+
+
 def test_login_window_collapses_brand_and_scrolls_on_small_work_area(monkeypatch):
     app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})

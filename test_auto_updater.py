@@ -31,6 +31,20 @@ class _ReleaseSession:
         return _ReleaseResponse(self.payload)
 
 
+def test_frozen_build_without_pinned_signer_does_not_offer_updates(monkeypatch):
+    monkeypatch.setattr(auto_updater.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(auto_updater.AutoUpdater, "DEFAULT_TRUSTED_SIGNER_THUMBPRINTS", set())
+
+    class _NoNetworkSession:
+        def get(self, *_args, **_kwargs):
+            raise AssertionError("an unpinned frozen build must not contact the updater")
+
+    updater = auto_updater.AutoUpdater("3.0.61")
+    updater.session = _NoNetworkSession()
+
+    assert updater.check_for_updates() is None
+
+
 def test_verify_authenticode_accepts_pinned_self_signed_trust_chain_error(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
     monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")

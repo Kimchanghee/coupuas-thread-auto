@@ -258,6 +258,12 @@ class AutoUpdater:
             return False
 
     def check_for_updates(self) -> Optional[Dict]:
+        if not self.is_dev_mode and not self.trusted_thumbprints:
+            # A frozen build without a baked-in signer pin cannot safely install
+            # releases. Keep local/test builds from repeatedly offering an update
+            # that signature verification must reject later.
+            return None
+
         response = self.session.get(self.RELEASES_URL, timeout=10)
         if response.status_code == 404:
             return None

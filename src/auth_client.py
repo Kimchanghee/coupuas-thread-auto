@@ -814,17 +814,40 @@ def _extract_state_value(payload: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
+def _extract_identity_value(payload: Dict[str, Any], *keys: str) -> Any:
+    """Read account identity only from account-shaped response containers."""
+    if not isinstance(payload, dict):
+        return None
+
+    candidate_maps = [payload]
+    pending = [payload]
+    while pending:
+        mapping = pending.pop(0)
+        for container_key in ("data", "account", "profile"):
+            container = mapping.get(container_key)
+            if isinstance(container, dict) and container not in candidate_maps:
+                candidate_maps.append(container)
+                pending.append(container)
+
+    for mapping in candidate_maps:
+        for key in keys:
+            value = mapping.get(key)
+            if value is not None:
+                return value
+    return None
+
+
 def _merge_account_state(payload: Dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         return
     with _AUTH_STATE_LOCK:
         user_id = _normalize_session_user_id(
-            _extract_state_value(payload, "user_id", "id", "uid")
+            _extract_identity_value(payload, "user_id", "id", "uid")
         )
         if user_id is not None:
             _auth_state["user_id"] = user_id
 
-        username = _extract_state_value(payload, "username", "id")
+        username = _extract_identity_value(payload, "username", "login_id")
         if isinstance(username, str) and username.strip():
             _auth_state["username"] = username.strip()
 

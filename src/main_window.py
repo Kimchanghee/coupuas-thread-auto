@@ -651,6 +651,8 @@ class MainWindow(QMainWindow):
         self._work_label.clicked.connect(self.open_settings)
 
         self._header_username_label = QLabel("사용자", header)
+        self._header_username_full_text = "사용자"
+        self._header_username_label.setToolTip(self._header_username_full_text)
         self._header_username_label.setStyleSheet(
             f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; background: transparent;"
         )
@@ -707,7 +709,10 @@ class MainWindow(QMainWindow):
         for btn in nav_buttons:
             if btn is self.update_btn and not btn.isVisible():
                 continue
-            button_w = 88 if btn is not self.update_btn else 96
+            button_w = 88
+            if btn is self.update_btn:
+                btn.ensurePolished()
+                button_w = max(96, btn.sizeHint().width())
             btn.setGeometry(right - button_w, 18, button_w, 32)
             right = btn.x() - 8
 
@@ -718,32 +723,38 @@ class MainWindow(QMainWindow):
         min_left = 306
         self.status_badge.setVisible(False)
 
-        show_account_detail = width >= 1110
+        plan_text = self._plan_badge.text() or "무료계정"
+        plan_w = max(self._plan_badge.fontMetrics().horizontalAdvance(plan_text) + 24, 84)
+        conn_text = self._connection_label.text() or "접속 확인 중"
+        conn_w = max(self._connection_label.fontMetrics().horizontalAdvance(conn_text) + 8, 84)
+        user_text = str(getattr(self, "_header_username_full_text", "") or "사용자")
+        user_metrics = self._header_username_label.fontMetrics()
+        user_w = min(max(user_metrics.horizontalAdvance(user_text) + 10, 48), 180)
+        work_text = self._work_label.text() or "0 / 0 회"
+        work_w = max(self._work_label.fontMetrics().horizontalAdvance(work_text) + 30, 106)
+        detail_width = plan_w + 8 + conn_w + 7 + 8 + 8 + user_w + 8 + work_w
+        show_account_detail = width >= 1110 and right - min_left >= detail_width
         self._header_username_label.setVisible(show_account_detail)
         self._online_dot.setVisible(show_account_detail)
         self._connection_label.setVisible(show_account_detail)
 
-        plan_text = self._plan_badge.text() or "무료계정"
-        plan_w = max(self._plan_badge.fontMetrics().horizontalAdvance(plan_text) + 24, 84)
         self._plan_badge.setGeometry(max(min_left, right - plan_w), top, plan_w, control_h)
         right = self._plan_badge.x() - 8
 
         if show_account_detail:
-            conn_text = self._connection_label.text() or "접속 확인 중"
-            conn_w = max(self._connection_label.fontMetrics().horizontalAdvance(conn_text) + 8, 84)
             self._connection_label.setGeometry(max(min_left, right - conn_w), top + 5, conn_w, 20)
             right = self._connection_label.x() - 7
 
             self._online_dot.setGeometry(max(min_left, right - 8), top + 11, 8, 8)
             right = self._online_dot.x() - 8
 
-            user_text = self._header_username_label.text() or "사용자"
-            user_w = min(max(self._header_username_label.fontMetrics().horizontalAdvance(user_text) + 10, 48), 120)
             self._header_username_label.setGeometry(max(min_left, right - user_w), top + 4, user_w, 20)
+            self._header_username_label.setText(
+                user_metrics.elidedText(user_text, Qt.TextElideMode.ElideRight, user_w)
+            )
+            self._header_username_label.setToolTip(user_text)
             right = self._header_username_label.x() - 8
 
-        work_text = self._work_label.text() or "0 / 0 회"
-        work_w = max(self._work_label.fontMetrics().horizontalAdvance(work_text) + 30, 106)
         self._work_label.setGeometry(max(min_left, right - work_w), top, work_w, control_h)
         self._work_label.setToolTip(work_text)
 
@@ -4402,7 +4413,9 @@ class MainWindow(QMainWindow):
             work_count = work_used
 
         self._work_label.setText(f"{work_used} / {work_count} 회")
+        self._header_username_full_text = str(display_name)
         self._header_username_label.setText(display_name)
+        self._header_username_label.setToolTip(str(display_name))
 
         # Settings page account card
         self._acct_username_label.setText(display_name)
@@ -6449,21 +6462,6 @@ class MainWindow(QMainWindow):
         self.update_btn.setEnabled(not self._update_installing)
         self._relayout_header_account_card()
         logger.info("Update available (version=%s)", version_text)
-
-        if self._has_active_update_work():
-            if self._update_notice_version != version_text:
-                self._update_notice_version = version_text
-                show_info(
-                    self,
-                    "새 업데이트가 있습니다",
-                    (
-                        f"{version_text or '새 버전'}을 설치할 수 있습니다.\n\n"
-                        "상단 업데이트 버튼을 누르면 작업을 안전하게 저장·중단하고 업데이트합니다. "
-                        "재실행 후 남은 작업은 자동으로 이어집니다."
-                    ),
-                )
-            return
-        self._run_auto_update_flow(update_info, resume_after=False)
 
     def _has_active_update_work(self) -> bool:
         runtime = getattr(self, "_multi_account_runtime", None)
