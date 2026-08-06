@@ -139,6 +139,7 @@ def test_login_window_collapses_brand_and_scrolls_on_small_work_area(monkeypatch
     app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})
     window = LoginWindow()
+    assert window.windowTitle() == "스레드 쇼핑 자동화 - 로그인"
     window.show()
     window.resize(600, 600)
     app.processEvents()

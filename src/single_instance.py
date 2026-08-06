@@ -13,6 +13,7 @@ _MUTEX_NAME = "Local\\CoupuasThreadAutoSingleInstance"
 _ERROR_ALREADY_EXISTS = 183
 _APP_WINDOW_TITLE_PARTS = (
     "Coupang Partners Thread Automation",
+    "스레드 쇼핑 자동화 - 로그인",
     "쇼츠스레드메이커 - 로그인",
 )
 

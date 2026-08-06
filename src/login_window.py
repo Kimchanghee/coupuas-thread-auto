@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 로그인/회원가입 윈도우 (PyQt6)
-쇼츠스레드메이커 전용 - Midnight Workshop 테마
+스레드 쇼핑 자동화 전용 - Midnight Workshop 테마
 """
 import re
 import logging
@@ -79,7 +79,7 @@ class LoginWindow(QMainWindow):
             QTimer.singleShot(450, self._maybe_start_auto_login)
 
     def _setup_ui(self):
-        self.setWindowTitle("쇼츠스레드메이커 - 로그인")
+        self.setWindowTitle("스레드 쇼핑 자동화 - 로그인")
         self.setMinimumSize(420, 560)
         screen = QApplication.primaryScreen()
         if screen is not None:
@@ -209,12 +209,12 @@ class LoginWindow(QMainWindow):
         # Title
         painter.setPen(QColor("#FFFFFF"))
         painter.setFont(QFont(fn, 16, QFont.Weight.Bold))
-        painter.drawText(0, 260, panel_w, 30, Qt.AlignmentFlag.AlignCenter, "쇼츠스레드메이커")
+        painter.drawText(0, 260, panel_w, 30, Qt.AlignmentFlag.AlignCenter, "스레드 쇼핑 자동화")
 
         # Subtitle
         painter.setPen(QColor(Colors.ACCENT_LIGHT))
         painter.setFont(QFont(fn, 11))
-        painter.drawText(0, 298, panel_w, 22, Qt.AlignmentFlag.AlignCenter, "Shorts Thread Maker")
+        painter.drawText(0, 298, panel_w, 22, Qt.AlignmentFlag.AlignCenter, "THREAD SHOPPING AUTOMATION")
 
         # Tagline
         painter.setPen(QColor(255, 255, 255, 230))
@@ -245,7 +245,7 @@ class LoginWindow(QMainWindow):
         title.setFont(QFont(fn, 18, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
 
-        subtitle = QLabel("쇼츠스레드메이커에 오신 것을 환영합니다", page)
+        subtitle = QLabel("스레드 쇼핑 자동화에 오신 것을 환영합니다", page)
         subtitle.setGeometry(50, 108, 320, 22)
         subtitle.setFont(QFont(fn, 10))
         subtitle.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")

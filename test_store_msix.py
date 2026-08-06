@@ -137,7 +137,12 @@ def test_build_store_package_runs_isolated_exe_and_msix_build(monkeypatch, tmp_p
 
     assert output.name == "ThreadShoppingAutomation_3.0.62.0_x64.msix"
     assert output.read_bytes() == b"msix"
-    assert calls[0][0][:3] == [sys.executable, "-m", "PyInstaller"]
+    pyinstaller_calls = [
+        call
+        for call in calls
+        if call[0][:3] == [sys.executable, "-m", "PyInstaller"]
+    ]
+    assert len(pyinstaller_calls) == 1
     makeappx_calls = [
         call for call in calls if call[0] and call[0][0] == str(makeappx.resolve())
     ]
@@ -178,7 +183,7 @@ def test_main_builds_with_explicit_makeappx_path(monkeypatch, tmp_path, capsys):
 
     assert result == 0
     assert captured["makeappx_path"] == makeappx.resolve()
-    assert captured["version"] == "3.0.62.0"
+    assert captured["version"] == "3.0.64.0"
     assert "package.msix" in capsys.readouterr().out
 
 
