@@ -1682,6 +1682,17 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
         return {"status": False, "message": "로그인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
 
+def clear_local_session() -> None:
+    """Clear local authentication state without making a network request."""
+    _clear_auth_state_memory()
+
+    cred = _load_cred()
+    if cred:
+        cred.pop("token", None)
+        cred.pop("user_id", None)
+        _save_cred(cred)
+
+
 def logout() -> bool:
     user_id, token = _get_session_user_and_token()
     server_ok = True
@@ -1699,13 +1710,7 @@ def logout() -> bool:
             logger.warning("로그아웃 API 호출 중 오류가 발생했지만 무시합니다: %s", e)
             server_ok = False
 
-    _clear_auth_state_memory()
-
-    cred = _load_cred()
-    if cred:
-        cred.pop("token", None)
-        cred.pop("user_id", None)
-        _save_cred(cred)
+    clear_local_session()
 
     return server_ok
 

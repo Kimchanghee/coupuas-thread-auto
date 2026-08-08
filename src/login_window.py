@@ -11,15 +11,19 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QStackedWidget,
     QVBoxLayout, QHBoxLayout, QApplication, QScrollArea
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
 from PyQt6.QtGui import (
-    QFont, QPainter, QColor, QLinearGradient, QPainterPath, QFontDatabase, QPen
+    QFont, QPainter, QColor, QLinearGradient, QPen
 )
 from PyQt6.QtCore import QRectF
 
-from src.theme import (Colors, Typography, Radius, Gradients,
-                       input_style, accent_btn_style, window_control_btn_style,
-                       muted_text_style)
+from src.theme import (
+    Colors,
+    Typography,
+    Gradients,
+    input_style,
+    window_control_btn_style,
+)
 from src.app_icon import apply_window_icon
 from src import auth_client
 from src.ui_messages import ask_yes_no, show_info, show_warning
@@ -31,6 +35,7 @@ WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 760
 LEFT_PANEL_WIDTH = 300
 RIGHT_PANEL_WIDTH = WINDOW_WIDTH - LEFT_PANEL_WIDTH
+WEBSITE_BASE_URL = "https://coupuas-thread-auto-three.vercel.app"
 
 
 def _resolve_app_version() -> str:
@@ -74,6 +79,9 @@ class LoginWindow(QMainWindow):
         self._username_check_token = 0
         self._app_version = _resolve_app_version()
         self._auto_login_pending = False
+        self._login_in_flight = False
+        self._duplicate_login_prompt_open = False
+        self._force_login_attempted = False
         self._setup_ui()
         if self._auto_login_pending:
             QTimer.singleShot(450, self._maybe_start_auto_login)
@@ -457,6 +465,24 @@ class LoginWindow(QMainWindow):
         """)
         form_layout.addWidget(self.reg_news_opt_in)
 
+        self.reg_legal_consent = QCheckBox("이용약관 및 개인정보처리방침에 동의합니다 (필수)")
+        self.reg_legal_consent.setFont(QFont(fn, 9, QFont.Weight.DemiBold))
+        self.reg_legal_consent.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reg_legal_consent.setStyleSheet(self.reg_news_opt_in.styleSheet())
+        form_layout.addWidget(self.reg_legal_consent)
+
+        self.reg_legal_links = QLabel(
+            f'<a href="{WEBSITE_BASE_URL}/terms" style="color:{Colors.ACCENT_LIGHT};">이용약관 보기</a>'
+            f' &nbsp;·&nbsp; '
+            f'<a href="{WEBSITE_BASE_URL}/privacy" style="color:{Colors.ACCENT_LIGHT};">개인정보처리방침 보기</a>'
+        )
+        self.reg_legal_links.setFont(QFont(fn, 9))
+        self.reg_legal_links.setOpenExternalLinks(True)
+        self.reg_legal_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.reg_legal_links.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
+        self.reg_legal_links.setToolTip("웹사이트에서 최신 약관과 개인정보처리방침을 확인합니다.")
+        form_layout.addWidget(self.reg_legal_links)
+
         # Username + check
         form_layout.addWidget(_field_label("아이디"))
         username_row = QHBoxLayout()
@@ -535,6 +561,9 @@ class LoginWindow(QMainWindow):
 
     # ─── Login logic ────────────────────────────────────────
     def _do_login(self, force=False):
+        if self._login_in_flight:
+            return
+
         uid = self.login_id.text().strip()
         pw = self.login_pw.text()
 
@@ -545,6 +574,12 @@ class LoginWindow(QMainWindow):
             self.login_status.setText(f"비밀번호는 최소 {MIN_LOGIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
 
+        if force:
+            self._force_login_attempted = True
+        else:
+            self._force_login_attempted = False
+
+        self._login_in_flight = True
         self.btn_login.setEnabled(False)
         self.btn_login.setText("로그인 중...")
         self.login_status.setText("")
@@ -555,11 +590,14 @@ class LoginWindow(QMainWindow):
         self._login_thread.start()
 
     def _on_login_result(self, result: dict):
+        self._login_in_flight = False
         self.btn_login.setEnabled(True)
         self.btn_login.setText("로그인")
 
         status = result.get("status")
         if status is True:
+            self._duplicate_login_prompt_open = False
+            self._force_login_attempted = False
             logger.info("로그인 성공: user_id=%s", result.get("id") or result.get("user_id"))
             try:
                 auth_client.log_action("ui_login_success", "로그인 창에서 로그인 성공")
@@ -583,13 +621,27 @@ class LoginWindow(QMainWindow):
 
             self.login_success.emit(result)
         elif status == "EU003":
-            if ask_yes_no(
-                self,
-                "중복 로그인",
-                "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?",
-            ):
+            if self._force_login_attempted:
+                self.login_status.setText(
+                    "기존 세션을 종료하지 못했습니다. 잠시 후 다시 시도하거나 다른 기기의 프로그램을 종료해 주세요."
+                )
+                self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
+                return
+            if self._duplicate_login_prompt_open:
+                return
+            self._duplicate_login_prompt_open = True
+            try:
+                replace_session = ask_yes_no(
+                    self,
+                    "중복 로그인",
+                    "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?",
+                )
+            finally:
+                self._duplicate_login_prompt_open = False
+            if replace_session:
                 self._do_login(force=True)
         else:
+            self._force_login_attempted = False
             msg = auth_client.friendly_login_message(result)
             self.login_status.setText(msg)
             self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
@@ -668,6 +720,9 @@ class LoginWindow(QMainWindow):
         contact_clean = re.sub(r'[^0-9]', '', contact)
         if len(contact_clean) < 10:
             self._show_msg("올바른 연락처를 입력해주세요.")
+            return
+        if not self.reg_legal_consent.isChecked():
+            self._show_msg("회원가입을 계속하려면 이용약관과 개인정보처리방침에 동의해 주세요.")
             return
 
         self.btn_register.setEnabled(False)

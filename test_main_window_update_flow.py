@@ -36,6 +36,9 @@ def test_background_update_check_only_offers_update_until_user_clicks():
         def _run_auto_update_flow(self, *_args, **_kwargs):
             raise AssertionError("background checks must not start installation")
 
+        def _maybe_show_update_notice(self):
+            self.notice_offered = True
+
     window = FakeWindow()
     main_window.MainWindow._apply_update_check_result(
         window,
@@ -47,6 +50,43 @@ def test_background_update_check_only_offers_update_until_user_clicks():
     assert window.update_btn.visible is True
     assert window.update_btn.enabled is True
     assert window.update_btn.text.endswith("3.1.0")
+    assert window.notice_offered is True
+
+
+def test_update_notice_is_deferred_during_work_and_shown_once_when_idle():
+    shown = []
+
+    class FakeWindow:
+        _pending_update_info = {"version": "3.1.0"}
+        _update_notice_version = ""
+
+        def _has_active_update_work(self):
+            return self.active
+
+        def _show_update_dialog(self, update_info):
+            shown.append(update_info["version"])
+
+    window = FakeWindow()
+    window.active = True
+    main_window.MainWindow._maybe_show_update_notice(window)
+    assert shown == []
+    assert window._update_notice_version == ""
+
+    window.active = False
+    main_window.MainWindow._maybe_show_update_notice(window)
+    main_window.MainWindow._maybe_show_update_notice(window)
+    assert shown == ["3.1.0"]
+    assert window._update_notice_version == "3.1.0"
+
+
+def test_always_on_update_check_has_a_periodic_timer():
+    source = (main_window.Path(__file__).parent / "src" / "main_window.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "UPDATE_CHECK_INTERVAL_MS" in source
+    assert "self._update_timer.timeout.connect(self._check_for_updates_silent)" in source
+    assert "self._update_timer.start(UPDATE_CHECK_INTERVAL_MS)" in source
 
 
 def test_update_does_not_start_when_resume_state_cannot_be_saved(monkeypatch, tmp_path):

@@ -28,3 +28,26 @@ test("legal and discovery files contain launch-critical information", () => {
   }
   assert.match(read("robots.txt"), /Sitemap: https:\/\//);
 });
+
+test("privacy and terms pages include Korean signup-required disclosures", () => {
+  const privacy = read("privacy.html");
+  const terms = read("terms.html");
+
+  for (const label of [
+    "개인정보의 처리 목적",
+    "처리하는 개인정보의 항목",
+    "개인정보의 처리 및 보유 기간",
+    "개인정보 처리의 위탁",
+    "개인정보의 파기",
+    "정보주체의 권리",
+    "개인정보 보호책임자",
+    "권익침해 구제방법",
+  ]) {
+    assert.match(privacy, new RegExp(label));
+  }
+  assert.match(terms, /회원가입/);
+  assert.match(terms, /서비스 이용계약/);
+  assert.match(terms, /회원의 의무/);
+  assert.match(terms, /계약 해지/);
+  assert.match(terms, /게시일: 2026년 8월 8일/);
+});

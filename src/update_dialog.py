@@ -1,382 +1,322 @@
 # -*- coding: utf-8 -*-
-"""
-쿠팡 파트너스 스레드 자동화 - 업데이트 다이얼로그
-"""
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QProgressBar
-)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+"""Responsive update center used by both manual and automatic checks."""
 
-from src.theme import (
-    Colors, Gradients, Typography,
-    accent_btn_style, ghost_btn_style, progress_bar_style,
-    dialog_style, header_title_style
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
+
 from src.app_icon import apply_window_icon
 from src.auto_updater import AutoUpdater
-from src.ui_messages import ask_yes_no, show_error, show_warning
+from src.theme import Colors, Gradients, Radius, Typography, progress_bar_style
 
 
 class UpdateCheckThread(QThread):
-    """백그라운드 업데이트 체크 스레드"""
-    update_found = pyqtSignal(dict)  # 업데이트 정보
+    """Check GitHub releases without blocking the Qt event loop."""
+
+    update_found = pyqtSignal(dict)
     no_update = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, current_version):
+    def __init__(self, current_version: str):
         super().__init__()
         self.current_version = current_version
 
     def run(self):
         try:
-            updater = AutoUpdater(self.current_version)
-            update_info = updater.check_for_updates()
-
+            update_info = AutoUpdater(self.current_version).check_for_updates()
             if update_info:
                 self.update_found.emit(update_info)
             else:
                 self.no_update.emit()
-        except Exception as e:
-            self.error.emit(str(e))
-
-
-class UpdateDownloadThread(QThread):
-    """백그라운드 다운로드 스레드"""
-    progress = pyqtSignal(float)  # 진행률 (0-100)
-    finished = pyqtSignal(str)  # 다운로드된 파일 경로
-    error = pyqtSignal(str)
-
-    def __init__(self, current_version, update_info):
-        super().__init__()
-        self.current_version = current_version
-        self.update_info = update_info
-
-    def run(self):
-        try:
-            updater = AutoUpdater(self.current_version)
-            file_path = updater.download_update(
-                self.update_info,
-                progress_callback=lambda p: self.progress.emit(p)
-            )
-
-            if file_path:
-                self.finished.emit(file_path)
-            else:
-                self.error.emit("다운로드 실패")
-        except Exception as e:
-            self.error.emit(str(e))
+        except Exception as exc:
+            self.error.emit(str(exc))
 
 
 class UpdateDialog(QDialog):
-    """업데이트 다이얼로그 - Stitch Blue 테마"""
+    """Polished, non-blocking update surface with responsive sizing."""
 
-    def __init__(self, current_version, parent=None):
+    install_requested = pyqtSignal(object)
+
+    def __init__(self, current_version: str, parent=None, *, update_info=None):
         super().__init__(parent)
-        self.current_version = current_version
+        self.current_version = str(current_version or "").strip() or "알 수 없음"
         self.update_info = None
-        self.download_path = None
+        self._busy = False
+        self._check_thread = None
 
-        self.setWindowTitle("업데이트 확인")
-        self.setFixedSize(520, 450)
-        self.setModal(True)
+        self.setWindowTitle("Thread Auto 업데이트")
+        self.setModal(False)
+        self.setMinimumSize(560, 520)
+        self.setSizeGripEnabled(True)
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(
+                min(660, max(560, available.width() - 48)),
+                min(600, max(520, available.height() - 48)),
+            )
+        else:
+            self.resize(640, 580)
         apply_window_icon(self)
 
         self._build_ui()
-        self._check_for_updates()
+        if isinstance(update_info, dict) and update_info:
+            self._on_update_found(update_info)
+        else:
+            self._check_for_updates()
 
     def _build_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 24)
-
-        # 헤더
-        header = QLabel("업데이트 확인")
-        header.setStyleSheet(header_title_style("18pt"))
-        layout.addWidget(header)
-
-        # 현재 버전
-        self.current_label = QLabel(f"현재 버전: {self.current_version}")
-        self.current_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: 10pt;
-                background: transparent;
-            }}
-        """)
-        layout.addWidget(self.current_label)
-
-        # 상태 레이블
-        self.status_label = QLabel("업데이트를 확인하는 중...")
-        self.status_label.setStyleSheet(f"""
-            QLabel {{
+        self.setStyleSheet(
+            f"""
+            QDialog {{
+                background-color: {Colors.BG_DARK};
                 color: {Colors.TEXT_PRIMARY};
-                font-size: 11pt;
-                font-weight: 600;
-                background: transparent;
+                font-family: '{Typography.FAMILY}';
             }}
-        """)
-        layout.addWidget(self.status_label)
+            QFrame#updateHero {{
+                background: {Gradients.CARD_SUBTLE};
+                border: 1px solid {Colors.BORDER};
+                border-radius: {Radius.XL};
+            }}
+            QLabel {{ background: transparent; }}
+            """
+        )
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 26, 28, 24)
+        root.setSpacing(18)
 
-        # 변경사항 (처음엔 숨김)
-        changelog_label = QLabel("변경사항:")
-        changelog_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: 9pt;
-                font-weight: 600;
-                background: transparent;
-                margin-top: 8px;
-            }}
-        """)
-        layout.addWidget(changelog_label)
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        title_box = QVBoxLayout()
+        title_box.setSpacing(4)
+        title = QLabel("새로운 업데이트")
+        title.setFont(QFont(Typography.FAMILY, 19, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        subtitle = QLabel("안전하게 내려받고, 설치 후 하던 작업을 이어갈 수 있어요.")
+        subtitle.setFont(QFont(Typography.FAMILY, 10))
+        subtitle.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
+        subtitle.setWordWrap(True)
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        top.addLayout(title_box, 1)
+        badge = QLabel("UPDATE")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setFixedSize(76, 28)
+        badge.setStyleSheet(
+            f"background: {Colors.ACCENT_SUBTLE}; color: {Colors.ACCENT_LIGHT};"
+            f"border: 1px solid {Colors.ACCENT_DARK}; border-radius: 14px;"
+            "font-size: 9pt; font-weight: 800; letter-spacing: 1px;"
+        )
+        top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+        root.addLayout(top)
+
+        hero = QFrame()
+        hero.setObjectName("updateHero")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(20, 18, 20, 18)
+        hero_layout.setSpacing(12)
+
+        version_row = QHBoxLayout()
+        version_row.setSpacing(12)
+        current_box = self._version_box("현재 버전", self.current_version, Colors.TEXT_SECONDARY)
+        self.target_version_value = QLabel("확인 중")
+        target_box = self._version_box(
+            "업데이트 버전", "", Colors.ACCENT_LIGHT, self.target_version_value
+        )
+        version_row.addWidget(current_box, 1)
+        version_row.addWidget(target_box, 1)
+        hero_layout.addLayout(version_row)
+
+        self.status_label = QLabel("최신 버전을 확인하고 있어요")
+        self.status_label.setFont(QFont(Typography.FAMILY, 12, QFont.Weight.Bold))
+        self.status_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        self.status_label.setWordWrap(True)
+        hero_layout.addWidget(self.status_label)
+
+        self.status_detail = QLabel("잠시만 기다려 주세요.")
+        self.status_detail.setFont(QFont(Typography.FAMILY, 9))
+        self.status_detail.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
+        self.status_detail.setWordWrap(True)
+        hero_layout.addWidget(self.status_detail)
+        root.addWidget(hero)
+
+        changelog_header = QHBoxLayout()
+        changelog_title = QLabel("이번 버전에서 달라진 점")
+        changelog_title.setFont(QFont(Typography.FAMILY, 10, QFont.Weight.Bold))
+        changelog_title.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
+        changelog_header.addWidget(changelog_title)
+        changelog_header.addStretch()
+        self.size_label = QLabel("")
+        self.size_label.setFont(QFont(Typography.FAMILY, 9))
+        self.size_label.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
+        changelog_header.addWidget(self.size_label)
+        root.addLayout(changelog_header)
 
         self.changelog_text = QTextEdit()
         self.changelog_text.setReadOnly(True)
-        self.changelog_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {Colors.BG_INPUT};
-                color: {Colors.TEXT_PRIMARY};
-                border: 1px solid {Colors.BORDER};
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 9pt;
-                font-family: {Typography.FAMILY_MONO};
-            }}
-        """)
-        self.changelog_text.setVisible(False)
-        layout.addWidget(self.changelog_text)
+        self.changelog_text.setMinimumHeight(120)
+        self.changelog_text.setFont(QFont(Typography.FAMILY, 10))
+        self.changelog_text.setPlaceholderText("업데이트 내용을 불러오는 중입니다.")
+        self.changelog_text.setStyleSheet(
+            f"QTextEdit {{ background-color: {Colors.BG_INPUT}; color: {Colors.TEXT_PRIMARY};"
+            f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.LG};"
+            "padding: 14px; line-height: 1.5; }}"
+        )
+        root.addWidget(self.changelog_text, 1)
 
-        changelog_label.setVisible(False)
-        self.changelog_label = changelog_label
-
-        # 진행바 (처음엔 숨김)
+        progress_row = QHBoxLayout()
+        progress_row.setSpacing(12)
         self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setMinimumHeight(10)
         self.progress_bar.setStyleSheet(progress_bar_style())
         self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
+        progress_row.addWidget(self.progress_bar, 1)
+        self.progress_label = QLabel("")
+        self.progress_label.setMinimumWidth(44)
+        self.progress_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.progress_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT}; font-weight: 700;")
+        self.progress_label.setVisible(False)
+        progress_row.addWidget(self.progress_label)
+        root.addLayout(progress_row)
 
-        layout.addStretch()
-
-        # 버튼 영역
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(12)
-
-        self.close_btn = QPushButton("닫기")
-        self.close_btn.setFixedHeight(40)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(12)
+        buttons.addStretch()
+        self.close_btn = QPushButton("나중에")
+        self.close_btn.setMinimumSize(120, 46)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {Colors.TEXT_SECONDARY};
-                border: 1px solid {Colors.BORDER};
-                border-radius: 8px;
-                font-size: 10pt;
-                font-weight: 600;
-                padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background-color: {Colors.BG_HOVER};
-                border-color: {Colors.TEXT_MUTED};
-            }}
-        """)
-        self.close_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(self.close_btn)
+        self.close_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {Colors.TEXT_SECONDARY};"
+            f"border: 1px solid {Colors.BORDER_LIGHT}; border-radius: {Radius.MD};"
+            "padding: 0 22px; font-size: 10pt; font-weight: 700; }}"
+            f"QPushButton:hover {{ background: {Colors.BG_HOVER}; color: {Colors.TEXT_PRIMARY}; }}"
+        )
+        self.close_btn.clicked.connect(self.close)
+        buttons.addWidget(self.close_btn)
 
-        self.download_btn = QPushButton("다운로드 및 설치")
-        self.download_btn.setFixedHeight(40)
-        self.download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.download_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {Gradients.ACCENT_BTN};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 8px;
-                font-size: 10pt;
-                font-weight: 600;
-                padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background: {Gradients.ACCENT_BTN_HOVER};
-            }}
-            QPushButton:disabled {{
-                background: {Colors.BG_ELEVATED};
-                color: {Colors.TEXT_MUTED};
-            }}
-        """)
-        self.download_btn.setEnabled(False)
-        self.download_btn.clicked.connect(self._start_download)
-        btn_layout.addWidget(self.download_btn)
+        self.install_btn = QPushButton("지금 업데이트")
+        self.install_btn.setMinimumSize(176, 46)
+        self.install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.install_btn.setEnabled(False)
+        self.install_btn.setStyleSheet(
+            f"QPushButton {{ background: {Gradients.ACCENT_BTN}; color: #FFFFFF; border: none;"
+            f"border-radius: {Radius.MD}; padding: 0 26px; font-size: 10pt; font-weight: 800; }}"
+            f"QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}"
+            f"QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}"
+            f"QPushButton:disabled {{ background: {Colors.BG_ELEVATED}; color: {Colors.TEXT_MUTED}; }}"
+        )
+        self.install_btn.clicked.connect(self._request_install)
+        buttons.addWidget(self.install_btn)
+        root.addLayout(buttons)
 
-        layout.addLayout(btn_layout)
+        # Compatibility alias for older callers and UI tests.
+        self.download_btn = self.install_btn
 
-        # 다이얼로그 스타일
-        self.setStyleSheet(dialog_style())
+    def _version_box(self, caption, value, color, value_label=None):
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background-color: {Colors.BG_INPUT}; border: 1px solid {Colors.BORDER_SUBTLE};"
+            f"border-radius: {Radius.MD}; }}"
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(3)
+        caption_label = QLabel(caption)
+        caption_label.setFont(QFont(Typography.FAMILY, 8))
+        caption_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; border: none;")
+        layout.addWidget(caption_label)
+        label = value_label or QLabel(value)
+        label.setText(value or label.text())
+        label.setFont(QFont(Typography.FAMILY, 12, QFont.Weight.Bold))
+        label.setStyleSheet(f"color: {color}; border: none;")
+        layout.addWidget(label)
+        return frame
 
     def _check_for_updates(self):
-        """백그라운드에서 업데이트 확인"""
-        self.check_thread = UpdateCheckThread(self.current_version)
-        self.check_thread.update_found.connect(self._on_update_found)
-        self.check_thread.no_update.connect(self._on_no_update)
-        self.check_thread.error.connect(self._on_error)
-        self.check_thread.start()
+        self._check_thread = UpdateCheckThread(self.current_version)
+        self._check_thread.update_found.connect(self._on_update_found)
+        self._check_thread.no_update.connect(self._on_no_update)
+        self._check_thread.error.connect(self._on_check_error)
+        self._check_thread.start()
 
     def _on_update_found(self, update_info):
-        """업데이트 발견됨"""
-        self.update_info = update_info
-
-        self.status_label.setText(
-            f"새 버전 발견: v{update_info['version']} "
-            f"({update_info['size_mb']:.1f} MB)"
-        )
-        self.status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.SUCCESS};
-                font-size: 11pt;
-                font-weight: 600;
-                background: transparent;
-            }}
-        """)
-
-        # 변경사항 표시
-        self.changelog_label.setVisible(True)
-        self.changelog_text.setVisible(True)
-        changelog = AutoUpdater.get_changelog_summary(update_info['changelog'])
-        self.changelog_text.setPlainText(changelog)
-
-        # 다운로드 버튼 활성화
-        self.download_btn.setEnabled(True)
+        self.update_info = dict(update_info)
+        version = str(update_info.get("version", "") or "").strip()
+        self.target_version_value.setText(version or "새 버전")
+        self.status_label.setText(f"{version or '새 버전'} 업데이트를 사용할 수 있어요")
+        self.status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
+        size_mb = float(update_info.get("size_mb", 0) or 0)
+        self.size_label.setText(f"약 {size_mb:.1f} MB" if size_mb else "")
+        self.status_detail.setText("업데이트 후 프로그램이 자동으로 다시 시작됩니다.")
+        changelog = AutoUpdater.get_changelog_summary(update_info.get("changelog", ""))
+        self.changelog_text.setPlainText(changelog or "안정성과 사용성을 개선했습니다.")
+        self.install_btn.setEnabled(True)
 
     def _on_no_update(self):
-        """최신 버전 사용 중"""
-        self.status_label.setText("최신 버전을 사용 중입니다.")
-        self.status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.SUCCESS};
-                font-size: 11pt;
-                font-weight: 600;
-                background: transparent;
-            }}
-        """)
+        self.target_version_value.setText(self.current_version)
+        self.status_label.setText("현재 최신 버전을 사용하고 있어요")
+        self.status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
+        self.status_detail.setText("새 업데이트가 나오면 실행 중에도 자동으로 알려드릴게요.")
+        self.changelog_text.setPlainText("추가로 설치할 업데이트가 없습니다.")
+        self.install_btn.setVisible(False)
+        self.close_btn.setText("확인")
 
-    def _on_error(self, error_msg):
-        """에러 발생"""
-        self.status_label.setText(f"업데이트 확인 실패: {error_msg}")
-        self.status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.ERROR};
-                font-size: 11pt;
-                font-weight: 600;
-                background: transparent;
-            }}
-        """)
+    def _on_check_error(self, error_message):
+        self.target_version_value.setText("확인 실패")
+        self.status_label.setText("업데이트 정보를 확인하지 못했어요")
+        self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
+        self.status_detail.setText(str(error_message or "네트워크 연결을 확인해 주세요."))
+        self.changelog_text.setPlainText("잠시 후 다시 시도해 주세요.")
 
-    def _start_download(self):
-        """다운로드 시작"""
-        if not self.update_info:
+    def _request_install(self):
+        if self._busy or not isinstance(self.update_info, dict):
             return
-
-        # 다운로드 확인
-        if not ask_yes_no(
-            self,
-            "업데이트 다운로드",
-            f"v{self.update_info['version']} 버전을 다운로드하시겠습니까?\n\n"
-            f"크기: {self.update_info['size_mb']:.1f} MB\n"
-            f"다운로드 후 자동으로 설치됩니다.",
-        ):
-            return
-
-        # UI 업데이트
-        self.status_label.setText("다운로드 중...")
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        self.download_btn.setEnabled(False)
+        self._busy = True
+        self.install_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
+        self.status_label.setText("업데이트를 준비하고 있어요")
+        self.status_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT};")
+        self.status_detail.setText("현재 작업을 안전하게 확인한 뒤 다운로드를 시작합니다.")
+        self.install_requested.emit(dict(self.update_info))
 
-        # 다운로드 시작
-        self.download_thread = UpdateDownloadThread(
-            self.current_version,
-            self.update_info
-        )
-        self.download_thread.progress.connect(self._on_download_progress)
-        self.download_thread.finished.connect(self._on_download_finished)
-        self.download_thread.error.connect(self._on_download_error)
-        self.download_thread.start()
+    def set_download_progress(self, percent):
+        value = max(0, min(100, int(float(percent or 0))))
+        self._busy = True
+        self.progress_bar.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress_bar.setValue(value)
+        self.progress_label.setText(f"{value}%")
+        self.status_label.setText("업데이트를 내려받고 있어요")
+        self.status_detail.setText("완료되면 설치 프로그램이 자동으로 시작됩니다.")
 
-    def _on_download_progress(self, percent):
-        """다운로드 진행률 업데이트"""
-        self.progress_bar.setValue(int(percent))
+    def set_installing(self):
+        self._busy = True
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+        self.progress_label.setVisible(False)
+        self.status_label.setText("설치를 시작하고 있어요")
+        self.status_detail.setText("잠시 후 프로그램이 종료되고 새 버전으로 다시 실행됩니다.")
 
-    def _on_download_finished(self, file_path):
-        """다운로드 완료"""
-        self.download_path = file_path
-        self.status_label.setText("다운로드 완료!")
-        self.status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.SUCCESS};
-                font-size: 11pt;
-                font-weight: 600;
-                background: transparent;
-            }}
-        """)
-
-        # 설치 확인
-        if ask_yes_no(
-            self,
-            "업데이트 설치",
-            "다운로드가 완료되었습니다.\n지금 설치하시겠습니까?\n\n"
-            "설치를 시작하면 프로그램이 종료되고,\n"
-            "자동으로 업데이트가 적용됩니다.",
-        ):
-            self._install_update()
-        else:
-            self.close_btn.setEnabled(True)
-
-    def _on_download_error(self, error_msg):
-        """다운로드 에러"""
-        self.status_label.setText(f"다운로드 실패: {error_msg}")
-        self.status_label.setStyleSheet(f"""
-            QLabel {{
-                color: {Colors.ERROR};
-                font-size: 11pt;
-                font-weight: 600;
-                background: transparent;
-            }}
-        """)
-        self.download_btn.setEnabled(True)
+    def set_install_error(self, message):
+        self._busy = False
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+        self.status_label.setText("업데이트를 완료하지 못했어요")
+        self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
+        self.status_detail.setText(str(message or "잠시 후 다시 시도해 주세요."))
+        self.install_btn.setText("다시 시도")
+        self.install_btn.setEnabled(True)
         self.close_btn.setEnabled(True)
-
-    def _install_update(self):
-        """업데이트 설치"""
-        if not self.download_path:
-            return
-
-        try:
-            updater = AutoUpdater(self.current_version)
-            expected_sha256 = ""
-            asset_name = ""
-            if isinstance(self.update_info, dict):
-                expected_sha256 = str(self.update_info.get("expected_sha256", "") or "")
-                asset_name = str(self.update_info.get("asset_name", "") or "")
-            success = updater.install_update(
-                self.download_path,
-                expected_sha256=expected_sha256,
-                asset_name=asset_name,
-            )
-
-            if success:
-                # 설치 스크립트가 실행되면 프로그램 종료
-                import sys
-                sys.exit(0)
-            else:
-                show_warning(
-                    self,
-                    "업데이트 실패",
-                    "업데이트 설치에 실패했습니다.\n"
-                    "개발 모드에서는 자동 업데이트가 지원되지 않습니다.",
-                )
-                self.close_btn.setEnabled(True)
-
-        except Exception as e:
-            show_error(self, "오류", f"업데이트 설치 중 오류가 발생했습니다:\n{e}")
-            self.close_btn.setEnabled(True)

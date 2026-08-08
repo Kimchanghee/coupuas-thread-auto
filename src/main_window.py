@@ -8,6 +8,7 @@ contextual guidance expands inside the current page instead of opening a modal.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import html
 import os
@@ -22,12 +23,12 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel,
-    QPushButton, QTextEdit, QPlainTextEdit, QListWidget, QFrame,
+    QPushButton, QTextEdit, QPlainTextEdit, QFrame,
     QLineEdit, QSpinBox, QCheckBox, QButtonGroup, QComboBox,
     QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
     QScrollArea, QTabBar, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent, QUrl, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QUrl, QTimer
 from PyQt6.QtCore import QRegularExpression
 from PyQt6.QtGui import (
     QColor,
@@ -62,11 +63,18 @@ from src.services.thread_payload import build_product_thread_payload
 from src.services.account_queue import AccountQueueStore
 from src.services.multi_account_runtime import MultiAccountRuntime
 from src.update_resume import UpdateResumeStore, active_account_ids, update_completed
-from src.theme import (Colors, Typography, Radius, Gradients,
-                       global_stylesheet, badge_style, stat_card_style,
-                       terminal_text_style,
-                       muted_text_style,
-                       hint_text_style, section_title_style)
+from src.update_dialog import UpdateDialog
+from src.theme import (
+    Colors,
+    Typography,
+    Radius,
+    Gradients,
+    global_stylesheet,
+    badge_style,
+    muted_text_style,
+    hint_text_style,
+    section_title_style,
+)
 from src.ui_messages import ask_yes_no, show_error, show_info, show_warning
 from src.events import LoginStatusEvent
 from src.autostart import sync_auto_start
@@ -90,6 +98,7 @@ SIDEBAR_W = 280
 CONTENT_W = 1000  # WIN_W - SIDEBAR_W
 CONTENT_H = 700   # WIN_H - HEADER_H - STATUSBAR_H
 STATUSBAR_H = 32
+UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 
 
 # ─── Helpers ────────────────────────────────────────────────
@@ -124,6 +133,7 @@ class Signals(QObject):
     threads_browser_closed = pyqtSignal()
     heartbeat_complete = pyqtSignal(object)
     update_check_complete = pyqtSignal(object)
+    update_install_progress = pyqtSignal(object)
     update_install_complete = pyqtSignal(object)
     grok_status = pyqtSignal(str, str, str)
     account_runtime_state = pyqtSignal(str, object)
@@ -279,6 +289,7 @@ class MainWindow(QMainWindow):
         self._update_installing = False
         self._pending_update_info = None
         self._update_notice_version = ""
+        self._update_dialog = None
         self._update_resume_store = UpdateResumeStore(
             Path(config.config_dir) / "update_resume.json"
         )
@@ -305,6 +316,7 @@ class MainWindow(QMainWindow):
         self.signals.threads_browser_closed.connect(self._on_threads_browser_closed)
         self.signals.heartbeat_complete.connect(self._apply_heartbeat_result)
         self.signals.update_check_complete.connect(self._apply_update_check_result)
+        self.signals.update_install_progress.connect(self._apply_update_install_progress)
         self.signals.update_install_complete.connect(self._apply_update_install_result)
         self.signals.grok_status.connect(self._apply_grok_status)
         self.signals.account_runtime_state.connect(self._on_account_runtime_state)
@@ -333,7 +345,7 @@ class MainWindow(QMainWindow):
         # Check on startup and periodically so already-running users see updates.
         self._update_timer = QTimer(self)
         self._update_timer.timeout.connect(self._check_for_updates_silent)
-        self._update_timer.start(30 * 60 * 1000)
+        self._update_timer.start(UPDATE_CHECK_INTERVAL_MS)
         QTimer.singleShot(3000, self._check_for_updates_silent)
 
         # Load settings into widgets
@@ -2720,6 +2732,9 @@ class MainWindow(QMainWindow):
                 msg += f"\n  중복 스킵: {skipped}"
             show_info(self, "완료", msg)
 
+        if isinstance(self._pending_update_info, dict):
+            QTimer.singleShot(300, self._maybe_show_update_notice)
+
     def _update_link_count(self):
         content = self.links_text.toPlainText()
         count = len(extract_supported_product_links(content))
@@ -2767,6 +2782,7 @@ class MainWindow(QMainWindow):
 
         for item in link_data or []:
             url = str(item[0] if isinstance(item, tuple) else item or "").strip()
+            marketplace = marketplace_for_url(url)
             allowed, message = marketplace_access_decision(state, url)
             if allowed:
                 continue
@@ -2780,7 +2796,10 @@ class MainWindow(QMainWindow):
                 self._settings_tab_bar.setCurrentIndex(3)
             self._log_user_activity(
                 "marketplace_access_blocked",
-                f"marketplace={getattr(marketplace, 'marketplace_id', 'unknown')}; label={label}",
+                (
+                    f"marketplace={getattr(marketplace, 'marketplace_id', 'unknown')}; "
+                    f"label={getattr(marketplace, 'label', 'unknown')}"
+                ),
                 level="WARNING",
             )
             return False
@@ -3964,6 +3983,8 @@ class MainWindow(QMainWindow):
         self.is_running = any_active
         if hasattr(self, "stop_all_btn"):
             self.stop_all_btn.setEnabled(any_active)
+        if not any_active and isinstance(self._pending_update_info, dict):
+            QTimer.singleShot(300, self._maybe_show_update_notice)
 
     def _add_threads_account_from_ui(self):
         if len(self._threads_accounts()) >= self._threads_account_limit():
@@ -6230,6 +6251,8 @@ class MainWindow(QMainWindow):
 
     def _send_heartbeat(self):
         """Start a server heartbeat without blocking Qt's event loop."""
+        if self._redirecting_to_login or self._closed:
+            return
         if os.getenv("THREAD_AUTO_DISABLE_HEARTBEAT", "").strip() == "1":
             self._apply_heartbeat_result({"state": "disabled"})
             return
@@ -6274,7 +6297,7 @@ class MainWindow(QMainWindow):
     def _apply_heartbeat_result(self, payload: object) -> None:
         """Apply heartbeat state on the Qt thread after the worker completes."""
         self._heartbeat_in_flight = False
-        if self._closed:
+        if self._closed or self._redirecting_to_login:
             return
 
         data = payload if isinstance(payload, dict) else {}
@@ -6303,7 +6326,8 @@ class MainWindow(QMainWindow):
             self.status_label.setText("로그아웃")
             self._server_label.setText("서버 연결: 로그아웃")
             if not self._session_expiry_notified:
-                show_warning(self, "세션 만료", "로그인 세션이 만료되었거나 로그아웃되었습니다. 다시 로그인해 주세요.")
+                # Set the guard before any window transition. Queued heartbeat
+                # results can otherwise enter a nested modal loop repeatedly.
                 self._session_expiry_notified = True
                 self._redirect_to_login_window("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.")
             return
@@ -6352,9 +6376,11 @@ class MainWindow(QMainWindow):
 
         try:
             from src import auth_client
-            auth_client.logout()
+            # The server already reported this session as invalid. Clear the
+            # local token immediately instead of blocking the UI on logout I/O.
+            auth_client.clear_local_session()
         except Exception:
-            logger.debug("세션 만료 복귀 중 로그아웃 API 호출에 실패했습니다.", exc_info=True)
+            logger.debug("세션 만료 복귀 중 로컬 세션 정리에 실패했습니다.", exc_info=True)
 
         login_win = getattr(self, "_login_ref", None)
         if login_win is not None:
@@ -6405,13 +6431,12 @@ class MainWindow(QMainWindow):
             QApplication.quit()
 
     def check_for_updates(self):
-        """Check now and use the same safe path as automatic updates."""
+        """Open the update center and use the same safe installation path."""
         if isinstance(self._pending_update_info, dict):
             self._activate_pending_update()
             return
         logger.info("Manual update check requested")
-        self._check_for_updates_silent()
-        show_info(self, "업데이트 확인", "최신 버전을 확인하고 있습니다.")
+        self._show_update_dialog(None)
 
     def _check_for_updates_silent(self):
         """Check for updates without blocking text entry or paint events."""
@@ -6462,6 +6487,7 @@ class MainWindow(QMainWindow):
         self.update_btn.setEnabled(not self._update_installing)
         self._relayout_header_account_card()
         logger.info("Update available (version=%s)", version_text)
+        self._maybe_show_update_notice()
 
     def _has_active_update_work(self) -> bool:
         runtime = getattr(self, "_multi_account_runtime", None)
@@ -6470,18 +6496,64 @@ class MainWindow(QMainWindow):
     def _activate_pending_update(self) -> None:
         update_info = self._pending_update_info
         if not isinstance(update_info, dict):
-            self._check_for_updates_silent()
+            self._show_update_dialog(None)
+            return
+        self._show_update_dialog(update_info)
+
+    def _maybe_show_update_notice(self) -> None:
+        """Offer each new version once, after active uploads become idle."""
+        update_info = self._pending_update_info
+        if not isinstance(update_info, dict) or self._has_active_update_work():
+            return
+        version = str(update_info.get("version", "") or "").strip()
+        if version and version == self._update_notice_version:
+            return
+        self._update_notice_version = version or "unknown"
+        self._show_update_dialog(update_info)
+
+    def _show_update_dialog(self, update_info=None) -> None:
+        existing = getattr(self, "_update_dialog", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        dialog = UpdateDialog(
+            self._app_version,
+            self,
+            update_info=update_info if isinstance(update_info, dict) else None,
+        )
+        dialog.install_requested.connect(self._start_update_from_dialog)
+        dialog.finished.connect(
+            lambda _result, current=dialog: self._release_update_dialog(current)
+        )
+        self._update_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _release_update_dialog(self, dialog) -> None:
+        if getattr(self, "_update_dialog", None) is dialog:
+            self._update_dialog = None
+
+    def _start_update_from_dialog(self, update_info: object) -> None:
+        if not isinstance(update_info, dict):
             return
         active = self._has_active_update_work()
         if active and not ask_yes_no(
             self,
-            "업데이트 준비",
+            "작업을 저장하고 업데이트",
             (
                 "현재 작업을 안전하게 저장하고 중단한 뒤 업데이트합니다.\n"
-                "프로그램이 자동 재실행되고 남은 작업도 자동으로 이어집니다.\n\n"
+                "프로그램이 다시 실행되면 남은 작업도 자동으로 이어집니다.\n\n"
                 "지금 업데이트할까요?"
             ),
         ):
+            dialog = getattr(self, "_update_dialog", None)
+            if dialog is not None:
+                dialog.set_install_error(
+                    "현재 작업이 끝난 뒤 상단 업데이트 버튼에서 다시 시작할 수 있습니다."
+                )
             return
         self._run_auto_update_flow(update_info, resume_after=active)
 
@@ -6520,11 +6592,12 @@ class MainWindow(QMainWindow):
             saved_marker = self._update_resume_store.load()
             if saved_marker:
                 self._resume_update_work(saved_marker)
-            show_error(
-                self,
-                "업데이트 준비 실패",
-                f"현재 작업을 안전하게 저장하지 못해 업데이트를 시작하지 않았습니다.\n{exc}",
-            )
+            message = f"현재 작업을 안전하게 저장하지 못해 업데이트를 시작하지 않았습니다.\n{exc}"
+            dialog = getattr(self, "_update_dialog", None)
+            if dialog is not None:
+                dialog.set_install_error(message)
+            else:
+                show_error(self, "업데이트 준비 실패", message)
             return
 
         def worker():
@@ -6537,9 +6610,15 @@ class MainWindow(QMainWindow):
                     raise RuntimeError("작업 중단이 완료되지 않아 업데이트를 취소했습니다.")
 
                 updater = AutoUpdater(self._app_version)
-                update_file = updater.download_update(update_info)
+                update_file = updater.download_update(
+                    update_info,
+                    progress_callback=lambda percent: self.signals.update_install_progress.emit(
+                        {"stage": "downloading", "percent": percent}
+                    ),
+                )
                 if not update_file:
                     raise RuntimeError("검증된 업데이트 파일을 내려받지 못했습니다.")
+                self.signals.update_install_progress.emit({"stage": "installing"})
                 if not updater.install_update(
                     update_file,
                     expected_sha256=str(update_info.get("expected_sha256", "") or ""),
@@ -6557,6 +6636,16 @@ class MainWindow(QMainWindow):
 
         threading.Thread(target=worker, daemon=True, name="auto-update-worker").start()
 
+    def _apply_update_install_progress(self, payload: object) -> None:
+        dialog = getattr(self, "_update_dialog", None)
+        if dialog is None:
+            return
+        data = payload if isinstance(payload, dict) else {}
+        if data.get("stage") == "installing":
+            dialog.set_installing()
+        else:
+            dialog.set_download_progress(data.get("percent", 0))
+
     def _apply_update_install_result(self, payload: object) -> None:
         data = payload if isinstance(payload, dict) else {}
         if data.get("success"):
@@ -6570,7 +6659,12 @@ class MainWindow(QMainWindow):
         self.update_btn.setEnabled(True)
         if data.get("resume_marker"):
             self._resume_update_work_when_ready(data.get("resume_marker"))
-        show_error(self, "업데이트 실패", str(data.get("message") or "잠시 후 다시 시도해 주세요."))
+        message = str(data.get("message") or "잠시 후 다시 시도해 주세요.")
+        dialog = getattr(self, "_update_dialog", None)
+        if dialog is not None:
+            dialog.set_install_error(message)
+        else:
+            show_error(self, "업데이트 실패", message)
 
     def _resume_update_work_when_ready(self, marker: dict, retries: int = 120) -> bool:
         """Resume only after the previous upload worker has fully exited."""
