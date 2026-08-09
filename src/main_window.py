@@ -1046,7 +1046,7 @@ class MainWindow(QMainWindow):
 
         # Supported marketplaces summary (top right)
         self._coupang_link = QLabel(
-            '<a href="https://coupuas-thread-auto-three.vercel.app/support" '
+            '<a href="https://coupuas-thread-auto-ten.vercel.app/support" '
             f'style="color: {Colors.ACCENT_LIGHT}; text-decoration: none; font-weight: 600;">'
             '지원 쇼핑몰 안내 →</a>',
             page

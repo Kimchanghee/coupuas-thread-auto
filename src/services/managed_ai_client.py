@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 
-DEFAULT_MANAGED_AI_URL = "https://coupuas-thread-auto-three.vercel.app"
+DEFAULT_MANAGED_AI_URL = "https://coupuas-thread-auto-ten.vercel.app"
 
 
 @dataclass(frozen=True)

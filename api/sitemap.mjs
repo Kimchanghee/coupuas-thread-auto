@@ -1,6 +1,6 @@
 import { loadNoticePayload } from "./notices.mjs";
 
-const DEFAULT_SITE_URL = "https://coupuas-thread-auto-three.vercel.app";
+const DEFAULT_SITE_URL = "https://coupuas-thread-auto-ten.vercel.app";
 const CORE_PATHS = ["/", "/notices", "/terms", "/privacy", "/refund", "/support"];
 
 function escapeXml(value) {

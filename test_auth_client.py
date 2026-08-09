@@ -196,6 +196,8 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
         password="SamplePass123",
         contact="01012345678",
         email="sample@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
     )
 
     assert result["success"] is False
@@ -214,12 +216,18 @@ def test_register_payload_hashes_password(monkeypatch):
         password="SamplePass123",
         contact="01012345678",
         email="sample@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
     )
 
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
     assert payload["password"] == hashlib.sha256("SamplePass123".encode("utf-8")).hexdigest()
     assert payload["ym_news_opt_in"] is False
+    assert payload["terms_accepted"] is True
+    assert payload["privacy_accepted"] is True
+    assert payload["terms_version"] == "2026-08-08"
+    assert payload["privacy_version"] == "2026-08-08"
 
 
 def test_register_payload_supports_news_opt_in(monkeypatch):
@@ -235,11 +243,50 @@ def test_register_payload_supports_news_opt_in(monkeypatch):
         contact="01012345678",
         email="sample@example.com",
         ym_news_opt_in=True,
+        terms_accepted=True,
+        privacy_accepted=True,
     )
 
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
     assert payload["ym_news_opt_in"] is True
+
+
+def test_register_rejects_missing_terms_consent(monkeypatch):
+    _reset_auth_state()
+    session = _FakeSession(_FakeResponse(200, {"success": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.register(
+        name="Tester1",
+        username="sampleuser",
+        password="SamplePass123",
+        contact="01012345678",
+        email="sample@example.com",
+    )
+
+    assert result["success"] is False
+    assert "동의" in result["message"]
+    assert session.calls == []
+
+
+def test_register_rejects_missing_privacy_consent(monkeypatch):
+    _reset_auth_state()
+    session = _FakeSession(_FakeResponse(200, {"success": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.register(
+        name="Tester1",
+        username="sampleuser",
+        password="SamplePass123",
+        contact="01012345678",
+        email="sample@example.com",
+        terms_accepted=True,
+    )
+
+    assert result["success"] is False
+    assert "개인정보" in result["message"]
+    assert session.calls == []
 
 
 def test_log_action_can_be_disabled_by_environment(monkeypatch):
@@ -294,6 +341,8 @@ def test_register_200_failure_with_error_object_returns_message(monkeypatch):
         password="SamplePass123",
         contact="01012345678",
         email="sample@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
     )
 
     assert result["success"] is False
@@ -370,6 +419,8 @@ def test_register_429_normalizes_rate_limit_message(monkeypatch):
         password="SamplePass123",
         contact="01012345678",
         email="rate@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
     )
 
     assert result["success"] is False

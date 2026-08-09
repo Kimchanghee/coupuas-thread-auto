@@ -19,6 +19,10 @@
       "dest": "/api/sitemap"
     },
     {
+      "src": "/favicon\\.ico",
+      "dest": "/favicon.svg"
+    },
+    {
       "src": "/notices/?",
       "dest": "/notices.html"
     },

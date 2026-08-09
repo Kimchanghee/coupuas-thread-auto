@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://coupuas-thread-auto-three.vercel.app/sitemap.xml
+Sitemap: https://coupuas-thread-auto-ten.vercel.app/sitemap.xml

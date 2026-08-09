@@ -35,7 +35,7 @@ WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 760
 LEFT_PANEL_WIDTH = 300
 RIGHT_PANEL_WIDTH = WINDOW_WIDTH - LEFT_PANEL_WIDTH
-WEBSITE_BASE_URL = "https://coupuas-thread-auto-three.vercel.app"
+WEBSITE_BASE_URL = "https://coupuas-thread-auto-ten.vercel.app"
 
 
 def _resolve_app_version() -> str:
@@ -735,6 +735,8 @@ class LoginWindow(QMainWindow):
             contact_clean,
             email,
             ym_news_opt_in,
+            True,
+            True,
         )
         self._reg_worker.finished_signal.connect(self._on_register_result)
         self._reg_worker.start()
@@ -817,7 +819,17 @@ class LoginWorker(QThread):
 class RegisterWorker(QThread):
     finished_signal = pyqtSignal(dict)
 
-    def __init__(self, name, username, password, contact, email, ym_news_opt_in=False):
+    def __init__(
+        self,
+        name,
+        username,
+        password,
+        contact,
+        email,
+        ym_news_opt_in=False,
+        terms_accepted=False,
+        privacy_accepted=False,
+    ):
         super().__init__()
         self.name = name
         self.username = username
@@ -825,6 +837,8 @@ class RegisterWorker(QThread):
         self.contact = contact
         self.email = email
         self.ym_news_opt_in = bool(ym_news_opt_in)
+        self.terms_accepted = bool(terms_accepted)
+        self.privacy_accepted = bool(privacy_accepted)
 
     def run(self):
         password = ""
@@ -837,6 +851,8 @@ class RegisterWorker(QThread):
                 self.contact,
                 self.email,
                 self.ym_news_opt_in,
+                self.terms_accepted,
+                self.privacy_accepted,
             )
             self.finished_signal.emit(result)
         except Exception as exc:

@@ -136,8 +136,8 @@ def test_registration_requires_legal_consent_and_exposes_policy_links(monkeypatc
     messages = []
     window._show_msg = messages.append
 
-    assert "https://coupuas-thread-auto-three.vercel.app/terms" in window.reg_legal_links.text()
-    assert "https://coupuas-thread-auto-three.vercel.app/privacy" in window.reg_legal_links.text()
+    assert "https://coupuas-thread-auto-ten.vercel.app/terms" in window.reg_legal_links.text()
+    assert "https://coupuas-thread-auto-ten.vercel.app/privacy" in window.reg_legal_links.text()
 
     window.reg_name.setText("테스트")
     window.reg_email.setText("test@example.com")

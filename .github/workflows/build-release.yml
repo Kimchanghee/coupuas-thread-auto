@@ -245,10 +245,10 @@ jobs:
         continue-on-error: true
         env:
           INDEXNOW_KEY: 31d40a5ce9c84f0f9f1f386ca9f96df6
-          SITE_URL: https://coupuas-thread-auto-three.vercel.app
+          SITE_URL: https://coupuas-thread-auto-ten.vercel.app
         run: |
           payload="$(jq -nc \
-            --arg host "coupuas-thread-auto-three.vercel.app" \
+            --arg host "coupuas-thread-auto-ten.vercel.app" \
             --arg key "$INDEXNOW_KEY" \
             --arg keyLocation "$SITE_URL/$INDEXNOW_KEY.txt" \
             --arg home "$SITE_URL/" \

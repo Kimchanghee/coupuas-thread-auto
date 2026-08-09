@@ -77,6 +77,8 @@ API_SERVER_URL = _normalize_api_server_url(
     or _DEFAULT_API_SERVER_URL
 )
 PROGRAM_TYPE = "stmaker"
+TERMS_VERSION = "2026-08-08"
+PRIVACY_VERSION = "2026-08-08"
 _DEFAULT_FREE_TRIAL_WORK_COUNT = 5
 _WEEKLY_PAYAPP_PLAN_ID = WEEKLY_PLAN_ID
 _MONTHLY_PAYAPP_PLAN_ID = MONTHLY_PLAN_ID
@@ -1474,6 +1476,8 @@ def register(
     contact: str,
     email: str,
     ym_news_opt_in: bool = False,
+    terms_accepted: bool = False,
+    privacy_accepted: bool = False,
 ) -> Dict[str, Any]:
     err = _check_api_url()
     if err:
@@ -1500,6 +1504,17 @@ def register(
     if len(contact_clean) < 10:
         return {"success": False, "message": "올바른 연락처를 입력해주세요."}
 
+    if not terms_accepted:
+        return {
+            "success": False,
+            "message": "이용약관 및 개인정보 처리방침 동의가 필요합니다.",
+        }
+    if not privacy_accepted:
+        return {
+            "success": False,
+            "message": "개인정보 처리방침 동의가 필요합니다.",
+        }
+
     backend_password = _normalize_password_for_backend(password)
 
     body = {
@@ -1509,6 +1524,10 @@ def register(
         "contact": contact_clean,
         "email": email if email else None,
         "ym_news_opt_in": bool(ym_news_opt_in),
+        "terms_accepted": True,
+        "privacy_accepted": True,
+        "terms_version": TERMS_VERSION,
+        "privacy_version": PRIVACY_VERSION,
         "program_type": PROGRAM_TYPE,
     }
 

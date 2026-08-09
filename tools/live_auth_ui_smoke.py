@@ -25,6 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src import auth_client  # noqa: E402
 import src.login_window as login_window_module  # noqa: E402
 from src.login_window import LoginWindow  # noqa: E402
+from src.main_window import MainWindow  # noqa: E402
 
 
 def _wait_for(app: QApplication, predicate, timeout: float = 30.0) -> bool:
@@ -49,6 +50,12 @@ def main() -> int:
         "--confirm-live-account",
         action="store_true",
         help="Required acknowledgement that this creates a live test account.",
+    )
+    parser.add_argument(
+        "--hold-seconds",
+        type=float,
+        default=15.0,
+        help="How long the authenticated main window must remain responsive.",
     )
     args = parser.parse_args()
     if not args.confirm_live_account:
@@ -96,6 +103,7 @@ def main() -> int:
     window.reg_pw.setText(password)
     window.reg_pw_confirm.setText(password)
     window.reg_contact.setText(contact)
+    window.reg_legal_consent.setChecked(True)
     window.btn_check_user.click()
 
     if not _wait_for(
@@ -119,18 +127,67 @@ def main() -> int:
         return 1
 
     window.grab().save(str(shot_dir / f"{timestamp}-03-register-complete.png"), "PNG")
+    window.remember_cb.setChecked(True)
+    window.auto_login_cb.setChecked(True)
     window.btn_login.click()
     if not _wait_for(app, lambda: login_result.get("status") is True, timeout=30):
         print(f"[FAIL] 로그인 실패: {window.login_status.text()}")
         return 1
+    if not auth_client.is_logged_in():
+        print("[FAIL] 로그인 성공 후 인증 세션이 유지되지 않았습니다.")
+        return 1
 
     window.grab().save(str(shot_dir / f"{timestamp}-04-login-success.png"), "PNG")
+    window.close()
+    app.processEvents()
+
+    if not auth_client.logout():
+        print("[FAIL] 첫 로그인 세션을 정상 종료하지 못했습니다.")
+        return 1
+
+    restart_result: dict = {}
+    restart_window = LoginWindow()
+    restart_window.login_success.connect(
+        lambda result: restart_result.update(result or {})
+    )
+    restart_window.show()
+    if not _wait_for(app, lambda: restart_result.get("status") is True, timeout=30):
+        print(f"[FAIL] 재실행 자동 로그인 실패: {restart_window.login_status.text()}")
+        return 1
+    restart_window.grab().save(
+        str(shot_dir / f"{timestamp}-05-auto-login-success.png"),
+        "PNG",
+    )
+
+    main_window = MainWindow()
+    main_window._auth_data = dict(restart_result)
+    main_window.show()
+    restart_window.hide()
+    if not _wait_for(app, main_window.isVisible, timeout=10):
+        print("[FAIL] 인증 후 메인 창이 표시되지 않았습니다.")
+        return 1
+
+    hold_deadline = time.monotonic() + max(1.0, args.hold_seconds)
+    while time.monotonic() < hold_deadline:
+        app.processEvents()
+        if not main_window.isVisible():
+            print("[FAIL] 유지 검증 중 메인 창이 종료되었습니다.")
+            return 1
+        time.sleep(0.05)
+    main_window.grab().save(
+        str(shot_dir / f"{timestamp}-06-main-window-stable.png"),
+        "PNG",
+    )
+
     print(f"[OK] endpoint={auth_client.API_SERVER_URL}")
     print(f"[OK] username={username}")
     print(f"[OK] user_id={login_result.get('id') or login_result.get('user_id')}")
-    print("[OK] live GUI registration and login verified")
-    window.close()
+    print("[OK] live GUI registration, login, auto-login, and main-window stability verified")
+    main_window.close()
+    restart_window.close()
     app.processEvents()
+    auth_client.logout()
+    auth_client.remember_login_credentials("", "")
     password = ""
     return 0
 

@@ -10,9 +10,9 @@ from src.update_dialog import UpdateDialog
 def test_update_dialog_is_responsive_and_uses_readable_korean_copy():
     app = QApplication.instance() or QApplication([])
     dialog = UpdateDialog(
-        "3.0.64",
+        "3.0.66",
         update_info={
-            "version": "3.0.65",
+            "version": "3.0.66",
             "size_mb": 112.4,
             "changelog": "세션 안정성과 업데이트 화면을 개선했습니다.",
         },
@@ -23,7 +23,7 @@ def test_update_dialog_is_responsive_and_uses_readable_korean_copy():
     assert dialog.minimumWidth() >= 560
     assert dialog.maximumWidth() > dialog.minimumWidth()
     assert dialog.windowTitle() == "Thread Auto 업데이트"
-    assert "3.0.65" in dialog.status_label.text()
+    assert "3.0.66" in dialog.status_label.text()
     assert dialog.install_btn.minimumHeight() >= 46
     assert dialog.changelog_text.font().family() != "Consolas"
 
@@ -41,11 +41,11 @@ def test_update_dialog_is_responsive_and_uses_readable_korean_copy():
 def test_update_dialog_emits_install_request_and_shows_progress():
     app = QApplication.instance() or QApplication([])
     update_info = {
-        "version": "3.0.65",
+        "version": "3.0.66",
         "size_mb": 112.4,
         "changelog": "업데이트 흐름 개선",
     }
-    dialog = UpdateDialog("3.0.64", update_info=update_info)
+    dialog = UpdateDialog("3.0.66", update_info=update_info)
     requested = []
     dialog.install_requested.connect(requested.append)
     dialog.show()
@@ -54,7 +54,7 @@ def test_update_dialog_emits_install_request_and_shows_progress():
     dialog.set_download_progress(43.2)
     app.processEvents()
 
-    assert requested and requested[0]["version"] == "3.0.65"
+    assert requested and requested[0]["version"] == "3.0.66"
     assert dialog.progress_bar.isVisible()
     assert dialog.progress_bar.value() == 43
     assert "43%" in dialog.progress_label.text()
