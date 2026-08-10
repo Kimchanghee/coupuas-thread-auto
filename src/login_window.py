@@ -734,9 +734,9 @@ class LoginWindow(QMainWindow):
             pw,
             contact_clean,
             email,
-            ym_news_opt_in,
-            True,
-            True,
+            ym_news_opt_in=ym_news_opt_in,
+            terms_accepted=True,
+            privacy_accepted=True,
         )
         self._reg_worker.finished_signal.connect(self._on_register_result)
         self._reg_worker.start()
@@ -850,9 +850,9 @@ class RegisterWorker(QThread):
                 password,
                 self.contact,
                 self.email,
-                self.ym_news_opt_in,
-                self.terms_accepted,
-                self.privacy_accepted,
+                ym_news_opt_in=self.ym_news_opt_in,
+                terms_accepted=self.terms_accepted,
+                privacy_accepted=self.privacy_accepted,
             )
             self.finished_signal.emit(result)
         except Exception as exc:

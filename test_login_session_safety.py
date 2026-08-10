@@ -155,3 +155,43 @@ def test_registration_requires_legal_consent_and_exposes_policy_links(monkeypatc
     window.close()
     window.deleteLater()
     app.processEvents()
+
+
+def test_registration_passes_required_consent_to_worker(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})
+    captured = {}
+
+    class FakeSignal:
+        def connect(self, callback):
+            captured["callback"] = callback
+
+    class FakeRegisterWorker:
+        finished_signal = FakeSignal()
+
+        def __init__(self, *args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+
+        def start(self):
+            captured["started"] = True
+
+    monkeypatch.setattr(login_window, "RegisterWorker", FakeRegisterWorker)
+    window = login_window.LoginWindow()
+    window.reg_name.setText("테스트")
+    window.reg_email.setText("test@example.com")
+    window.reg_username.setText("tester")
+    window._username_available = True
+    window.reg_pw.setText("Password1!")
+    window.reg_pw_confirm.setText("Password1!")
+    window.reg_contact.setText("010-1234-5678")
+    window.reg_legal_consent.setChecked(True)
+
+    window._do_register()
+
+    assert captured["kwargs"]["terms_accepted"] is True
+    assert captured["kwargs"]["privacy_accepted"] is True
+    assert captured["started"] is True
+    window.close()
+    window.deleteLater()
+    app.processEvents()
