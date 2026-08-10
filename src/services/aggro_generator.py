@@ -34,10 +34,9 @@ class AggroGenerator:
     GENERAL_AFFILIATE_DISCLOSURE = GENERAL_AFFILIATE_DISCLOSURE
 
     ACTIVITY_WARNING = (
-        "*파트너스 활동 주의사항*\n\n"
-        "1. 게시글 작성 시 아래 문구를 반드시 포함해 주세요.\n"
-        "\"이 포스팅은 쿠팡 파트너스 활동의 일환으로, "
-        "이에 따른 일정액의 수수료를 제공받습니다.\"\n\n"
+        "*제휴 활동 주의사항*\n\n"
+        "1. 게시글 작성 시 선택한 쇼핑몰의 지정 고지문을 반드시 포함해 주세요.\n"
+        "앱은 상품 댓글 첫 줄에 프로그램별 고지문을 자동으로 배치합니다.\n\n"
         "2. 수신자 동의 없는 메시지/SNS 발송은 스팸으로 간주될 수 있습니다."
     )
     MAX_HOOK_LENGTH = 82
@@ -83,7 +82,11 @@ class AggroGenerator:
     _FIRST_POST_BLOCK_PATTERNS = (
         re.compile(r"https?://\S+", re.IGNORECASE),
         re.compile(r"\b(link\.coupang\.com|www\.coupang\.com)\S*", re.IGNORECASE),
-        re.compile(r"(쿠팡\s*파트너스|파트너스\s*활동|수수료를\s*제공받습니다)", re.IGNORECASE),
+        re.compile(
+            r"(쿠팡\s*파트너스|쇼핑\s*커넥트|쉐어링크|큐레이터\s*활동|"
+            r"파트너스\s*활동|광고[·\s]*제휴|수수료를\s*제공받습니다)",
+            re.IGNORECASE,
+        ),
         re.compile(r"(구매\s*링크|제품\s*확인\s*링크|확인\s*링크|바로\s*가기|링크는\s*여기)", re.IGNORECASE),
     )
     _FORBIDDEN_CLAIM_PATTERNS = (
@@ -531,11 +534,11 @@ class AggroGenerator:
         token = cls._select_core_keyword(title, keywords)
         compact_title = cls._trim_line(title or token, 28)
         lines = [
+            str(disclosure or cls.COUPANG_DISCLOSURE).strip(),
             f"🔗 {compact_title} 확인 링크",
             original_url,
-            str(disclosure or cls.COUPANG_DISCLOSURE).strip(),
         ]
-        return "\n".join(lines)
+        return "\n\n".join(lines)
 
     def generate_product_post(
         self,

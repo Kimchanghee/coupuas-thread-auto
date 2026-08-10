@@ -56,6 +56,8 @@ from src.gemini_keys import (
 )
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.services.marketplaces import (
+    ProductLinkInputAnalysis,
+    analyze_product_link_input,
     extract_supported_product_links,
     marketplace_for_url,
 )
@@ -99,6 +101,23 @@ CONTENT_W = 1000  # WIN_W - SIDEBAR_W
 CONTENT_H = 700   # WIN_H - HEADER_H - STATUSBAR_H
 STATUSBAR_H = 32
 UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+
+LINK_TABLE_NUMBER_COLUMN = 0
+LINK_TABLE_CHANNEL_COLUMN = 1
+LINK_TABLE_URL_COLUMN = 2
+LINK_TABLE_STATUS_COLUMN = 3
+LINK_TABLE_PRODUCT_COLUMN = 4
+
+MARKETPLACE_CHANNEL_STYLES = {
+    "coupang": ("쿠팡", "#FF9A8F"),
+    "naver": ("네이버", "#6EE7A8"),
+    "toss": ("토스", "#7CC4FF"),
+    "ohouse": ("오늘집", "#67E8F9"),
+    "musinsa": ("무신사", "#F1F5F9"),
+    "kurly": ("컬리", "#C4B5FD"),
+    "oliveyoung": ("올영", "#D9F99D"),
+    "aliexpress": ("Ali", "#FDBA74"),
+}
 
 
 # ─── Helpers ────────────────────────────────────────────────
@@ -1036,7 +1055,7 @@ class MainWindow(QMainWindow):
 
         self._link_help_panel = InlineHelpPanel(
             "링크 자동화 사용법",
-            "상품 링크를 한 줄에 하나씩 붙여넣고 자동화 시작을 누르세요. 여러 계정은 위 탭에서 각각 대기열을 관리하며, 업로드 간격·영상 우선·글 작성 방식은 설정에서 한 번만 지정합니다.",
+            "각 제휴 프로그램에서 이미 발급받은 링크를 한 줄에 하나씩 붙여넣으세요. 원본 제휴 URL은 게시물에 그대로 유지되며, 쿠팡 파트너스 외 프로그램은 쇼핑 프로가 필요합니다.",
             page,
         )
         self._link_help_panel.setVisible(False)
@@ -1066,11 +1085,16 @@ class MainWindow(QMainWindow):
 
         # Hint text
         hint = QLabel(
-            "상품 링크를 한 줄에 하나씩 붙여넣으세요 · 쿠팡 외 쇼핑몰은 쇼핑 프로에서 지원",
+            "이미 발급받은 제휴 링크를 한 줄에 하나씩 붙여넣으세요 · 쿠팡 외 프로그램은 쇼핑 프로에서 지원",
             page,
         )
         hint.setGeometry(28, cy, 700, 20)
         hint.setStyleSheet(muted_text_style("9pt"))
+        hint.setTextFormat(Qt.TextFormat.RichText)
+        hint.setAccessibleName("입력 링크 채널 분류")
+        hint.setAccessibleDescription(
+            "입력한 링크의 사용 가능 개수와 쇼핑 채널, 중복 및 제외 사유를 표시합니다."
+        )
         self._links_hint = hint
 
         # Links text area (compact)
@@ -1078,8 +1102,12 @@ class MainWindow(QMainWindow):
         self.links_text.setGeometry(28, cy + 24, 944, 160)
         self.links_text.setPlaceholderText(
             "https://link.coupang.com/a/xxx\n"
-            "https://smartstore.naver.com/.../products/...\n"
-            "https://www.aliexpress.com/item/...html"
+            "https://naver.me/... 또는 https://toss.im/_m/...\n"
+            "https://ohou.se/productions/... 또는 https://oy.run/..."
+        )
+        self.links_text.setAccessibleName("제휴 링크 입력")
+        self.links_text.setAccessibleDescription(
+            "한 줄에 링크 하나를 입력하세요. 아래 미리보기에서 채널과 제외 사유를 확인할 수 있습니다."
         )
         self.links_text.textChanged.connect(self._update_link_count)
 
@@ -1203,20 +1231,23 @@ class MainWindow(QMainWindow):
 
         self.link_table = QTableWidget(page)
         self.link_table.setGeometry(28, table_y, 944, table_h)
-        self.link_table.setColumnCount(4)
-        self.link_table.setHorizontalHeaderLabels(["#", "링크", "상태", "상품명"])
+        self.link_table.setColumnCount(5)
+        self.link_table.setHorizontalHeaderLabels(["#", "채널", "링크", "상태", "상품명"])
+        self.link_table.setAccessibleName("링크 채널 및 작업 현황")
         self.link_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.link_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.link_table.setAlternatingRowColors(False)
         self.link_table.verticalHeader().setVisible(False)
 
         header = self.link_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.link_table.setColumnWidth(0, 40)
-        self.link_table.setColumnWidth(2, 80)
+        header.setSectionResizeMode(LINK_TABLE_NUMBER_COLUMN, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(LINK_TABLE_CHANNEL_COLUMN, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(LINK_TABLE_URL_COLUMN, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(LINK_TABLE_STATUS_COLUMN, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(LINK_TABLE_PRODUCT_COLUMN, QHeaderView.ResizeMode.Stretch)
+        self.link_table.setColumnWidth(LINK_TABLE_NUMBER_COLUMN, 40)
+        self.link_table.setColumnWidth(LINK_TABLE_CHANNEL_COLUMN, 92)
+        self.link_table.setColumnWidth(LINK_TABLE_STATUS_COLUMN, 84)
 
         self.link_table.setStyleSheet(
             f"QTableWidget {{"
@@ -1809,7 +1840,7 @@ class MainWindow(QMainWindow):
         payment_title.setStyleSheet(_section_title_style)
 
         payment_desc = QLabel(
-            "쿠팡 기본 또는 네이버쇼핑·토스쇼핑·AliExpress까지 지원하는 쇼핑 프로를 선택하세요.",
+            "쿠팡 파트너스 기본 또는 국내 7개 제휴 프로그램과 AliExpress 호환 링크를 지원하는 쇼핑 프로를 선택하세요.",
             self._settings_payment_sec,
         )
         payment_desc.setGeometry(24, 40, 880, 20)
@@ -1898,7 +1929,7 @@ class MainWindow(QMainWindow):
             button.setAccessibleName(accessible_name)
 
         self._pay_hint_label = QLabel(
-            "7일권은 일회결제, 월간은 30일마다 정기결제됩니다. 쇼핑 프로는 쿠팡·네이버·토스·Ali 링크를 지원합니다.",
+            "7일권은 일회결제, 월간은 30일마다 정기결제됩니다. 쿠팡 외 제휴 프로그램과 AliExpress는 쇼핑 프로가 필요합니다.",
             self._settings_payment_sec,
         )
         self._pay_hint_label.setGeometry(24, 258, 900, 20)
@@ -2172,7 +2203,7 @@ class MainWindow(QMainWindow):
         self._run_state_detail.setGeometry(split, 10, max(120, inner_w - split - 18), 20)
         self._run_state_next.setGeometry(split, 36, max(120, inner_w - split - 18), 20)
         y += state_h + 10
-        self._link_table_label.setGeometry(margin, y, 180, 20)
+        self._link_table_label.setGeometry(margin, y, 220, 20)
         y += 24
         self.link_table.setGeometry(margin, y, inner_w, max(42, height - y - 12))
 
@@ -2342,39 +2373,132 @@ class MainWindow(QMainWindow):
     #  LINK TABLE MANAGEMENT
     # ────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _channel_style(marketplace):
+        if marketplace is None:
+            return "미지원", Colors.WARNING
+        return MARKETPLACE_CHANNEL_STYLES.get(
+            marketplace.marketplace_id,
+            (marketplace.label, Colors.ACCENT_LIGHT),
+        )
+
+    def _make_channel_item(self, marketplace, classification="supported"):
+        if classification == "invalid":
+            text, color, tooltip = "! 오류", Colors.ERROR, "URL 형식 또는 보안 조건을 확인해 주세요."
+        elif marketplace is None:
+            text, color, tooltip = "? 미지원", Colors.WARNING, "현재 지원하지 않는 쇼핑 채널입니다."
+        else:
+            short_label, color = self._channel_style(marketplace)
+            text = f"● {short_label}"
+            tooltip = marketplace.label
+            if classification == "duplicate":
+                tooltip += " · 앞에서 입력한 링크와 중복"
+
+        item = QTableWidgetItem(text)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor(color))
+        background = QColor(color)
+        background.setAlpha(28)
+        item.setBackground(background)
+        item.setToolTip(tooltip)
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        return item
+
+    @staticmethod
+    def _link_status_color(status):
+        status_text = str(status or "")
+        if any(token in status_text for token in ("실패", "오류")):
+            return Colors.ERROR
+        if any(token in status_text for token in ("진행", "미지원", "제외")):
+            return Colors.WARNING
+        if any(token in status_text for token in ("완료", "사용 가능")):
+            return Colors.SUCCESS
+        return Colors.TEXT_MUTED
+
+    def _set_link_table_row(
+        self,
+        row,
+        number,
+        url,
+        status,
+        product_name="-",
+        *,
+        marketplace=None,
+        classification="supported",
+        tooltip="",
+    ):
+        num_item = QTableWidgetItem(str(number))
+        num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.link_table.setItem(row, LINK_TABLE_NUMBER_COLUMN, num_item)
+
+        self.link_table.setItem(
+            row,
+            LINK_TABLE_CHANNEL_COLUMN,
+            self._make_channel_item(marketplace, classification),
+        )
+
+        visible_url = str(url or "").strip()
+        short_url = visible_url if len(visible_url) <= 50 else visible_url[:47] + "..."
+        url_item = QTableWidgetItem(short_url)
+        url_item.setToolTip(str(tooltip or visible_url))
+        url_item.setData(Qt.ItemDataRole.UserRole, visible_url)
+        self.link_table.setItem(row, LINK_TABLE_URL_COLUMN, url_item)
+
+        status_item = QTableWidgetItem(str(status or ""))
+        status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_item.setForeground(QColor(self._link_status_color(status)))
+        self.link_table.setItem(row, LINK_TABLE_STATUS_COLUMN, status_item)
+
+        name_item = QTableWidgetItem(str(product_name or "-"))
+        name_item.setForeground(QColor(Colors.TEXT_MUTED))
+        self.link_table.setItem(row, LINK_TABLE_PRODUCT_COLUMN, name_item)
+
+    def _render_link_input_preview(self, analyses: list[ProductLinkInputAnalysis]):
+        """Show immediate channel feedback without mutating the editor content."""
+        self.link_table.setRowCount(0)
+        self._link_url_row_map.clear()
+        self._link_table_label.setText("입력 링크 미리보기")
+
+        status_labels = {
+            "supported": "사용 가능",
+            "duplicate": "중복 제외",
+            "unsupported": "미지원",
+            "invalid": "형식 오류",
+        }
+        for analysis in analyses:
+            row = self.link_table.rowCount()
+            self.link_table.insertRow(row)
+            visible_value = analysis.normalized_url or analysis.url or analysis.source_text
+            self._set_link_table_row(
+                row,
+                analysis.line_number,
+                visible_value,
+                status_labels.get(analysis.status, analysis.status),
+                analysis.reason,
+                marketplace=analysis.marketplace,
+                classification=analysis.status,
+                tooltip=f"입력 {analysis.line_number}줄 · {analysis.reason}\n{visible_value}",
+            )
+
     def _populate_link_table(self, link_data):
         """Populate the link table with initial data (all '대기' status)."""
         self.link_table.setRowCount(0)
         self._link_url_row_map.clear()
+        self._link_table_label.setText("작업 현황")
 
         for idx, item in enumerate(link_data):
             url = item[0] if isinstance(item, tuple) else item
             row = self.link_table.rowCount()
             self.link_table.insertRow(row)
-
-            # # column
-            num_item = QTableWidgetItem(str(idx + 1))
-            num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.link_table.setItem(row, 0, num_item)
-
-            # URL column (shortened)
-            short_url = url
-            if len(url) > 50:
-                short_url = url[:47] + "..."
-            url_item = QTableWidgetItem(short_url)
-            url_item.setToolTip(url)
-            self.link_table.setItem(row, 1, url_item)
-
-            # Status column
-            status_item = QTableWidgetItem("대기")
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            status_item.setForeground(QColor(Colors.TEXT_MUTED))
-            self.link_table.setItem(row, 2, status_item)
-
-            # Product name column
-            name_item = QTableWidgetItem("-")
-            name_item.setForeground(QColor(Colors.TEXT_MUTED))
-            self.link_table.setItem(row, 3, name_item)
+            self._set_link_table_row(
+                row,
+                idx + 1,
+                url,
+                "대기",
+                marketplace=marketplace_for_url(url),
+            )
 
             self._link_url_row_map[url] = row
 
@@ -2382,12 +2506,14 @@ class MainWindow(QMainWindow):
         if row < 0:
             return
 
-        url_item = self.link_table.item(row, 1)
-        status_item = self.link_table.item(row, 2)
-        product_item = self.link_table.item(row, 3)
+        url_item = self.link_table.item(row, LINK_TABLE_URL_COLUMN)
+        status_item = self.link_table.item(row, LINK_TABLE_STATUS_COLUMN)
+        product_item = self.link_table.item(row, LINK_TABLE_PRODUCT_COLUMN)
         url_text = ""
         if url_item:
-            url_text = str(url_item.toolTip() or url_item.text() or "").strip()
+            url_text = str(
+                url_item.data(Qt.ItemDataRole.UserRole) or url_item.text() or ""
+            ).strip()
         status_text = str(status_item.text() or "").strip() if status_item else ""
         product_text = str(product_item.text() or "").strip() if product_item else ""
 
@@ -2418,7 +2544,7 @@ class MainWindow(QMainWindow):
             level=level,
         )
 
-        status_item = self.link_table.item(row, 2)
+        status_item = self.link_table.item(row, LINK_TABLE_STATUS_COLUMN)
         if status_item:
             status_item.setText(status)
             color_map = {
@@ -2431,7 +2557,7 @@ class MainWindow(QMainWindow):
             status_item.setForeground(QColor(color_map.get(status, Colors.TEXT_MUTED)))
 
         if product_name:
-            name_item = self.link_table.item(row, 3)
+            name_item = self.link_table.item(row, LINK_TABLE_PRODUCT_COLUMN)
             if name_item:
                 name_item.setText(product_name[:40])
                 if status == "완료":
@@ -2737,11 +2863,70 @@ class MainWindow(QMainWindow):
 
     def _update_link_count(self):
         content = self.links_text.toPlainText()
+        analyses = analyze_product_link_input(content)
+        self._last_link_input_analysis = analyses
+        supported = [item for item in analyses if item.status == "supported"]
+        duplicates = sum(item.status == "duplicate" for item in analyses)
+        unsupported = sum(item.status == "unsupported" for item in analyses)
+        invalid = sum(item.status == "invalid" for item in analyses)
         count = len(extract_supported_product_links(content))
         if count > 0:
-            self.link_count_badge.update_style(Colors.ACCENT, f"{count}개 링크")
+            self.link_count_badge.update_style(Colors.ACCENT, f"사용 {count}개")
         else:
-            self.link_count_badge.update_style(Colors.TEXT_MUTED, "0개 링크")
+            self.link_count_badge.update_style(Colors.TEXT_MUTED, "사용 0개")
+
+        if not analyses:
+            summary_html = (
+                "이미 발급받은 제휴 링크를 한 줄에 하나씩 붙여넣으세요 · "
+                "입력 즉시 채널과 제외 사유가 표시됩니다"
+            )
+            summary_text = "입력한 링크가 없습니다."
+        else:
+            channel_counts = {}
+            for analysis in supported:
+                marketplace_id = analysis.marketplace.marketplace_id
+                channel_counts[marketplace_id] = channel_counts.get(marketplace_id, 0) + 1
+
+            summary_parts = [
+                f'<span style="color:{Colors.TEXT_SECONDARY};"><b>입력 {len(analyses)}</b></span>',
+                f'<span style="color:{Colors.SUCCESS};"><b>사용 가능 {count}</b></span>',
+            ]
+            summary_text_parts = [f"입력 {len(analyses)}", f"사용 가능 {count}"]
+            if duplicates:
+                summary_parts.append(
+                    f'<span style="color:{Colors.WARNING};">중복 {duplicates}</span>'
+                )
+                summary_text_parts.append(f"중복 {duplicates}")
+            if unsupported:
+                summary_parts.append(
+                    f'<span style="color:{Colors.WARNING};">? 미지원 {unsupported}</span>'
+                )
+                summary_text_parts.append(f"미지원 {unsupported}")
+            if invalid:
+                summary_parts.append(
+                    f'<span style="color:{Colors.ERROR};">! 오류 {invalid}</span>'
+                )
+                summary_text_parts.append(f"오류 {invalid}")
+
+            for marketplace_id, channel_count in channel_counts.items():
+                short_label, color = MARKETPLACE_CHANNEL_STYLES.get(
+                    marketplace_id,
+                    (marketplace_id, Colors.ACCENT_LIGHT),
+                )
+                summary_parts.append(
+                    f'<span style="color:{color};">● {html.escape(short_label)} {channel_count}</span>'
+                )
+                summary_text_parts.append(f"{short_label} {channel_count}")
+            summary_html = " &nbsp;·&nbsp; ".join(summary_parts)
+            summary_text = " · ".join(summary_text_parts)
+
+        self._links_hint.setText(summary_html)
+        self._links_hint.setToolTip(summary_text)
+        self._links_hint.setAccessibleDescription(summary_text)
+        self.link_count_badge.setAccessibleDescription(summary_text)
+
+        if not self.is_running:
+            self._render_link_input_preview(analyses)
 
     def _extract_links(self, content: str) -> list:
         return [(url, None) for url in extract_supported_product_links(content)]
@@ -3865,15 +4050,25 @@ class MainWindow(QMainWindow):
         items = list(state.pending_items)
         if state.current_item:
             items.insert(0, state.current_item)
+        if not items:
+            self._render_link_input_preview(
+                analyze_product_link_input(self.links_text.toPlainText())
+            )
+            return
         self.link_table.setRowCount(0)
         self._link_url_row_map.clear()
+        self._link_table_label.setText("작업 현황")
         for row, item in enumerate(items):
             url = str(item.get("url", ""))
             self.link_table.insertRow(row)
-            self.link_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-            self.link_table.setItem(row, 1, QTableWidgetItem(url))
-            self.link_table.setItem(row, 2, QTableWidgetItem("진행 중" if item == state.current_item else "대기"))
-            self.link_table.setItem(row, 3, QTableWidgetItem(str(item.get("title", ""))))
+            self._set_link_table_row(
+                row,
+                row + 1,
+                url,
+                "진행 중" if item == state.current_item else "대기",
+                str(item.get("title", "")),
+                marketplace=marketplace_for_url(url),
+            )
             self._link_url_row_map[url] = row
 
     def _init_multi_account_runtime(self):
@@ -4466,7 +4661,7 @@ class MainWindow(QMainWindow):
             offer_price = int(state.get("offer_price_krw") or 59_000)
             offer_cycles = int(state.get("offer_cycles") or 6)
             if resolved_plan and resolved_plan.is_shopping_pro:
-                offer_text = "현재 쇼핑 프로 이용 중 · 쿠팡·네이버·토스·Ali 상품 링크 지원"
+                offer_text = "현재 쇼핑 프로 이용 중 · 국내 7개 제휴 프로그램 + AliExpress 호환 링크 지원"
             elif str(state.get("commerce_scope") or "").lower() == "multi" and trial_ends_at:
                 trial_date = trial_ends_at[:10]
                 offer_text = f"기존 고객 · {trial_date} 전까지 쇼핑 프로 무료"
@@ -5459,20 +5654,13 @@ class MainWindow(QMainWindow):
                     # Add to table
                     row = self.link_table.rowCount()
                     self.link_table.insertRow(row)
-                    num_item = QTableWidgetItem(str(row + 1))
-                    num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.link_table.setItem(row, 0, num_item)
-                    short_url = url if len(url) <= 50 else url[:47] + "..."
-                    url_item = QTableWidgetItem(short_url)
-                    url_item.setToolTip(url)
-                    self.link_table.setItem(row, 1, url_item)
-                    status_item = QTableWidgetItem("대기")
-                    status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    status_item.setForeground(QColor(Colors.TEXT_MUTED))
-                    self.link_table.setItem(row, 2, status_item)
-                    name_item = QTableWidgetItem("-")
-                    name_item.setForeground(QColor(Colors.TEXT_MUTED))
-                    self.link_table.setItem(row, 3, name_item)
+                    self._set_link_table_row(
+                        row,
+                        row + 1,
+                        url,
+                        "대기",
+                        marketplace=marketplace_for_url(url),
+                    )
                     self._link_url_row_map[url] = row
 
         if added > 0:

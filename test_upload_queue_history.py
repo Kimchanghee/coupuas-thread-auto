@@ -136,7 +136,8 @@ def test_failed_history_records_do_not_count_as_uploaded(tmp_path):
 
     history.add_link("https://example.com/product/1", "successful upload", success=True)
 
-    assert history.is_uploaded("https://example.com/product/1?other=value")
+    assert history.is_uploaded("https://example.com/product/1")
+    assert not history.is_uploaded("https://example.com/product/1?other=value")
     assert history.get_stats() == {"total": 2, "success": 1, "failed": 1}
 
 

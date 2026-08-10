@@ -11,7 +11,18 @@ test("landing page publishes search, social, legal, and real purchase guidance",
   assert.match(html, /property="og:image"/);
   assert.match(html, /application\/ld\+json/);
   assert.match(html, /앱에서 월간 쇼핑 프로 결제/);
-  for (const label of ["네이버쇼핑", "토스쇼핑", "AliExpress", "29,000원", "69,000원"]) {
+  for (const label of [
+    "쿠팡 파트너스",
+    "네이버 쇼핑 커넥트",
+    "토스 쇼핑 쉐어링크",
+    "오늘의집 큐레이터",
+    "무신사 큐레이터",
+    "컬리 큐레이터",
+    "올리브영 쇼핑 큐레이터",
+    "AliExpress",
+    "29,000원",
+    "69,000원",
+  ]) {
     assert.match(html, new RegExp(label));
   }
   for (const path of ["/terms", "/privacy", "/refund", "/support"]) {

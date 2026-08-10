@@ -2,7 +2,7 @@
 
 쓰레드(Threads) 플랫폼에 글을 자동으로 업로드하는 Windows용 Python 애플리케이션입니다.
 
-**현재 버전: v3.0.66** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
+**현재 버전: v3.0.68** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
 
 ## 이용권
 
@@ -16,7 +16,7 @@
 
 ## 주요 기능
 
-- **멀티 쇼핑몰 상품 분석**: 쿠팡·네이버쇼핑·토스쇼핑·AliExpress 링크를 API 연동 없이 공개 상품 페이지에서 분석
+- **멀티 쇼핑몰 상품 분석**: 국내 7개 제휴 프로그램의 발급 링크와 AliExpress 호환 링크를 API 연동 없이 공개 상품 페이지에서 분석
 - **AI 기반 문구 생성**: 쇼핑몰별 광고·제휴 고지를 포함한 Threads용 짧은 홍보 문구를 생성
 - **상품 이미지 검색**: 1688 이미지 검색 결과를 캐시에 저장해 첫 번째 게시글에 첨부
 - **브라우저 세션 기반 업로드**: Playwright로 Threads 웹을 제어하고 로그인 세션을 암호화 저장
@@ -24,6 +24,23 @@
 - **업로드 이력 관리**: 업로드한 링크를 기록해 중복 업로드를 방지
 - **간편한 AI 사용**: 별도 AI API 키 없이 로그인과 이용권만으로 Grok 4.3 문안 생성
 - **설정 관리**: Threads 계정, 업로드 간격, 계정별 대기열 등을 앱에서 설정
+
+## 지원 제휴 프로그램
+
+Thread Auto는 아래 프로그램에서 사용자가 **이미 발급받은 제휴 링크**를 입력받습니다. 앱이 가입, 제휴 승인, 링크 발급 또는 일반 상품 URL의 제휴 링크 전환을 대신하지 않습니다.
+
+| 프로그램 | 이용권 | 대표 입력 URL |
+| --- | --- | --- |
+| 쿠팡 파트너스 | 쿠팡 기본·쇼핑 프로 | `link.coupang.com`, `coupang.com` |
+| 네이버 쇼핑 커넥트 | 쇼핑 프로 | `naver.me`, `shopping.naver.com`, `smartstore.naver.com` 등 |
+| 토스 쇼핑 쉐어링크 | 쇼핑 프로 | `toss.im/_m/`, `toss.shopping`, `shopping.toss.im` 등 |
+| 오늘의집 큐레이터 | 쇼핑 프로 | `ozip.me`, `link.ohou.se`, `ohou.se`, `store.ohou.se` |
+| 무신사 큐레이터 | 쇼핑 프로 | `musinsa.com`, `musinsa.onelink.me` |
+| 컬리 큐레이터 | 쇼핑 프로 | `lounge.kurly.com`, `kurly.com` |
+| 올리브영 쇼핑 큐레이터 | 쇼핑 프로 | `oy.run`, `oliveyoung.co.kr` |
+| AliExpress | 쇼핑 프로 · 호환 지원 | `aliexpress.com` |
+
+입력한 원본 제휴 URL은 수수료 귀속 정보를 보호하기 위해 Threads 게시물에 그대로 사용합니다. 상품명·특징 수집은 로그인 없이 볼 수 있는 공개 메타데이터와 허용된 리다이렉트 경로에 한정됩니다. 앱 전용·로그인 전용 페이지, 차단된 요청, 새로운 단축 도메인 또는 허용 범위 밖으로 이동하는 리다이렉트에서는 상품 정보가 일부 누락되거나 분석이 실패할 수 있습니다. 자세한 내용은 [제휴 링크 지원 안내](docs/AFFILIATE_MARKETPLACES.md)를 참고하세요.
 
 ## 시스템 요구사항
 
@@ -99,10 +116,10 @@ python login_main.py
 3. **저장** 버튼을 눌러 설정을 반영합니다.
 
 ### 6. 링크 입력 및 업로드
-1. **링크 입력** 화면에 쿠팡·네이버쇼핑·토스쇼핑·AliExpress 상품 URL을 붙여넣습니다.
+1. **링크 입력** 화면에 지원 제휴 프로그램에서 이미 발급받은 상품 URL을 붙여넣습니다. 한 줄에 하나씩 입력하며, 쿠팡 파트너스 외 프로그램은 쇼핑 프로가 필요합니다.
 2. **자동화 시작** 버튼을 누릅니다.
 3. 앱이 링크 분석, 이미지 검색, 문구 생성, Threads 업로드를 순서대로 진행합니다.
-4. 이미 업로드된 링크는 이력 기준으로 자동 스킵됩니다.
+4. 게시물에는 입력한 원본 제휴 URL이 유지되며, 이미 업로드된 링크는 이력 기준으로 자동 스킵됩니다.
 
 ## 프로젝트 구조
 
@@ -187,7 +204,8 @@ python setup_login.py
 ## 최근 업데이트
 
 ### 2026-08-05 쇼핑 프로
-- 쿠팡·네이버쇼핑·토스쇼핑·AliExpress 상품 링크를 한 입력창에서 처리합니다.
+- 쿠팡 파트너스·네이버 쇼핑 커넥트·토스 쇼핑 쉐어링크·오늘의집 큐레이터·무신사 큐레이터·컬리 큐레이터·올리브영 쇼핑 큐레이터 링크를 한 입력창에서 처리합니다.
+- AliExpress 링크는 기존 사용자를 위한 호환 대상으로 계속 지원합니다.
 - 쇼핑 프로 7일권·월간권과 Threads 다계정 한도를 결제 서버 권한에 연결했습니다.
 - 기존 유료 고객에게 한시적 무료 확장과 전환 혜택을 서버에서 판정합니다.
 
@@ -278,6 +296,7 @@ python build_installer.py
 
 ## 추가 문서
 
+- [docs/AFFILIATE_MARKETPLACES.md](docs/AFFILIATE_MARKETPLACES.md) - 제휴 프로그램, 링크 보존, 분석 범위 안내
 - [TESTING.md](TESTING.md) - 테스트/배포 검증 체크리스트
 - [AUTO_UPDATE_SETUP.md](AUTO_UPDATE_SETUP.md) - 자동 업데이트 설정
 - [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) - 구현 메모

@@ -106,7 +106,7 @@ def test_product_post_keeps_link_only_in_second_post():
 
     assert "https://link.coupang.com/a/dVx6gM6fm0" not in first_text
     assert "https://link.coupang.com/a/dVx6gM6fm0" in second_text
-    assert second_text.startswith("🔗")
+    assert second_text.startswith(AggroGenerator.COUPANG_DISCLOSURE)
     assert AggroGenerator.COUPANG_DISCLOSURE in second_text
 
 

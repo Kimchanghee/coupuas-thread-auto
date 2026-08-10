@@ -12,11 +12,30 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set
+from urllib.parse import urlsplit, urlunsplit
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 
 logger = logging.getLogger(__name__)
 _SAFE_ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+
+def normalize_history_url(url: object) -> str:
+    """Canonicalize identity without discarding affiliate attribution data."""
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+        if not parsed.scheme or not parsed.hostname:
+            return raw.split("#", 1)[0]
+        host = parsed.hostname.lower().rstrip(".")
+        port = f":{parsed.port}" if parsed.port else ""
+        netloc = f"{host}{port}"
+        path = parsed.path or "/"
+        return urlunsplit((parsed.scheme.lower(), netloc, path, parsed.query, ""))
+    except (TypeError, ValueError):
+        return raw.split("#", 1)[0]
 
 
 class LinkHistory:
@@ -104,9 +123,7 @@ class LinkHistory:
                     pass
 
     def _normalize_url(self, url: str) -> str:
-        url_text = str(url or "").strip()
-        base = url_text.split("?", 1)[0]
-        return base.lower()
+        return normalize_history_url(url)
 
     def _build_uploaded_set(self) -> Set[str]:
         uploaded = set()

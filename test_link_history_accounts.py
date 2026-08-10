@@ -10,12 +10,25 @@ def test_same_url_is_scoped_to_account(tmp_path):
 
     one.add_link(url, success=True)
 
-    assert one.is_uploaded("https://example.test/product/1?other=value")
+    assert one.is_uploaded("https://EXAMPLE.test/product/1?tracking=yes#ignored")
+    assert not one.is_uploaded("https://example.test/product/1?other=value")
     assert not two.is_uploaded(url)
     two.add_link(url, success=True)
     assert two.is_uploaded(url)
     assert (tmp_path / "one.json").exists()
     assert (tmp_path / "two.json").exists()
+
+
+def test_affiliate_query_values_are_distinct_history_entries(tmp_path):
+    history = LinkHistory(account_id="creator", history_root=tmp_path)
+    first = "https://ohou.se/productions/123/selling?af=creator-one"
+    second = "https://ohou.se/productions/123/selling?af=creator-two"
+
+    history.add_link(first, success=True)
+
+    assert history.is_uploaded(first)
+    assert not history.is_uploaded(second)
+    assert history.filter_new_links([first, second]) == [second]
 
 
 def test_default_constructor_and_explicit_legacy_file_keep_legacy_format(tmp_path):

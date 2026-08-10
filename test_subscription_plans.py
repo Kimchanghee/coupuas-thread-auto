@@ -58,3 +58,24 @@ def test_marketplace_access_supports_first_free_trial_and_paid_pro():
     assert not marketplace_access_decision({"user_type": "trial", "work_used": 1}, naver_url)[0]
     assert marketplace_access_decision({"plan_id": SHOPPING_PRO_MONTHLY_PLAN.plan_id}, naver_url)[0]
     assert marketplace_access_decision({"plan_id": MONTHLY_PLAN.plan_id}, coupang_url)[0]
+
+
+def test_all_non_coupang_affiliate_programs_share_existing_multi_entitlement():
+    urls = [
+        "https://naver.me/example",
+        "https://toss.im/_m/example",
+        "https://ozip.me/example?af",
+        "https://www.musinsa.com/curator/goods/example",
+        "https://lounge.kurly.com/link/example",
+        "https://oy.run/example",
+    ]
+
+    for url in urls:
+        assert not marketplace_access_decision(
+            {"plan_id": MONTHLY_PLAN.plan_id, "user_type": "paid", "work_used": 1},
+            url,
+        )[0]
+        assert marketplace_access_decision(
+            {"plan_id": SHOPPING_PRO_MONTHLY_PLAN.plan_id},
+            url,
+        )[0]

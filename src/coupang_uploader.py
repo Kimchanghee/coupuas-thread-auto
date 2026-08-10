@@ -7,6 +7,7 @@ import time
 import threading
 import re
 from typing import List, Dict, Optional, Callable
+from urllib.parse import urlsplit, urlunsplit
 from src.computer_use_agent import ComputerUseAgent
 from src.threads_playwright_helper import ThreadsPlaywrightHelper
 from src.threads_navigation import goto_threads_with_fallback
@@ -483,32 +484,60 @@ class CoupangPartnersPipeline:
         post_data: Optional[Dict],
         product_info: Optional[Dict] = None,
     ) -> Optional[Dict]:
-        """Ensure required disclosure line is always at the top of second post."""
+        """Enforce the disclosure and immutable affiliate URL at publish boundary."""
         if not isinstance(post_data, dict):
             return post_data
 
-        second_post = post_data.get("second_post")
-        if not isinstance(second_post, dict):
-            return post_data
-
-        disclosure = str((product_info or {}).get("affiliate_disclosure") or "").strip()
+        product = product_info or {}
+        disclosure = str(product.get("affiliate_disclosure") or "").strip()
         if not disclosure:
             disclosure = str(getattr(self.aggro_generator, "COUPANG_DISCLOSURE", "") or "").strip()
         if not disclosure:
             return post_data
 
-        raw_text = str(second_post.get("text", "") or "").strip()
-        if not raw_text:
-            second_post["text"] = disclosure
-            return post_data
+        affiliate_url = str(
+            product.get("affiliate_url")
+            or product.get("original_url")
+            or post_data.get("original_url")
+            or ""
+        ).strip()
+        from src.services.marketplaces import MARKETPLACES
 
-        lines = [line.strip() for line in raw_text.replace("\r\n", "\n").split("\n") if line.strip()]
-        remaining_lines = [line for line in lines if line != disclosure]
+        known_disclosures = {
+            str(item.disclosure or "").strip()
+            for item in MARKETPLACES
+            if str(item.disclosure or "").strip()
+        }
+        known_disclosures.add(disclosure)
 
-        if remaining_lines:
-            second_post["text"] = f"{disclosure}\n\n" + "\n".join(remaining_lines)
-        else:
-            second_post["text"] = disclosure
+        def normalize_comment(container: Dict) -> None:
+            second_post = container.get("second_post")
+            if not isinstance(second_post, dict):
+                second_post = container.get("product_comment")
+            if not isinstance(second_post, dict):
+                return
+            raw_text = str(second_post.get("text", "") or "").replace("\r\n", "\n")
+            if affiliate_url:
+                raw_text = raw_text.replace(affiliate_url, "")
+            # Product comments have a single-link contract. Remove any URL
+            # invented by AI (including a resolved landing URL) before the
+            # immutable user-supplied affiliate URL is appended once.
+            raw_text = re.sub(r"https?://[^\s<>\"']+", "", raw_text, flags=re.IGNORECASE)
+            lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
+            remaining_lines = [line for line in lines if line not in known_disclosures]
+            sections = [disclosure]
+            if remaining_lines:
+                sections.append("\n".join(remaining_lines))
+            if affiliate_url:
+                sections.append(affiliate_url)
+            second_post["text"] = "\n\n".join(sections)
+
+        normalize_comment(post_data)
+        managed_variants = post_data.get("all_managed_variants")
+        if isinstance(managed_variants, list):
+            for variant in managed_variants:
+                if isinstance(variant, dict):
+                    normalize_comment(variant)
         return post_data
 
     def process_link(self, product_url: str, user_keywords: str = None) -> Optional[Dict]:
@@ -534,7 +563,14 @@ class CoupangPartnersPipeline:
         if not allowed:
             raise PermissionError(access_message)
 
-        print(f"\n  링크 처리 중: {product_url[:50]}...")
+        try:
+            parsed_log_url = urlsplit(str(product_url or "").strip())
+            safe_log_url = urlunsplit(
+                (parsed_log_url.scheme, parsed_log_url.netloc, "", "", "")
+            )
+        except ValueError:
+            safe_log_url = "(invalid URL)"
+        print(f"\n  링크 처리 중: {safe_log_url[:80]}...")
 
         print("  [1단계] 상품 링크 분석...")
         try:
@@ -545,9 +581,30 @@ class CoupangPartnersPipeline:
         except OperationCancelled as exc:
             raise CancelledException("사용자에 의해 취소됨") from exc
 
+        if not product_info and user_keywords:
+            from src.services.marketplaces import marketplace_for_url, normalize_product_url
+
+            normalized_input = normalize_product_url(product_url)
+            marketplace = marketplace_for_url(normalized_input)
+            if marketplace is not None:
+                product_info = {
+                    "title": str(user_keywords or "").strip(),
+                    "search_keywords": str(user_keywords or "").strip(),
+                    "original_url": normalized_input,
+                    "affiliate_url": normalized_input,
+                    "resolved_product_url": normalized_input,
+                    "marketplace": marketplace.marketplace_id,
+                    "marketplace_label": marketplace.label,
+                    "affiliate_disclosure": marketplace.disclosure,
+                }
+                print("  공개 상품 정보가 없어 사용자 키워드로 계속 진행")
+
         if not product_info:
             print(f"  링크 분석 실패")
             return None
+
+        product_info.setdefault("original_url", str(product_url or "").strip())
+        product_info.setdefault("affiliate_url", product_info.get("original_url"))
 
         # 사용자 키워드가 제공되면 우선 사용
         if user_keywords:

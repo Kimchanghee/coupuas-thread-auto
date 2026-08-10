@@ -9,6 +9,7 @@ import requests
 import base64
 import json
 import time
+import html as html_lib
 from html.parser import HTMLParser
 from typing import Callable, Optional, Dict
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -20,7 +21,9 @@ from src.gemini_keys import (
 )
 from src.services.cancellation import check_cancelled, is_cancelled_exception
 from src.services.marketplaces import (
+    MARKETPLACES_BY_ID,
     marketplace_for_url,
+    marketplace_for_redirect_url,
     normalize_product_url,
 )
 
@@ -29,7 +32,8 @@ MAX_RETRIES = 5
 RETRY_DELAY = 60  # 1분
 PARTNER_LINK_HOST = "link.coupang.com"
 ALLOWED_COUPANG_DOMAINS = ("coupang.com",)
-MAX_REDIRECT_HOPS = 5
+MAX_REDIRECT_HOPS = 8
+MAX_BRIDGE_HOPS = 2
 MAX_PRODUCT_HTML_BYTES = 2_000_000
 
 
@@ -54,6 +58,7 @@ class _ProductMetadataParser(HTMLParser):
                 values.get("property")
                 or values.get("name")
                 or values.get("itemprop")
+                or ""
             ).strip().lower()
             content = values.get("content", "").strip()
             if key and content and key not in self.meta:
@@ -101,8 +106,8 @@ def _redact_api_key(value: object) -> str:
 class CoupangParser:
     """상품 링크 파서.
 
-    기존 클래스 이름은 호환성을 위해 유지하며 쿠팡, 네이버쇼핑,
-    토스쇼핑, AliExpress 상품 링크를 공통 결과 형식으로 반환합니다.
+    기존 클래스 이름은 호환성을 위해 유지하며 등록된 제휴 쇼핑몰
+    상품 링크를 공통 결과 형식으로 반환합니다.
     """
 
     def __init__(self, google_api_key: str = None):
@@ -112,7 +117,9 @@ class CoupangParser:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
+            # requests always decodes gzip/deflate. Advertising Brotli without
+            # a Brotli decoder can leave compressed bytes masquerading as HTML.
+            'Accept-Encoding': 'gzip, deflate',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
             'Sec-Fetch-Dest': 'document',
@@ -124,14 +131,7 @@ class CoupangParser:
 
     @staticmethod
     def _normalize_url(url: str) -> str:
-        value = str(url or "").strip()
-        if not value:
-            return ""
-        if not value.startswith(("http://", "https://")):
-            value = f"https://{value}"
-        if value.startswith("http://"):
-            value = "https://" + value[len("http://"):]
-        return value
+        return normalize_product_url(url)
 
     @staticmethod
     def _is_allowed_coupang_host(host: str) -> bool:
@@ -191,6 +191,8 @@ class CoupangParser:
                 )
             if result:
                 result['original_url'] = url
+                result['affiliate_url'] = url
+                result['resolved_product_url'] = str(result.get('final_url') or url)
                 result['marketplace'] = marketplace.marketplace_id
                 result['marketplace_label'] = marketplace.label
                 result['affiliate_disclosure'] = marketplace.disclosure
@@ -242,7 +244,7 @@ class CoupangParser:
         title = str(info.get("title") or "").strip()
         if title and not info.get("search_keywords"):
             info["search_keywords"] = self._extract_keywords(title)
-        return info if title or info.get("image_url") else None
+        return info if title or info.get("image_url") or info.get("product_id") else None
 
     def _fetch_supported_html(
         self,
@@ -255,41 +257,126 @@ class CoupangParser:
             return "", ""
 
         current_url = normalize_product_url(url)
+        visited: set[str] = set()
+        redirect_hops = 0
+        bridge_hops = 0
         try:
-            for _ in range(MAX_REDIRECT_HOPS + 1):
+            while redirect_hops <= MAX_REDIRECT_HOPS:
                 check_cancelled(cancel_check)
+                if current_url in visited:
+                    return current_url, ""
+                visited.add(current_url)
                 response = self.session.get(
                     current_url,
                     allow_redirects=False,
                     timeout=15,
+                    stream=True,
                 )
                 status = int(response.status_code or 0)
                 if 300 <= status < 400:
                     location = str(response.headers.get("Location", "") or "").strip()
+                    self._close_response(response)
                     next_url = normalize_product_url(urljoin(current_url, location))
-                    next_marketplace = marketplace_for_url(next_url)
                     if (
                         not next_url
-                        or next_marketplace is None
-                        or next_marketplace.marketplace_id != initial_marketplace.marketplace_id
+                        or marketplace_for_redirect_url(
+                            next_url,
+                            initial_marketplace.marketplace_id,
+                        ) is None
                     ):
-                        return "", ""
+                        return current_url, ""
                     current_url = next_url
+                    redirect_hops += 1
                     continue
                 if status < 200 or status >= 400:
-                    return "", ""
-                content = bytes(getattr(response, "content", b"") or b"")[:MAX_PRODUCT_HTML_BYTES]
+                    self._close_response(response)
+                    return current_url, ""
+                content_type = str(response.headers.get("Content-Type", "") or "").lower()
+                if content_type and not any(
+                    allowed in content_type
+                    for allowed in ("text/html", "application/xhtml+xml")
+                ):
+                    self._close_response(response)
+                    return current_url, ""
+                content = self._read_limited_content(response)
                 encoding = str(getattr(response, "encoding", "") or "utf-8")
                 try:
-                    return current_url, content.decode(encoding, errors="replace")
+                    page_html = content.decode(encoding, errors="replace")
                 except LookupError:
-                    return current_url, content.decode("utf-8", errors="replace")
-            return "", ""
+                    page_html = content.decode("utf-8", errors="replace")
+
+                embedded_target = self._embedded_bridge_target(
+                    initial_marketplace.marketplace_id,
+                    current_url,
+                    page_html,
+                )
+                if embedded_target:
+                    next_url = normalize_product_url(urljoin(current_url, embedded_target))
+                    if (
+                        bridge_hops >= MAX_BRIDGE_HOPS
+                        or not next_url
+                        or marketplace_for_redirect_url(
+                            next_url,
+                            initial_marketplace.marketplace_id,
+                        ) is None
+                    ):
+                        return current_url, page_html
+                    bridge_hops += 1
+                    current_url = next_url
+                    continue
+                return current_url, page_html
+            return current_url, ""
         except Exception as exc:
             if is_cancelled_exception(exc):
                 raise
             print(f"  [!] 상품 페이지 메타데이터 요청 실패: {exc}")
             return current_url, ""
+
+    @staticmethod
+    def _close_response(response) -> None:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+
+    @classmethod
+    def _read_limited_content(cls, response) -> bytes:
+        """Stream at most the configured HTML budget, then close the response."""
+        chunks: list[bytes] = []
+        remaining = MAX_PRODUCT_HTML_BYTES
+        try:
+            iterator = getattr(response, "iter_content", None)
+            if not callable(iterator):
+                return bytes(getattr(response, "content", b"") or b"")[:remaining]
+            for chunk in iterator(chunk_size=64 * 1024):
+                value = bytes(chunk or b"")
+                if not value:
+                    continue
+                chunks.append(value[:remaining])
+                remaining -= min(len(value), remaining)
+                if remaining <= 0:
+                    break
+            return b"".join(chunks)
+        finally:
+            cls._close_response(response)
+
+    @staticmethod
+    def _embedded_bridge_target(marketplace_id: str, current_url: str, page_html: str) -> str:
+        """Read only explicitly supported, inert bridge bootstrap fields."""
+        if str(marketplace_id or "") != "oliveyoung":
+            return ""
+        try:
+            if (urlparse(current_url).hostname or "").lower() != "oy.run":
+                return ""
+            html_text = str(page_html or "")
+            match = re.search(r"window\.__SERVER_DATA__\s*=\s*", html_text)
+            if not match:
+                return ""
+            payload, _ = json.JSONDecoder().raw_decode(html_text[match.end():].lstrip())
+            if not isinstance(payload, dict):
+                return ""
+            return html_lib.unescape(str(payload.get("targetUrl") or "").strip())
+        except (TypeError, ValueError):
+            return ""
 
     @classmethod
     def _metadata_from_html(cls, html: str, final_url: str) -> Dict:
@@ -347,17 +434,8 @@ class CoupangParser:
 
     @staticmethod
     def _product_id_from_url(url: str, marketplace_id: str) -> str:
-        patterns = {
-            "coupang": (r"/products/(\d+)",),
-            "naver": (r"/products/(\d+)", r"/catalog/(\d+)"),
-            "toss": (r"/products?/(\d+)", r"[?&]productId=(\d+)"),
-            "aliexpress": (r"/item/(\d+)\.html", r"[?&]productId=(\d+)"),
-        }
-        for pattern in patterns.get(str(marketplace_id or ""), ()):
-            match = re.search(pattern, str(url or ""), re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return ""
+        marketplace = MARKETPLACES_BY_ID.get(str(marketplace_id or ""))
+        return marketplace.product_id_from_url(url) if marketplace else ""
 
     def _parse_with_playwright(
         self,

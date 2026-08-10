@@ -35,13 +35,14 @@ def test_upload_tabs_keep_drafts_and_render_their_own_queue(monkeypatch, tmp_pat
     try:
         assert window._upload_account_tabs.count() == 2
         assert window.selected_threads_account_id() == first.account_id
-        assert window.link_table.item(0, 1).text().endswith("/first")
+        assert window.link_table.item(0, main_window.LINK_TABLE_URL_COLUMN).text().endswith("/first")
+        assert "쿠팡" in window.link_table.item(0, main_window.LINK_TABLE_CHANNEL_COLUMN).text()
 
         window.links_text.setPlainText("first draft")
         window._upload_account_tabs.setCurrentIndex(1)
         assert window.selected_threads_account_id() == second.account_id
         assert window.links_text.toPlainText() == ""
-        assert window.link_table.item(0, 1).text().endswith("/second")
+        assert window.link_table.item(0, main_window.LINK_TABLE_URL_COLUMN).text().endswith("/second")
 
         window.links_text.setPlainText("second draft")
         window._upload_account_tabs.setCurrentIndex(0)

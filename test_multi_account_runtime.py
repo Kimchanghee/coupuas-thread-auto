@@ -208,8 +208,9 @@ def test_runtime_deduplicates_urls_within_an_account(tmp_path):
             "https://example.test/a?tracking=1",
             "https://example.test/a?tracking=2",
         ],
-    ) == 1
-    assert runtime.enqueue("id-a", ["https://example.test/a"]) == 0
+    ) == 2
+    assert runtime.enqueue("id-a", ["https://example.test/a?tracking=1"]) == 0
+    assert runtime.enqueue("id-a", ["https://example.test/a"]) == 1
 
 
 def test_runtime_recovers_an_item_left_current_by_a_crashed_process(tmp_path):

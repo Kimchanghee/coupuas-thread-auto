@@ -9,22 +9,73 @@ const AFFILIATE_DISCLOSURE =
   "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
 const GENERAL_AFFILIATE_DISCLOSURE =
   "이 게시물에는 광고·제휴 링크가 포함될 수 있으며, 구매 시 작성자가 일정액의 수수료를 제공받을 수 있습니다.";
+const NAVER_DISCLOSURE =
+  "이 포스팅은 네이버 쇼핑 커넥트 활동의 일환으로, 판매 발생 시 수수료를 제공받습니다.";
+const TOSS_DISCLOSURE =
+  "이 포스팅은 토스쇼핑 쉐어링크 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
+const OHOUSE_DISCLOSURE =
+  "이 포스팅은 오늘의집 큐레이터 활동의 일환으로, 구매시 이에 따른 일정액의 수수료를 제공받습니다.";
+const MUSINSA_DISCLOSURE =
+  "이 포스팅은 무신사 큐레이터 활동의 일환으로, 구매 발생 시 일정 수수료를 제공받습니다.";
+const KURLY_DISCLOSURE =
+  "이 포스팅은 컬리 큐레이터 활동의 일환으로, 구매 시 이에 따른 일정액의 수수료를 제공받습니다.";
+const OLIVEYOUNG_DISCLOSURE =
+  "이 포스팅은 올리브영 쇼핑 큐레이터 활동의 일환으로, 구매 시 일정 금액의 수수료를 제공받습니다.";
 
 const MARKETPLACES = Object.freeze([
-  { id: "coupang", label: "쿠팡", hosts: ["coupang.com"], disclosure: AFFILIATE_DISCLOSURE },
+  { id: "coupang", label: "쿠팡 파트너스", hosts: ["coupang.com"], allowSubdomains: true, disclosure: AFFILIATE_DISCLOSURE },
   {
     id: "naver",
-    label: "네이버쇼핑",
-    hosts: ["shopping.naver.com", "smartstore.naver.com", "brand.naver.com", "shoppinglive.naver.com", "naver.me"],
-    disclosure: GENERAL_AFFILIATE_DISCLOSURE,
+    label: "네이버 쇼핑커넥트",
+    hosts: ["shopping.naver.com", "smartstore.naver.com", "brand.naver.com", "shoppinglive.naver.com", "brandconnect.naver.com", "naver.me"],
+    disclosure: NAVER_DISCLOSURE,
   },
   {
     id: "toss",
-    label: "토스쇼핑",
-    hosts: ["shopping.toss.im", "shopping-view.toss.im", "link.toss.im", "toss.im"],
-    disclosure: GENERAL_AFFILIATE_DISCLOSURE,
+    label: "토스쇼핑 쉐어링크",
+    hosts: ["shopping.toss.im", "shopping-view.toss.im", "link.toss.im", "toss.im", "toss.shopping", "www.toss.shopping"],
+    urlPatterns: [
+      /^https:\/\/toss\.im\/_m\//i,
+      /^https:\/\/(?:www\.)?toss\.shopping\/(?:i|t|products?)\//i,
+      /^https:\/\/shopping\.toss\.im\/products?\//i,
+      /^https:\/\/shopping-view\.toss\.im\//i,
+      /^https:\/\/link\.toss\.im\//i,
+    ],
+    disclosure: TOSS_DISCLOSURE,
   },
-  { id: "aliexpress", label: "AliExpress", hosts: ["aliexpress.com"], disclosure: GENERAL_AFFILIATE_DISCLOSURE },
+  {
+    id: "ohouse",
+    label: "오늘의집 큐레이터",
+    hosts: ["ohou.se", "m.ohou.se", "store.ohou.se", "ozip.me", "link.ohou.se"],
+    urlPatterns: [
+      /^https:\/\/(?:m\.|store\.)?ohou\.se\/(?:productions|goods)\//i,
+      /^https:\/\/ozip\.me\//i,
+      /^https:\/\/link\.ohou\.se\/@ohouse\/affiliate/i,
+    ],
+    disclosure: OHOUSE_DISCLOSURE,
+  },
+  {
+    id: "musinsa",
+    label: "무신사 큐레이터",
+    hosts: ["musinsa.com", "www.musinsa.com", "musinsa.onelink.me"],
+    urlPatterns: [/^https:\/\/(?:www\.)?musinsa\.com\/(?:curator|products?)\//i, /^https:\/\/musinsa\.onelink\.me\//i],
+    disclosure: MUSINSA_DISCLOSURE,
+  },
+  {
+    id: "kurly",
+    label: "컬리 큐레이터",
+    hosts: ["kurly.com", "www.kurly.com", "lounge.kurly.com"],
+    urlPatterns: [/^https:\/\/lounge\.kurly\.com\/link\//i, /^https:\/\/(?:www\.)?kurly\.com\/goods\//i],
+    disclosure: KURLY_DISCLOSURE,
+  },
+  {
+    id: "oliveyoung",
+    label: "올리브영 쇼핑 큐레이터",
+    hosts: ["oy.run", "m.oliveyoung.co.kr", "www.oliveyoung.co.kr"],
+    urlPatterns: [/^https:\/\/oy\.run\//i, /^https:\/\/(?:m\.|www\.)oliveyoung\.co\.kr\/(?:m\/|store\/)?goods\//i],
+    disclosure: OLIVEYOUNG_DISCLOSURE,
+  },
+  { id: "aliexpress", label: "AliExpress", hosts: ["aliexpress.com"], allowSubdomains: true, disclosure: GENERAL_AFFILIATE_DISCLOSURE },
 ]);
 
 const BLOCKED_ROOT_PATTERNS = [
@@ -33,6 +84,8 @@ const BLOCKED_ROOT_PATTERNS = [
   /www\.coupang\.com/i,
   /쿠팡\s*파트너스/i,
   /(?:네이버|토스)\s*쇼핑/i,
+  /(?:오늘의집|무신사|컬리|올리브영)\s*(?:쇼핑\s*)?큐레이터/i,
+  /(?:쇼핑\s*커넥트|쉐어링크)/i,
   /ali\s*express/i,
   /광고[·\s]*제휴\s*링크/i,
   /수수료를\s*제공받/i,
@@ -48,16 +101,30 @@ const FORBIDDEN_CLAIM_PATTERNS = [
   /최저가\s*보장/i,
 ];
 
-export { AFFILIATE_DISCLOSURE, GENERAL_AFFILIATE_DISCLOSURE, MARKETPLACES, VARIANT_IDS };
+export {
+  AFFILIATE_DISCLOSURE,
+  GENERAL_AFFILIATE_DISCLOSURE,
+  KURLY_DISCLOSURE,
+  MARKETPLACES,
+  MUSINSA_DISCLOSURE,
+  NAVER_DISCLOSURE,
+  OHOUSE_DISCLOSURE,
+  OLIVEYOUNG_DISCLOSURE,
+  TOSS_DISCLOSURE,
+  VARIANT_IDS,
+};
 
-function marketplaceForHost(hostname) {
-  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
-  return MARKETPLACES.find((marketplace) =>
-    marketplace.hosts.some((allowed) =>
+function marketplaceForUrl(parsedUrl) {
+  const host = String(parsedUrl?.hostname || "").toLowerCase().replace(/\.$/, "");
+  return MARKETPLACES.find((marketplace) => {
+    const hostMatches = marketplace.hosts.some((allowed) =>
       host === allowed
-      || (["coupang", "aliexpress"].includes(marketplace.id) && host.endsWith(`.${allowed}`)),
-    ),
-  );
+      || (marketplace.allowSubdomains && host.endsWith(`.${allowed}`)),
+    );
+    if (!hostMatches) return false;
+    if (!marketplace.urlPatterns?.length) return true;
+    return marketplace.urlPatterns.some((pattern) => pattern.test(parsedUrl.toString()));
+  });
 }
 
 export function sanitizeText(value, maxLength = 500) {
@@ -73,7 +140,7 @@ export function sanitizeText(value, maxLength = 500) {
 export function normalizeProduct(rawProduct) {
   const raw = rawProduct && typeof rawProduct === "object" ? rawProduct : {};
   const title = sanitizeText(raw.title, 300);
-  const url = sanitizeText(raw.url, 1000);
+  const url = sanitizeText(raw.url, 2048);
   const claimedMarketplace = sanitizeText(raw.marketplace, 40).toLowerCase();
   const keywords = sanitizeText(raw.keywords, 500);
   const featureSource = Array.isArray(raw.features) ? raw.features : [];
@@ -99,7 +166,7 @@ export function normalizeProduct(rawProduct) {
   ) {
     throw new ManagedAiError("INVALID_PRODUCT_FACTS", 422, "지원하지 않는 상품 링크입니다.");
   }
-  const marketplace = marketplaceForHost(parsedUrl.hostname);
+  const marketplace = marketplaceForUrl(parsedUrl);
   if (!marketplace || (claimedMarketplace && claimedMarketplace !== marketplace.id)) {
     throw new ManagedAiError("INVALID_PRODUCT_FACTS", 422, "지원하지 않는 상품 링크입니다.");
   }
@@ -279,9 +346,9 @@ export function validateVariants(rawValue, product) {
   }
 
   const commentText = [
+    product.affiliateDisclosure,
     `🔗 ${sanitizeText(product.title, 80)}`,
     product.url,
-    product.affiliateDisclosure,
   ].join("\n\n");
 
   return VARIANT_IDS.map((variantId) => ({

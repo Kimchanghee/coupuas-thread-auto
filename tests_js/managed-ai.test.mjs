@@ -4,6 +4,12 @@ import test from "node:test";
 import {
   AFFILIATE_DISCLOSURE,
   GENERAL_AFFILIATE_DISCLOSURE,
+  KURLY_DISCLOSURE,
+  MUSINSA_DISCLOSURE,
+  NAVER_DISCLOSURE,
+  OHOUSE_DISCLOSURE,
+  OLIVEYOUNG_DISCLOSURE,
+  TOSS_DISCLOSURE,
   buildFallbackVariants,
   buildPrompt,
   extractReservationId,
@@ -66,17 +72,32 @@ test("rejects invalid product URLs", () => {
   );
 });
 
-test("recognizes Naver Shopping and applies the general affiliate disclosure", () => {
+test("recognizes Naver Shopping Connect and applies its program disclosure", () => {
   const naverProduct = normalizeProduct({
     title: "접이식 캠핑 의자",
     url: "https://smartstore.naver.com/example/products/1234",
     marketplace: "naver",
   });
   assert.equal(naverProduct.marketplace, "naver");
-  assert.equal(naverProduct.marketplaceLabel, "네이버쇼핑");
+  assert.equal(naverProduct.marketplaceLabel, "네이버 쇼핑커넥트");
   const result = validateVariants(validVariants, naverProduct);
-  assert.match(result[0].product_comment_text, new RegExp(GENERAL_AFFILIATE_DISCLOSURE));
+  assert.match(result[0].product_comment_text, new RegExp(NAVER_DISCLOSURE));
   assert.doesNotMatch(result[0].product_comment_text, /쿠팡 파트너스/);
+});
+
+test("recognizes all seven affiliate programs with matching disclosures", () => {
+  const fixtures = [
+    ["https://toss.im/_m/example", "toss", TOSS_DISCLOSURE],
+    ["https://ozip.me/example?af", "ohouse", OHOUSE_DISCLOSURE],
+    ["https://www.musinsa.com/curator/goods/ABC123", "musinsa", MUSINSA_DISCLOSURE],
+    ["https://lounge.kurly.com/link/ABC123", "kurly", KURLY_DISCLOSURE],
+    ["https://oy.run/ABC123", "oliveyoung", OLIVEYOUNG_DISCLOSURE],
+  ];
+  for (const [url, marketplace, disclosure] of fixtures) {
+    const normalized = normalizeProduct({ title: "테스트 상품", url, marketplace });
+    assert.equal(normalized.marketplace, marketplace);
+    assert.equal(normalized.affiliateDisclosure, disclosure);
+  }
 });
 
 test("builds four distinct Korean fallback variants from verified product facts", () => {

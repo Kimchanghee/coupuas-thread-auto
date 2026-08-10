@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional
 
 from src.services.account_queue import AccountQueueStore
-from src.services.link_history import LinkHistory
+from src.services.link_history import LinkHistory, normalize_history_url
 from src.services.multi_account_coordinator import MultiAccountCoordinator
 from src.services.multi_account_upload_runner import MultiAccountUploadRunner
 
@@ -265,7 +265,7 @@ class MultiAccountRuntime:
 
     @staticmethod
     def _normalize_url(url) -> str:
-        return str(url or "").strip().split("?", 1)[0].lower()
+        return normalize_history_url(url)
 
     def snapshot(self, account_id: str) -> dict:
         store_state = self.queue_store(account_id).snapshot()

@@ -10,7 +10,11 @@ from PyQt6.QtWidgets import QApplication
 from src.hidpi import configure_high_dpi, recommended_window_size
 from src import auth_client
 from src.login_window import LoginWindow
-from src.main_window import MainWindow
+from src.main_window import (
+    LINK_TABLE_CHANNEL_COLUMN,
+    LINK_TABLE_STATUS_COLUMN,
+    MainWindow,
+)
 
 
 def test_high_dpi_uses_native_qt_scaling_without_forced_shrink(monkeypatch):
@@ -57,6 +61,50 @@ def test_main_window_reflows_at_compact_and_wide_sizes():
     window.close()
     window.deleteLater()
     app.processEvents()
+
+
+def test_link_input_immediately_lists_channel_colors_and_exclusions():
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window.links_text.setPlainText(
+            "https://link.coupang.com/a/example\n"
+            "https://naver.me/example\n"
+            "https://toss.im/_m/example\n"
+            "https://ozip.me/example?af\n"
+            "https://www.musinsa.com/curator/goods/example\n"
+            "https://lounge.kurly.com/link/example\n"
+            "https://oy.run/example\n"
+            "https://www.aliexpress.com/item/123.html\n"
+            "https://link.coupang.com/a/example\n"
+            "https://example.com/item/1\n"
+            "http://smartstore.naver.com/main/products/123"
+        )
+        app.processEvents()
+
+        assert window.link_count_badge.text() == "사용 8개"
+        assert window.link_table.columnCount() == 5
+        assert window.link_table.rowCount() == 11
+        assert window._link_table_label.text() == "입력 링크 미리보기"
+        expected_channels = ["쿠팡", "네이버", "토스", "오늘집", "무신사", "컬리", "올영", "Ali"]
+        channel_colors = set()
+        for row, expected_channel in enumerate(expected_channels):
+            channel_item = window.link_table.item(row, LINK_TABLE_CHANNEL_COLUMN)
+            assert expected_channel in channel_item.text()
+            channel_colors.add(channel_item.foreground().color().name())
+        assert len(channel_colors) == len(expected_channels)
+        assert window.link_table.item(8, LINK_TABLE_STATUS_COLUMN).text() == "중복 제외"
+        assert "미지원" in window.link_table.item(9, LINK_TABLE_CHANNEL_COLUMN).text()
+        assert "오류" in window.link_table.item(10, LINK_TABLE_CHANNEL_COLUMN).text()
+        assert "사용 가능 8" in window._links_hint.accessibleDescription()
+        assert "중복 1" in window._links_hint.accessibleDescription()
+        assert "미지원 1" in window._links_hint.accessibleDescription()
+        assert "오류 1" in window._links_hint.accessibleDescription()
+    finally:
+        window._closed = True
+        window.close()
+        window.deleteLater()
+        app.processEvents()
 
 
 def test_header_update_button_expands_for_version_text():
