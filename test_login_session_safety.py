@@ -2,9 +2,16 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 from src import auth_client, login_window, main_window
+
+
+def test_login_entrypoint_has_qtimer_for_immediate_transition():
+    import login_main
+
+    assert login_main.QTimer is QTimer
 
 
 class _Label:
@@ -143,6 +150,7 @@ def test_registration_requires_legal_consent_and_exposes_policy_links(monkeypatc
     window.reg_email.setText("test@example.com")
     window.reg_username.setText("tester")
     window._username_available = True
+    window._username_available_for = "tester"
     window.reg_pw.setText("Password1!")
     window.reg_pw_confirm.setText("Password1!")
     window.reg_contact.setText("010-1234-5678")
@@ -182,6 +190,7 @@ def test_registration_passes_required_consent_to_worker(monkeypatch):
     window.reg_email.setText("test@example.com")
     window.reg_username.setText("tester")
     window._username_available = True
+    window._username_available_for = "tester"
     window.reg_pw.setText("Password1!")
     window.reg_pw_confirm.setText("Password1!")
     window.reg_contact.setText("010-1234-5678")
@@ -195,3 +204,157 @@ def test_registration_passes_required_consent_to_worker(monkeypatch):
     window.close()
     window.deleteLater()
     app.processEvents()
+
+
+def test_registration_password_confirmation_updates_live(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})
+    window = login_window.LoginWindow()
+
+    assert window.reg_pw_match_status.text() == ""
+    window.reg_pw.setText("Password1!")
+    window.reg_pw_confirm.setText("Password2!")
+    assert window.reg_pw_match_status.text() == "✗ 비밀번호가 일치하지 않습니다"
+
+    window.reg_pw_confirm.setText("Password1!")
+    assert window.reg_pw_match_status.text() == "✓ 비밀번호가 일치합니다"
+
+    window.reg_pw.setText("Changed1!")
+    assert window.reg_pw_match_status.text() == "✗ 비밀번호가 일치하지 않습니다"
+
+    window.reg_pw_confirm.clear()
+    assert window.reg_pw_match_status.text() == ""
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_stale_username_check_restores_button_without_authorizing_new_value(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})
+    window = login_window.LoginWindow()
+    window.reg_username.setText("first_user")
+    token = window._username_check_token
+    window.btn_check_user.setEnabled(False)
+    window.btn_check_user.setText("확인중...")
+
+    window.reg_username.setText("second_user")
+    window._on_username_checked(token, "first_user", True, "available")
+
+    assert window.btn_check_user.isEnabled() is True
+    assert window.btn_check_user.text() == "중복확인"
+    assert window._username_available is False
+    assert window._username_available_for is None
+    assert window.reg_user_status.text() == ""
+    window.close()
+    window.deleteLater()
+    app.processEvents()
+
+
+def test_login_worker_persists_preferences_before_final_signal(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    events = []
+    monkeypatch.setattr(
+        auth_client,
+        "login",
+        lambda *_args: events.append("login") or {"status": True, "id": "user-1"},
+    )
+    monkeypatch.setattr(
+        auth_client,
+        "remember_login_credentials",
+        lambda *_args, **_kwargs: events.append("remember") or True,
+    )
+    monkeypatch.setattr(
+        login_window,
+        "_queue_telemetry",
+        lambda *_args: events.append("telemetry_queued"),
+    )
+    worker = login_window.LoginWorker(
+        "tester", "Password1!", remember_credentials=True, auto_login=True
+    )
+    worker.finished_signal.connect(lambda _result: events.append("signal"))
+
+    worker.run()
+
+    assert events == ["login", "remember", "telemetry_queued", "signal"]
+    assert worker._password_bytes == bytearray()
+    app.processEvents()
+
+
+def test_register_worker_emits_only_after_password_cleanup(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    worker = login_window.RegisterWorker(
+        "Tester",
+        "tester",
+        "Password1!",
+        "01012345678",
+        "tester@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
+    )
+    events = []
+    monkeypatch.setattr(
+        auth_client,
+        "register",
+        lambda *_args, **_kwargs: events.append("register") or {"success": True},
+    )
+    monkeypatch.setattr(
+        login_window,
+        "_queue_telemetry",
+        lambda *_args: events.append("telemetry_queued"),
+    )
+    worker.finished_signal.connect(
+        lambda _result: events.append(("signal", worker._password_bytes))
+    )
+
+    worker.run()
+
+    assert events == ["register", "telemetry_queued", ("signal", bytearray())]
+    app.processEvents()
+
+
+def test_login_success_callback_does_not_perform_network_or_credential_io(monkeypatch):
+    emitted = []
+
+    class FakeWindow:
+        btn_login = _Button()
+        login_status = _Label()
+        _login_in_flight = True
+        _duplicate_login_prompt_open = False
+        _force_login_attempted = False
+        login_success = type("Signal", (), {"emit": lambda self, value: emitted.append(value)})()
+
+    monkeypatch.setattr(
+        auth_client,
+        "log_action",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("UI callback must not log")),
+    )
+    monkeypatch.setattr(
+        auth_client,
+        "remember_login_credentials",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("UI callback must not persist")),
+    )
+
+    result = {"status": True, "id": "user-1"}
+    login_window.LoginWindow._on_login_result(FakeWindow(), result)
+
+    assert emitted == [result]
+
+
+def test_register_success_callback_does_not_send_activity_log(monkeypatch):
+    class FakeWindow:
+        btn_register = _Button()
+        reg_username = type("Field", (), {"text": lambda self: "tester"})()
+        reg_pw = type("Field", (), {"text": lambda self: "Password1!"})()
+        login_id = type("Field", (), {"setText": lambda self, _value: None})()
+        login_pw = type("Field", (), {"setText": lambda self, _value: None})()
+        stack = type("Stack", (), {"setCurrentIndex": lambda self, _value: None})()
+
+    monkeypatch.setattr(login_window, "show_info", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        auth_client,
+        "log_action",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("UI callback must not log")),
+    )
+
+    login_window.LoginWindow._on_register_result(FakeWindow(), {"success": True})

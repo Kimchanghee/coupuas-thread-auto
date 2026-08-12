@@ -31,7 +31,8 @@ def _entropy_candidates() -> list[bytes]:
 def _key_root_dir() -> Path:
     root = Path.home() / ".shorts_thread_maker"
     root.mkdir(parents=True, exist_ok=True)
-    secure_dir_permissions(root)
+    if not secure_dir_permissions(root):
+        raise PermissionError("Secret-key directory ACL hardening failed")
     return root
 
 
@@ -44,6 +45,8 @@ def _load_or_create_fernet_key() -> Optional[bytes]:
     try:
         key_path = _key_root_dir() / _FERNET_KEY_FILENAME
         if key_path.exists():
+            if not secure_file_permissions(key_path):
+                return None
             raw = key_path.read_text(encoding="utf-8").strip().encode("ascii")
             if raw:
                 # Validate format before returning.
@@ -61,9 +64,12 @@ def _load_or_create_fernet_key() -> Optional[bytes]:
         ) as tmp:
             tmp.write(raw.decode("ascii"))
             temp_path = Path(tmp.name)
-        secure_file_permissions(temp_path)
+        if not secure_file_permissions(temp_path):
+            raise PermissionError("Temporary secret-key ACL hardening failed")
         os.replace(temp_path, key_path)
-        secure_file_permissions(key_path)
+        if not secure_file_permissions(key_path):
+            key_path.unlink(missing_ok=True)
+            raise PermissionError("Final secret-key ACL hardening failed")
         return raw
     except Exception:
         if "temp_path" in locals():

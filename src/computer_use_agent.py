@@ -13,7 +13,6 @@ import ipaddress
 import logging
 import os
 import re
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -35,6 +34,7 @@ except ModuleNotFoundError as exc:
 
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
+from src.system_process import run_process
 
 
 SCREEN_WIDTH = 1440
@@ -336,8 +336,10 @@ class ComputerUseAgent:
             return False
 
         try:
-            completed = subprocess.run(
+            completed = run_process(
                 [sys.executable, "-m", "playwright", "install", "chromium"],
+                operation="playwright.install_chromium",
+                process_logger=logger,
                 capture_output=True,
                 text=True,
                 timeout=cls.PLAYWRIGHT_INSTALL_TIMEOUT_SEC,

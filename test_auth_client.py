@@ -1190,3 +1190,99 @@ def test_check_username_retries_once_on_connection_error(monkeypatch):
 
     assert result["available"] is True
     assert len(session.calls) == 2
+
+
+def test_register_does_not_retry_ambiguous_connection_failure(monkeypatch):
+    _reset_auth_state()
+    session = _SequenceSession(
+        [
+            requests.exceptions.ConnectionError("registration response was lost"),
+            _FakeResponse(200, {"success": True}),
+        ]
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.register(
+        name="Tester1",
+        username="no_retry_user",
+        password="SamplePass123",
+        contact="01012345678",
+        email="sample@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
+    )
+
+    assert result["success"] is False
+    assert len(session.calls) == 1
+
+
+def test_credential_save_fails_closed_when_temp_acl_fails(monkeypatch, tmp_path):
+    cred_dir = tmp_path / "credentials"
+    monkeypatch.setattr(auth_client, "_CRED_DIR", cred_dir)
+    monkeypatch.setattr(auth_client, "_CRED_FILE", cred_dir / "auth.json")
+    monkeypatch.setattr(auth_client, "_API_HOST_LOCK_FILE", cred_dir / "api_host.lock")
+    monkeypatch.setattr(auth_client, "secure_dir_permissions", lambda _path: True)
+    monkeypatch.setattr(auth_client, "secure_file_permissions", lambda _path: False)
+
+    assert auth_client._save_cred({"username": "tester"}) is False
+    assert not auth_client._CRED_FILE.exists()
+    assert list(cred_dir.glob("auth_*.tmp")) == []
+
+
+def test_credential_save_removes_published_file_when_final_acl_fails(
+    monkeypatch, tmp_path
+):
+    cred_dir = tmp_path / "credentials"
+    results = iter([True, False])
+    monkeypatch.setattr(auth_client, "_CRED_DIR", cred_dir)
+    monkeypatch.setattr(auth_client, "_CRED_FILE", cred_dir / "auth.json")
+    monkeypatch.setattr(auth_client, "_API_HOST_LOCK_FILE", cred_dir / "api_host.lock")
+    monkeypatch.setattr(auth_client, "secure_dir_permissions", lambda _path: True)
+    monkeypatch.setattr(
+        auth_client, "secure_file_permissions", lambda _path: next(results)
+    )
+
+    assert auth_client._save_cred({"username": "tester"}) is False
+    assert not auth_client._CRED_FILE.exists()
+
+
+def test_explicit_remember_clear_deletes_unreadable_existing_credentials(
+    monkeypatch, tmp_path
+):
+    cred_dir = tmp_path / "credentials"
+    cred_dir.mkdir()
+    cred_file = cred_dir / "auth.json"
+    cred_file.write_text('{"saved_password":"stale"}', encoding="utf-8")
+    monkeypatch.setattr(auth_client, "_CRED_DIR", cred_dir)
+    monkeypatch.setattr(auth_client, "_CRED_FILE", cred_file)
+    monkeypatch.setattr(auth_client, "secure_file_permissions", lambda _path: False)
+
+    assert auth_client.remember_login_credentials("", "") is True
+    assert not cred_file.exists()
+
+
+def test_clear_local_session_deletes_unreadable_existing_token(monkeypatch, tmp_path):
+    cred_dir = tmp_path / "credentials"
+    cred_dir.mkdir()
+    cred_file = cred_dir / "auth.json"
+    cred_file.write_text('{"token":"stale-token"}', encoding="utf-8")
+    monkeypatch.setattr(auth_client, "_CRED_DIR", cred_dir)
+    monkeypatch.setattr(auth_client, "_CRED_FILE", cred_file)
+    monkeypatch.setattr(auth_client, "secure_file_permissions", lambda _path: False)
+
+    auth_client.clear_local_session()
+
+    assert not cred_file.exists()
+
+
+def test_secret_protection_failure_removes_stale_credentials(monkeypatch, tmp_path):
+    cred_dir = tmp_path / "credentials"
+    cred_dir.mkdir()
+    cred_file = cred_dir / "auth.json"
+    cred_file.write_text('{"saved_password":"stale"}', encoding="utf-8")
+    monkeypatch.setattr(auth_client, "_CRED_DIR", cred_dir)
+    monkeypatch.setattr(auth_client, "_CRED_FILE", cred_file)
+    monkeypatch.setattr(auth_client, "_protect_secret", lambda _value: None)
+
+    assert auth_client._save_cred({"saved_password": "replacement"}) is False
+    assert not cred_file.exists()

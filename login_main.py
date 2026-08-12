@@ -55,7 +55,7 @@ if _allow_external_env_loading() and _DASHBOARD_ENV.exists() and not _DASHBOARD_
     load_dotenv(_DASHBOARD_ENV, override=False)
 
 from PyQt6.QtWidgets import QApplication, QSplashScreen
-from PyQt6.QtCore import Qt, QRectF
+from PyQt6.QtCore import Qt, QRectF, QTimer
 from PyQt6.QtGui import (
     QPixmap, QFont, QPainter, QColor, QLinearGradient,
     QPainterPath, QPen, QBrush, QFontDatabase, QIcon
@@ -65,7 +65,7 @@ from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
-VERSION = "v3.0.68"
+VERSION = "v3.0.69"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -373,7 +373,10 @@ def main():
                 app._login_loading_dialog = None
 
         loading_dialog.show()
-        loading_dialog.start(on_finished=_open_main_window)
+        # Give Qt one paint cycle for feedback, then open the real window.
+        # The previous decorative checklist added about 1.5 seconds after a
+        # successful login without performing any actual initialization.
+        QTimer.singleShot(0, _open_main_window)
     login_win.login_success.connect(on_login_success)
     center_window(login_win)
     login_win.show()

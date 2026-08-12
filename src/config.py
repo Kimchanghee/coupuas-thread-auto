@@ -10,7 +10,6 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from src.ai_provider import (
-    AI_PROVIDER_GROK_CLI,
     AI_PROVIDER_MANAGED,
     normalize_ai_provider,
 )
@@ -39,7 +38,8 @@ class Config:
         """Ensure configuration directory exists."""
         if not self.config_dir.exists():
             self.config_dir.mkdir(parents=True, mode=0o700)
-        secure_dir_permissions(self.config_dir)
+        if not secure_dir_permissions(self.config_dir):
+            raise PermissionError("Configuration directory ACL hardening failed")
 
     def load(self):
         """Load config and encrypted secrets."""
@@ -48,6 +48,8 @@ class Config:
             data = {}
             if self.config_file.exists():
                 try:
+                    if not secure_file_permissions(self.config_file):
+                        raise PermissionError("Configuration file ACL hardening failed")
                     with open(self.config_file, "r", encoding="utf-8") as f:
                         loaded = json.load(f)
                         if isinstance(loaded, dict):
@@ -198,6 +200,8 @@ class Config:
         if not self.secrets_file.exists():
             return
         try:
+            if not secure_file_permissions(self.secrets_file):
+                raise PermissionError("Secrets file ACL hardening failed")
             with open(self.secrets_file, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             if not isinstance(payload, dict):
@@ -226,6 +230,7 @@ class Config:
 
     def _save_secrets(self):
         payload = {}
+        protection_failed = False
         for key in self._SECRET_KEYS:
             if key == "gemini_api_keys":
                 values = self._normalize_gemini_keys(getattr(self, key, []))
@@ -237,6 +242,7 @@ class Config:
                     if protected is None:
                         logger.warning("보안 저장소를 사용할 수 없어 비밀값 '%s' 저장을 건너뜁니다.", key)
                         protected_values = []
+                        protection_failed = True
                         break
                     protected_values.append(protected)
                 if protected_values:
@@ -249,9 +255,18 @@ class Config:
             protected = protect_secret(value, "shorts_thread_maker")
             if protected is None:
                 logger.warning("보안 저장소를 사용할 수 없어 비밀값 '%s' 저장을 건너뜁니다.", key)
+                protection_failed = True
                 continue
             payload[key] = protected
 
+        if protection_failed:
+            try:
+                self.secrets_file.unlink(missing_ok=True)
+            except OSError:
+                logger.exception("기존 보안 설정 파일 삭제에 실패했습니다.")
+            return False
+
+        temp_path = None
         try:
             if payload:
                 with tempfile.NamedTemporaryFile(
@@ -264,18 +279,27 @@ class Config:
                 ) as tmp:
                     json.dump(payload, tmp, ensure_ascii=False, indent=2)
                     temp_path = tmp.name
-                secure_file_permissions(temp_path)
+                if not secure_file_permissions(temp_path):
+                    raise PermissionError("Temporary secrets ACL hardening failed")
                 os.replace(temp_path, self.secrets_file)
-                secure_file_permissions(self.secrets_file)
+                if not secure_file_permissions(self.secrets_file):
+                    raise PermissionError("Final secrets ACL hardening failed")
             elif self.secrets_file.exists():
                 self.secrets_file.unlink()
+            return True
         except Exception:
             logger.exception("보안 설정 파일 저장에 실패했습니다.")
-            if "temp_path" in locals():
+            if temp_path:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
                 except Exception:
                     pass
+            try:
+                # A failed update must not preserve stale passwords or API keys.
+                self.secrets_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False
 
     def save(self):
         """Save non-sensitive config and encrypted secrets."""
@@ -295,6 +319,9 @@ class Config:
                 "post_concept": normalize_concept_id(getattr(self, "post_concept", "")),
                 "tutorial_shown": self.tutorial_shown,
             }
+            temp_path = None
+            published = False
+            config_saved = False
             try:
                 with tempfile.NamedTemporaryFile(
                     mode="w",
@@ -306,17 +333,27 @@ class Config:
                 ) as tmp:
                     json.dump(data, tmp, ensure_ascii=False, indent=2)
                     temp_path = tmp.name
-                secure_file_permissions(temp_path)
+                if not secure_file_permissions(temp_path):
+                    raise PermissionError("Temporary configuration ACL hardening failed")
                 os.replace(temp_path, self.config_file)
-                secure_file_permissions(self.config_file)
+                published = True
+                if not secure_file_permissions(self.config_file):
+                    raise PermissionError("Final configuration ACL hardening failed")
+                config_saved = True
             except OSError:
                 logger.exception("설정 파일 저장에 실패했습니다.")
-                if "temp_path" in locals():
+                if temp_path:
                     try:
                         Path(temp_path).unlink(missing_ok=True)
                     except Exception:
                         pass
-            self._save_secrets()
+                if published:
+                    try:
+                        self.config_file.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            secrets_saved = self._save_secrets()
+            return config_saved and secrets_saved
 
     @classmethod
     def _normalize_gemini_keys(cls, values):

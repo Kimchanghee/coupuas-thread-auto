@@ -6,10 +6,11 @@ from __future__ import annotations
 import csv
 import ctypes
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Tuple
+
+from src.system_process import run_process
 
 
 class RuntimeSecurityError(RuntimeError):
@@ -105,8 +106,10 @@ def _list_process_names() -> set[str]:
         return set()
 
     try:
-        completed = subprocess.run(
+        completed = run_process(
             ["tasklist", "/fo", "csv", "/nh"],
+            system_command=True,
+            operation="runtime_security.tasklist",
             capture_output=True,
             text=True,
             timeout=5,

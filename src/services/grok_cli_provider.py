@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
+from src.system_process import resolve_system_executable, run_process
+
 
 GROK_INSTALL_URL = "https://x.ai/cli"
 _ANSI_ESCAPE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -55,19 +57,6 @@ class GrokCliStatus:
         return self.code == "ready"
 
 
-def _windows_process_kwargs() -> dict:
-    if os.name != "nt":
-        return {}
-
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    startupinfo.wShowWindow = 0
-    return {
-        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        "startupinfo": startupinfo,
-    }
-
-
 def find_grok_cli() -> str:
     """Find a supported Grok CLI executable without reading its credentials."""
     configured = str(os.environ.get("GROK_CLI_PATH", "") or "").strip()
@@ -104,7 +93,7 @@ def find_grok_cli() -> str:
 def _command_prefix(executable: str) -> list[str]:
     path = Path(executable)
     if os.name == "nt" and path.suffix.lower() in {".cmd", ".bat"}:
-        command_processor = os.environ.get("COMSPEC") or "cmd.exe"
+        command_processor = resolve_system_executable("cmd.exe")
         return [command_processor, "/d", "/s", "/c", str(path)]
     return [str(path)]
 
@@ -164,8 +153,9 @@ class GrokCliProvider:
         )
         command = _command_prefix(executable) + list(args)
         try:
-            return subprocess.run(
+            return run_process(
                 command,
+                operation="grok_cli.run",
                 cwd=str(self._workspace),
                 env=env,
                 capture_output=True,
@@ -173,8 +163,6 @@ class GrokCliProvider:
                 encoding="utf-8",
                 errors="replace",
                 timeout=timeout or self.timeout_seconds,
-                shell=False,
-                **_windows_process_kwargs(),
             )
         except subprocess.TimeoutExpired as exc:
             raise GrokCliError("timeout", "Grok 응답 시간이 초과되었습니다.") from exc

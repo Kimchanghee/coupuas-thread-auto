@@ -206,7 +206,8 @@ def _check_api_url() -> Optional[str]:
 
 def _ensure_cred_dir() -> None:
     _CRED_DIR.mkdir(parents=True, exist_ok=True)
-    secure_dir_permissions(_CRED_DIR)
+    if not secure_dir_permissions(_CRED_DIR):
+        raise PermissionError("Credential directory ACL hardening failed")
 
 
 def _protect_secret(value: str) -> Optional[str]:
@@ -227,6 +228,8 @@ def _read_api_host_lock() -> str:
     try:
         if not _API_HOST_LOCK_FILE.exists():
             return ""
+        if not secure_file_permissions(_API_HOST_LOCK_FILE):
+            return _INVALID_LOCK_SENTINEL
         raw = _API_HOST_LOCK_FILE.read_text(encoding="utf-8").strip()
         if not raw:
             return ""
@@ -249,7 +252,6 @@ def _read_api_host_lock() -> str:
 
 
 def _write_api_host_lock(host: str) -> bool:
-    _ensure_cred_dir()
     normalized_host = str(host or "").strip().lower()
     protected = _protect_secret(normalized_host)
     if not protected:
@@ -261,7 +263,9 @@ def _write_api_host_lock(host: str) -> bool:
         # local tests and non-Windows development still exercise host pinning.
         protected = normalized_host
     temp_path = None
+    published = False
     try:
+        _ensure_cred_dir()
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
@@ -272,15 +276,23 @@ def _write_api_host_lock(host: str) -> bool:
         ) as tmp:
             tmp.write(protected)
             temp_path = tmp.name
-        secure_file_permissions(temp_path)
+        if not secure_file_permissions(temp_path):
+            raise PermissionError("Temporary host-lock ACL hardening failed")
         os.replace(temp_path, _API_HOST_LOCK_FILE)
-        secure_file_permissions(_API_HOST_LOCK_FILE)
+        published = True
+        if not secure_file_permissions(_API_HOST_LOCK_FILE):
+            raise PermissionError("Final host-lock ACL hardening failed")
         return True
     except Exception:
         logger.warning("API 호스트 잠금 파일 저장에 실패했습니다.")
         if temp_path:
             try:
                 Path(temp_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+        if published:
+            try:
+                _API_HOST_LOCK_FILE.unlink(missing_ok=True)
             except Exception:
                 pass
         return False
@@ -291,7 +303,10 @@ def _check_api_host_lock(parsed) -> Optional[str]:
     if not host or host in {"localhost", "127.0.0.1", "::1"}:
         return None
 
-    _ensure_cred_dir()
+    try:
+        _ensure_cred_dir()
+    except PermissionError:
+        return "API 호스트 잠금 정보 저장에 실패했습니다."
     locked_host = _read_api_host_lock()
     if locked_host == _INVALID_LOCK_SENTINEL:
         default_host = (urlparse(_DEFAULT_API_SERVER_URL).hostname or "").lower()
@@ -320,6 +335,8 @@ def _load_cred() -> dict:
     with _LOCK:
         try:
             if _CRED_FILE.exists():
+                if not secure_file_permissions(_CRED_FILE):
+                    return {}
                 with open(_CRED_FILE, "r", encoding="utf-8") as f:
                     payload = json.load(f)
                 if isinstance(payload, dict):
@@ -333,8 +350,7 @@ def _load_cred() -> dict:
         return {}
 
 
-def _save_cred(data: dict) -> None:
-    _ensure_cred_dir()
+def _save_cred(data: dict) -> bool:
     serialized = dict(data or {})
     serialized.pop("remember_pw", None)
     for field in _SENSITIVE_CRED_FIELDS:
@@ -342,12 +358,18 @@ def _save_cred(data: dict) -> None:
             protected = _protect_secret(serialized.get(field, ""))
             if protected is None:
                 logger.warning("보안 저장소를 사용할 수 없어 민감 필드 '%s' 저장을 건너뜁니다.", field)
-                serialized.pop(field, None)
+                try:
+                    _CRED_FILE.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return False
             else:
                 serialized[field] = protected
 
     with _LOCK:
+        temp_path = None
         try:
+            _ensure_cred_dir()
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",
@@ -358,16 +380,25 @@ def _save_cred(data: dict) -> None:
             ) as tmp:
                 json.dump(serialized, tmp, ensure_ascii=False, indent=2)
                 temp_path = tmp.name
-            secure_file_permissions(temp_path)
+            if not secure_file_permissions(temp_path):
+                raise PermissionError("Temporary credential ACL hardening failed")
             os.replace(temp_path, _CRED_FILE)
-            secure_file_permissions(_CRED_FILE)
+            if not secure_file_permissions(_CRED_FILE):
+                raise PermissionError("Final credential ACL hardening failed")
+            return True
         except Exception as e:
             logger.error("자격 증명 저장에 실패했습니다: %s", e)
-            if "temp_path" in locals():
+            if temp_path:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
                 except Exception:
                     pass
+            try:
+                # Never leave an older token/password behind after a failed update.
+                _CRED_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False
 
 
 def _clear_cred() -> bool:
@@ -385,22 +416,22 @@ def _clear_saved_username_only() -> None:
     _clear_saved_login_fields()
 
 
-def _clear_saved_login_fields() -> None:
+def _clear_saved_login_fields() -> bool:
     """Best-effort fallback to remove saved username/password fields only."""
     cred = _load_cred()
     if not isinstance(cred, dict) or not cred:
-        return
+        # An unreadable existing file may still contain a saved password.
+        return _clear_cred() if _CRED_FILE.exists() else True
     changed = False
     for field in ("username", _SAVED_PASSWORD_KEY, "remember_pw", _AUTO_LOGIN_KEY):
         if field in cred:
             cred.pop(field, None)
             changed = True
     if not changed:
-        return
+        return True
     if cred:
-        _save_cred(cred)
-    else:
-        _clear_cred()
+        return _save_cred(cred) or _clear_cred()
+    return _clear_cred()
 
 
 def _safe_json(resp: requests.Response) -> Dict[str, Any]:
@@ -1444,7 +1475,7 @@ def check_username(username: str) -> Dict[str, Any]:
             "GET",
             f"{API_SERVER_URL}/user/check-username/{username}",
             params={"program_type": PROGRAM_TYPE},
-            timeout=5,
+            timeout=4,
             retries=1,
         )
         payload = _safe_json(resp)
@@ -1536,8 +1567,10 @@ def register(
             "POST",
             f"{API_SERVER_URL}/user/register/request",
             json=body,
-            timeout=30,
-            retries=1,
+            timeout=20,
+            # Registration is not guaranteed idempotent by the deployed API.
+            # Never replay it automatically after an ambiguous connection loss.
+            retries=0,
         )
         payload = _safe_json(resp)
 
@@ -1625,8 +1658,10 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
             "POST",
             f"{API_SERVER_URL}/user/login/god",
             json=body,
-            timeout=15,
-            retries=1,
+            timeout=12,
+            # A lost response may already have issued/replaced a session token.
+            # Avoid replaying login and let the user retry explicitly.
+            retries=0,
         )
         if resp.status_code == 200:
             data = _safe_json(resp)
@@ -1709,7 +1744,10 @@ def clear_local_session() -> None:
     if cred:
         cred.pop("token", None)
         cred.pop("user_id", None)
-        _save_cred(cred)
+        if not _save_cred(cred):
+            _clear_cred()
+    elif _CRED_FILE.exists():
+        _clear_cred()
 
 
 def logout() -> bool:
@@ -2063,11 +2101,10 @@ def get_saved_credentials() -> Optional[Dict[str, str]]:
     return None
 
 
-def remember_login_credentials(username: str, password: str = "", auto_login: bool = False) -> None:
+def remember_login_credentials(username: str, password: str = "", auto_login: bool = False) -> bool:
     name = _normalize_saved_username(username)
     if not name:
-        _clear_saved_login_fields()
-        return
+        return _clear_saved_login_fields()
 
     cred = _load_cred()
     if not isinstance(cred, dict):
@@ -2084,7 +2121,7 @@ def remember_login_credentials(username: str, password: str = "", auto_login: bo
     else:
         cred.pop(_SAVED_PASSWORD_KEY, None)
         cred.pop(_AUTO_LOGIN_KEY, None)
-    _save_cred(cred)
+    return _save_cred(cred)
 
 
 def remember_username(username: str) -> None:

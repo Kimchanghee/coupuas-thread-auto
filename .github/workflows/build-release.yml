@@ -77,11 +77,22 @@ jobs:
       - name: Get version
         id: get_version
         shell: bash
+        env:
+          RELEASE_VERSION_INPUT: ${{ inputs.version || '' }}
+          RELEASE_BUMP_INPUT: ${{ inputs.bump || 'patch' }}
         run: |
+          if [[ -n "$RELEASE_VERSION_INPUT" && ! "$RELEASE_VERSION_INPUT" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid explicit version format"
+            exit 1
+          fi
+          if [[ ! "$RELEASE_BUMP_INPUT" =~ ^(patch|minor|major)$ ]]; then
+            echo "Invalid bump value"
+            exit 1
+          fi
           VERSION="$(python .github/scripts/next_version.py \
-            --explicit "${{ inputs.version || '' }}" \
+            --explicit "$RELEASE_VERSION_INPUT" \
             --ref "${GITHUB_REF}" \
-            --bump "${{ inputs.bump || 'patch' }}")"
+            --bump "$RELEASE_BUMP_INPUT")"
           echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Resolved release version: ${VERSION}"
 
@@ -129,6 +140,52 @@ jobs:
           } else {
             Write-Error "Build failed - EXE not found"
             exit 1
+          }
+
+      - name: Verify packaged Windows child processes stay hidden
+        shell: pwsh
+        run: |
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "coupuas-window-smoke"
+          New-Item -ItemType Directory -Force -Path $smokeRoot | Out-Null
+          python -m PyInstaller --onefile --windowed --clean --noconfirm `
+            --name CoupangThreadAutoWindowsSmoke `
+            --distpath $smokeRoot `
+            --workpath (Join-Path $smokeRoot "build") `
+            --specpath $smokeRoot `
+            --paths . `
+            tools/windows_child_process_smoke.py
+          $resultPath = Join-Path $smokeRoot "result.json"
+          $before = Get-Process conhost,cmd,icacls,whoami,tasklist,WerFault -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Id
+          $process = Start-Process `
+            -FilePath (Join-Path $smokeRoot "CoupangThreadAutoWindowsSmoke.exe") `
+            -ArgumentList @($resultPath) `
+            -WindowStyle Hidden `
+            -PassThru
+          $visible = @()
+          $deadline = (Get-Date).AddSeconds(60)
+          while (-not $process.HasExited) {
+            if ((Get-Date) -ge $deadline) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "Packaged Windows child-process smoke timed out."
+            }
+            $visible += Get-Process conhost,cmd,icacls,whoami,tasklist,WerFault -ErrorAction SilentlyContinue |
+              Where-Object { $_.Id -notin $before -and $_.MainWindowHandle -ne 0 }
+            Start-Sleep -Milliseconds 25
+            $process.Refresh()
+          }
+          if ($process.ExitCode -ne 0) {
+            Get-Content $resultPath -ErrorAction SilentlyContinue
+            throw "Packaged Windows child-process smoke failed with exit code $($process.ExitCode)"
+          }
+          if ($visible) {
+            $visible | Sort-Object Id -Unique | Format-Table -AutoSize
+            throw "A child console window was visible during the packaged smoke test."
+          }
+          $result = Get-Content -Raw $resultPath | ConvertFrom-Json
+          if (-not $result.frozen -or -not $result.passed) {
+            Get-Content $resultPath
+            throw "Packaged Windows child-process assertions failed."
           }
 
       - name: Generate checksum

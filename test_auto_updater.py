@@ -59,7 +59,7 @@ def test_verify_authenticode_accepts_pinned_self_signed_trust_chain_error(monkey
             }
         )
 
-    monkeypatch.setattr(auto_updater.subprocess, "run", _fake_run)
+    monkeypatch.setattr(auto_updater, "run_process", _fake_run)
 
     updater = auto_updater.AutoUpdater("3.0.5")
 
@@ -80,7 +80,7 @@ def test_verify_authenticode_rejects_hash_mismatch_even_when_thumbprint_matches(
             }
         )
 
-    monkeypatch.setattr(auto_updater.subprocess, "run", _fake_run)
+    monkeypatch.setattr(auto_updater, "run_process", _fake_run)
 
     updater = auto_updater.AutoUpdater("3.0.5")
 
@@ -175,7 +175,7 @@ def test_installer_update_uses_detached_runner_and_relaunches_app(monkeypatch, t
     monkeypatch.setattr(auto_updater.os, "name", "nt")
     monkeypatch.setattr(auto_updater.sys, "executable", r"C:\Program Files\Thread Auto\CoupangThreadAuto.exe")
     monkeypatch.setattr(auto_updater.AutoUpdater, "_create_installer_update_script", lambda self: str(script))
-    monkeypatch.setattr(auto_updater.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(auto_updater, "popen_process", lambda args, **kwargs: calls.append((args, kwargs)))
 
     updater = auto_updater.AutoUpdater("3.0.54")
     expected_sha = "a" * 64
@@ -187,8 +187,7 @@ def test_installer_update_uses_detached_runner_and_relaunches_app(monkeypatch, t
     assert args[args.index("-ExpectedSha256") + 1] == expected_sha
     assert args[args.index("-TrustedThumbprints") + 1] == "B" * 40
     assert str(installer) in args
-    assert kwargs["shell"] is False
-    assert "creationflags" in kwargs
+    assert kwargs["system_command"] is True
 
 
 def test_installer_runner_waits_installs_relaunches_and_self_cleans(tmp_path, monkeypatch):

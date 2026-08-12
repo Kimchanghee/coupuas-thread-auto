@@ -3,9 +3,11 @@
 로그인/회원가입 윈도우 (PyQt6)
 스레드 쇼핑 자동화 전용 - Midnight Workshop 테마
 """
-import re
+import atexit
 import logging
+import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
     QPushButton, QCheckBox, QStackedWidget,
@@ -29,6 +31,27 @@ from src import auth_client
 from src.ui_messages import ask_yes_no, show_info, show_warning
 
 logger = logging.getLogger(__name__)
+_TELEMETRY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="ui-telemetry",
+)
+atexit.register(_TELEMETRY_EXECUTOR.shutdown, wait=False, cancel_futures=True)
+
+
+def _send_telemetry(action: str, detail: str) -> None:
+    try:
+        auth_client.log_action(action, detail)
+    except Exception:
+        logger.debug("활동 로그 전송에 실패했습니다: %s", action, exc_info=True)
+
+
+def _queue_telemetry(action: str, detail: str) -> None:
+    try:
+        _TELEMETRY_EXECUTOR.submit(_send_telemetry, action, detail)
+    except RuntimeError:
+        logger.debug("종료 중이어서 활동 로그를 건너뜁니다: %s", action)
+
+
 MIN_LOGIN_PASSWORD_LENGTH = getattr(auth_client, "MIN_LOGIN_PASSWORD_LENGTH", 6)
 MIN_REGISTER_PASSWORD_LENGTH = getattr(auth_client, "MIN_REGISTER_PASSWORD_LENGTH", 8)
 WINDOW_WIDTH = 720
@@ -76,6 +99,7 @@ class LoginWindow(QMainWindow):
         super().__init__()
         self.oldPos = None
         self._username_available = False
+        self._username_available_for = None
         self._username_check_token = 0
         self._app_version = _resolve_app_version()
         self._auto_login_pending = False
@@ -519,6 +543,7 @@ class LoginWindow(QMainWindow):
         self.reg_pw.setPlaceholderText("비밀번호를 입력하세요")
         self.reg_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.reg_pw)
+        self.reg_pw.textChanged.connect(self._update_password_match_status)
         form_layout.addWidget(self.reg_pw)
 
         # Password confirm
@@ -527,7 +552,15 @@ class LoginWindow(QMainWindow):
         self.reg_pw_confirm.setPlaceholderText("비밀번호를 다시 입력")
         self.reg_pw_confirm.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.reg_pw_confirm)
+        self.reg_pw_confirm.textChanged.connect(self._update_password_match_status)
         form_layout.addWidget(self.reg_pw_confirm)
+
+        self.reg_pw_match_status = QLabel("")
+        self.reg_pw_match_status.setFont(QFont(fn, 9))
+        self.reg_pw_match_status.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; background: transparent;"
+        )
+        form_layout.addWidget(self.reg_pw_match_status)
 
         # Contact
         form_layout.addWidget(_field_label("연락처"))
@@ -581,17 +614,29 @@ class LoginWindow(QMainWindow):
 
         self._login_in_flight = True
         self.btn_login.setEnabled(False)
+        self.remember_cb.setEnabled(False)
+        self.auto_login_cb.setEnabled(False)
         self.btn_login.setText("로그인 중...")
         self.login_status.setText("")
 
         # Run login in thread
-        self._login_thread = LoginWorker(uid, pw, force)
+        self._login_thread = LoginWorker(
+            uid,
+            pw,
+            force,
+            remember_credentials=self.remember_cb.isChecked(),
+            auto_login=self.auto_login_cb.isChecked(),
+        )
         self._login_thread.finished_signal.connect(self._on_login_result)
         self._login_thread.start()
 
     def _on_login_result(self, result: dict):
         self._login_in_flight = False
         self.btn_login.setEnabled(True)
+        if hasattr(self, "remember_cb"):
+            self.remember_cb.setEnabled(True)
+        if hasattr(self, "auto_login_cb"):
+            self.auto_login_cb.setEnabled(True)
         self.btn_login.setText("로그인")
 
         status = result.get("status")
@@ -599,26 +644,6 @@ class LoginWindow(QMainWindow):
             self._duplicate_login_prompt_open = False
             self._force_login_attempted = False
             logger.info("로그인 성공: user_id=%s", result.get("id") or result.get("user_id"))
-            try:
-                auth_client.log_action("ui_login_success", "로그인 창에서 로그인 성공")
-            except Exception:
-                logger.debug("로그인 성공 활동 로그 전송에 실패했습니다.", exc_info=True)
-
-            # Respect explicit opt-in for login form persistence.
-            saved_username = self.login_id.text().strip().lower()
-            saved_password = self.login_pw.text()
-            try:
-                if self.remember_cb.isChecked():
-                    auth_client.remember_login_credentials(
-                        saved_username,
-                        saved_password,
-                        auto_login=self.auto_login_cb.isChecked(),
-                    )
-                else:
-                    auth_client.remember_login_credentials("", "")
-            except Exception:
-                logger.exception("아이디 저장 설정을 반영하지 못했습니다.")
-
             self.login_success.emit(result)
         elif status == "EU003":
             if self._force_login_attempted:
@@ -649,9 +674,32 @@ class LoginWindow(QMainWindow):
     # ─── Register logic ─────────────────────────────────────
     def _on_reg_username_changed(self):
         self._username_available = False
+        self._username_available_for = None
+        self._username_check_token += 1
         self.reg_user_status.setText("")
 
+    def _update_password_match_status(self):
+        password = self.reg_pw.text()
+        confirmation = self.reg_pw_confirm.text()
+        if not confirmation:
+            self.reg_pw_match_status.setText("")
+            self.reg_pw_match_status.setStyleSheet(
+                f"color: {Colors.TEXT_MUTED}; background: transparent;"
+            )
+        elif password == confirmation:
+            self.reg_pw_match_status.setText("✓ 비밀번호가 일치합니다")
+            self.reg_pw_match_status.setStyleSheet(
+                f"color: {Colors.SUCCESS}; background: transparent;"
+            )
+        else:
+            self.reg_pw_match_status.setText("✗ 비밀번호가 일치하지 않습니다")
+            self.reg_pw_match_status.setStyleSheet(
+                f"color: {Colors.ERROR}; background: transparent;"
+            )
+
     def _check_username(self):
+        if hasattr(self, "_username_worker") and self._username_worker.isRunning():
+            return
         username = self.reg_username.text().strip().lower()
         if not username or len(username) < 4:
             self._show_msg("아이디는 4자 이상이어야 합니다.")
@@ -667,22 +715,28 @@ class LoginWindow(QMainWindow):
         token = self._username_check_token
         self._username_worker = UsernameCheckWorker(username)
         self._username_worker.finished.connect(
-            lambda available, message, t=token: self._on_username_checked(t, available, message)
+            lambda available, message, t=token, u=username: self._on_username_checked(
+                t, u, available, message
+            )
         )
         self._username_worker.start()
 
-    def _on_username_checked(self, token: int, available: bool, message: str):
-        if token != self._username_check_token:
-            return
+    def _on_username_checked(self, token: int, username: str, available: bool, message: str):
         self.btn_check_user.setEnabled(True)
         self.btn_check_user.setText("중복확인")
 
+        current_username = self.reg_username.text().strip().lower()
+        if token != self._username_check_token or username != current_username:
+            return
+
         if available:
             self._username_available = True
+            self._username_available_for = username
             self.reg_user_status.setText("✓ 사용 가능한 아이디입니다")
             self.reg_user_status.setStyleSheet(f"color: {Colors.SUCCESS}; background: transparent;")
         else:
             self._username_available = False
+            self._username_available_for = None
             self.reg_user_status.setText(f"✗ {message}")
             self.reg_user_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
 
@@ -705,7 +759,7 @@ class LoginWindow(QMainWindow):
         if not username or len(username) < 4:
             self._show_msg("아이디를 4자 이상 입력해주세요.")
             return
-        if not self._username_available:
+        if not self._username_available or self._username_available_for != username:
             self._show_msg("아이디 중복확인을 해주세요.")
             return
         if not pw:
@@ -746,13 +800,6 @@ class LoginWindow(QMainWindow):
         self.btn_register.setText("회원가입")
 
         if result.get("success"):
-            try:
-                auth_client.log_action(
-                    "ui_register_success",
-                    f"username={self.reg_username.text().strip().lower()}",
-                )
-            except Exception:
-                logger.debug("회원가입 성공 활동 로그 전송에 실패했습니다.", exc_info=True)
             show_info(self, "가입 완료", "회원가입이 완료되었습니다!\n바로 로그인해주세요.")
             # Auto-fill login
             self.login_id.setText(self.reg_username.text().strip().lower())
@@ -794,26 +841,52 @@ class LoginWindow(QMainWindow):
 class LoginWorker(QThread):
     finished_signal = pyqtSignal(dict)
 
-    def __init__(self, username, password, force=False):
+    def __init__(
+        self,
+        username,
+        password,
+        force=False,
+        *,
+        remember_credentials=False,
+        auto_login=False,
+    ):
         super().__init__()
         self.username = username
         self._password_bytes = bytearray(str(password or "").encode("utf-8"))
         self.force = force
+        self.remember_credentials = bool(remember_credentials)
+        self.auto_login = bool(auto_login)
 
     def run(self):
         password = ""
+        result = {"status": False, "message": "로그인 처리 중 오류가 발생했습니다."}
         try:
             password = self._password_bytes.decode("utf-8", errors="ignore")
             result = auth_client.login(self.username, password, self.force)
-            self.finished_signal.emit(result)
+            if result.get("status") is True:
+                try:
+                    if self.remember_credentials:
+                        saved = auth_client.remember_login_credentials(
+                            self.username,
+                            password,
+                            auto_login=self.auto_login,
+                        )
+                    else:
+                        saved = auth_client.remember_login_credentials("", "")
+                    if saved is False:
+                        logger.warning("로그인 정보의 보안 저장을 완료하지 못했습니다.")
+                except Exception:
+                    logger.exception("아이디 저장 설정을 반영하지 못했습니다.")
+                _queue_telemetry("ui_login_success", "로그인 창에서 로그인 성공")
         except Exception as exc:
             logger.exception("로그인 워커 실행에 실패했습니다.")
-            self.finished_signal.emit({"status": False, "message": f"로그인 처리 중 오류가 발생했습니다: {exc}"})
+            result = {"status": False, "message": f"로그인 처리 중 오류가 발생했습니다: {exc}"}
         finally:
             for i in range(len(self._password_bytes)):
                 self._password_bytes[i] = 0
             self._password_bytes = bytearray()
             password = None
+        self.finished_signal.emit(result)
 
 
 class RegisterWorker(QThread):
@@ -842,6 +915,7 @@ class RegisterWorker(QThread):
 
     def run(self):
         password = ""
+        result = {"success": False, "message": "회원가입 처리 중 오류가 발생했습니다."}
         try:
             password = self._password_bytes.decode("utf-8", errors="ignore")
             result = auth_client.register(
@@ -854,12 +928,17 @@ class RegisterWorker(QThread):
                 terms_accepted=self.terms_accepted,
                 privacy_accepted=self.privacy_accepted,
             )
-            self.finished_signal.emit(result)
+            if result.get("success"):
+                _queue_telemetry(
+                    "ui_register_success",
+                    f"username={self.username}",
+                )
         except Exception as exc:
             logger.exception("회원가입 워커 실행에 실패했습니다.")
-            self.finished_signal.emit({"success": False, "message": f"회원가입 처리 중 오류가 발생했습니다: {exc}"})
+            result = {"success": False, "message": f"회원가입 처리 중 오류가 발생했습니다: {exc}"}
         finally:
             for i in range(len(self._password_bytes)):
                 self._password_bytes[i] = 0
             self._password_bytes = bytearray()
             password = None
+        self.finished_signal.emit(result)

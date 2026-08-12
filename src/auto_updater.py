@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -15,6 +14,7 @@ from urllib.parse import urlparse
 import requests
 from packaging import version
 from src.fs_security import secure_dir_permissions, secure_file_permissions
+from src.system_process import popen_process, run_process
 
 
 class AutoUpdater:
@@ -224,8 +224,10 @@ class AutoUpdater:
             "$obj | ConvertTo-Json -Compress"
         )
         try:
-            completed = subprocess.run(
+            completed = run_process(
                 ["powershell", "-NoProfile", "-Command", ps_script],
+                system_command=True,
+                operation="updater.verify_authenticode",
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -430,7 +432,7 @@ class AutoUpdater:
             shutil.copy2(current_exe, backup_exe)
             update_script = self._create_update_script()
 
-            subprocess.Popen(
+            popen_process(
                 [
                     "powershell",
                     "-NoProfile",
@@ -451,7 +453,8 @@ class AutoUpdater:
                     "-TrustedPublishers",
                     ",".join(sorted(self.trusted_publishers)),
                 ],
-                shell=False,
+                system_command=True,
+                operation="updater.install_standalone",
             )
             return True
 
@@ -468,7 +471,7 @@ class AutoUpdater:
             return False
 
         update_script = self._create_installer_update_script()
-        subprocess.Popen(
+        popen_process(
             [
                 "powershell",
                 "-NoProfile",
@@ -489,9 +492,9 @@ class AutoUpdater:
                 "-TrustedPublishers",
                 ",".join(sorted(self.trusted_publishers)),
             ],
-            shell=False,
+            system_command=True,
+            operation="updater.install_package",
             close_fds=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return True
 
