@@ -113,6 +113,29 @@ jobs:
           grep "VERSION =" main.py
           grep "VERSION =" login_main.py
 
+      - name: Select release signing provider
+        id: signing_provider
+        shell: pwsh
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+        run: |
+          $values = @(
+            $env:ESIGNER_USERNAME,
+            $env:ESIGNER_PASSWORD,
+            $env:ESIGNER_CREDENTIAL_ID,
+            $env:ESIGNER_TOTP_SECRET
+          )
+          $configured = @($values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+          if ($configured -ne 0 -and $configured -ne $values.Count) {
+            throw "SSL.com eSigner secrets are only partially configured."
+          }
+          $provider = if ($configured -eq $values.Count) { "esigner" } else { "pfx" }
+          "provider=$provider" >> $env:GITHUB_OUTPUT
+          Write-Host "Release signing provider: $provider"
+
       - name: Build executable
         env:
           PYTHONIOENCODING: utf-8
@@ -121,7 +144,24 @@ jobs:
         run: |
           python build_exe.py
 
-      - name: Sign executable
+      - name: Sign executable with SSL.com eSigner
+        if: steps.signing_provider.outputs.provider == 'esigner'
+        uses: SSLcom/esigner-codesign@cf5f6c1d38ad10f47e3ed9aca873f429b1a8d85b # v1.3.2
+        with:
+          command: sign
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          program_name: CoupangThreadAuto
+          file_path: ${{ github.workspace }}\dist\CoupangThreadAuto.exe
+          override: true
+          malware_block: true
+          clean_logs: true
+          environment_name: PROD
+
+      - name: Sign executable with PFX fallback
+        if: steps.signing_provider.outputs.provider == 'pfx'
         shell: pwsh
         timeout-minutes: 5
         env:
@@ -130,6 +170,15 @@ jobs:
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           & ".github/scripts/sign-windows-artifact.ps1" -Path "dist\CoupangThreadAuto.exe"
+
+      - name: Verify executable has public Authenticode trust
+        shell: pwsh
+        env:
+          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
+        run: |
+          & ".github/scripts/assert-public-authenticode.ps1" `
+            -Path "dist\CoupangThreadAuto.exe" `
+            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
 
       - name: Verify build
         run: |
@@ -206,7 +255,24 @@ jobs:
         run: |
           python build_installer.py
 
-      - name: Sign installer
+      - name: Sign installer with SSL.com eSigner
+        if: steps.signing_provider.outputs.provider == 'esigner'
+        uses: SSLcom/esigner-codesign@cf5f6c1d38ad10f47e3ed9aca873f429b1a8d85b # v1.3.2
+        with:
+          command: sign
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          credential_id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          program_name: CoupangThreadAuto
+          file_path: ${{ github.workspace }}\dist\CoupangThreadAutoSetup.exe
+          override: true
+          malware_block: true
+          clean_logs: true
+          environment_name: PROD
+
+      - name: Sign installer with PFX fallback
+        if: steps.signing_provider.outputs.provider == 'pfx'
         shell: pwsh
         timeout-minutes: 5
         env:
@@ -215,6 +281,15 @@ jobs:
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           & ".github/scripts/sign-windows-artifact.ps1" -Path "dist\CoupangThreadAutoSetup.exe"
+
+      - name: Verify installer has public Authenticode trust
+        shell: pwsh
+        env:
+          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
+        run: |
+          & ".github/scripts/assert-public-authenticode.ps1" `
+            -Path "dist\CoupangThreadAutoSetup.exe" `
+            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
 
       - name: Verify installer
         run: |
