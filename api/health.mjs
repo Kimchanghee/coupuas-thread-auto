@@ -1,4 +1,6 @@
-export default function handler(_req, res) {
+import { hasGatewayCredentials } from "./_lib/gateway-auth.mjs";
+
+export default function handler(req, res) {
   res.statusCode = 200;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -6,9 +8,7 @@ export default function handler(_req, res) {
     JSON.stringify({
       ok: true,
       service: "coupuas-thread-managed-ai",
-      gatewayConfigured: Boolean(
-        process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN,
-      ),
+      gatewayConfigured: hasGatewayCredentials(req),
     }),
   );
 }

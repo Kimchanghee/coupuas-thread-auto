@@ -10,6 +10,7 @@ import {
   sanitizeText,
   validateVariants,
 } from "../_lib/managed-ai.mjs";
+import { gatewayToken } from "../_lib/gateway-auth.mjs";
 
 const AUTH_API_URL = String(
   process.env.AUTH_API_URL || "https://newshopping-shorts-auth.vercel.app",
@@ -229,8 +230,8 @@ export default async function handler(req, res) {
     const product = normalizeProduct(body?.product);
     reservationId = await reserveWork(userId, loginToken, requestId);
 
-    const gatewayToken = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
-    if (!gatewayToken) {
+    const gatewayCredential = gatewayToken(req);
+    if (!gatewayCredential) {
       throw new ManagedAiError(
         "AI_NOT_CONFIGURED",
         503,
@@ -246,7 +247,7 @@ export default async function handler(req, res) {
     try {
       const completion = await gatewayCompletion(
         PRIMARY_MODEL,
-        gatewayToken,
+        gatewayCredential,
         userId,
         prompt,
       );
