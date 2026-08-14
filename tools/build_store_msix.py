@@ -264,6 +264,10 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     parser.add_argument("--makeappx", type=Path, help="Path to makeappx.exe")
     parser.add_argument("--output-dir", type=Path, help="MSIX output directory")
     parser.add_argument("--build-root", type=Path, help="Temporary build directory")
+    parser.add_argument(
+        "--version",
+        help="MSIX version override (three or four numeric parts, optional leading v)",
+    )
     args = parser.parse_args(argv)
 
     resolved_repo_root = (
@@ -271,7 +275,11 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
         if repo_root is not None
         else Path(__file__).resolve().parents[1]
     )
-    version = read_app_version(resolved_repo_root / "login_main.py")
+    version = (
+        normalize_msix_version(args.version)
+        if args.version
+        else read_app_version(resolved_repo_root / "login_main.py")
+    )
     if args.makeappx:
         makeappx_path = args.makeappx.resolve()
     else:

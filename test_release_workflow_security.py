@@ -24,15 +24,10 @@ def test_release_requires_publicly_trusted_timestamped_authenticode():
         encoding="utf-8"
     )
 
-    pinned_esigner = (
-        "SSLcom/esigner-codesign@"
-        "cf5f6c1d38ad10f47e3ed9aca873f429b1a8d85b"
-    )
-    assert workflow.count(pinned_esigner) == 2
-    assert "SSLcom/esigner-codesign@develop" not in workflow
+    assert "SSLcom/esigner-codesign" not in workflow
+    assert "ESIGNER_" not in workflow
     assert workflow.count("assert-public-authenticode.ps1") == 2
-    assert "ESIGNER_CREDENTIAL_ID" in workflow
-    assert "ESIGNER_TOTP_SECRET" in workflow
+    assert "branches:" not in workflow.split("workflow_dispatch:", 1)[0]
 
     assert "SignatureStatus]::Valid" in verifier
     assert "X509Chain]::new()" in verifier
@@ -41,4 +36,27 @@ def test_release_requires_publicly_trusted_timestamped_authenticode():
     assert "self-signed" in verifier
     assert "NotTrusted" not in signer
     assert "UnknownError" not in signer
-    assert '-TimestampServer "http://ts.ssl.com"' in signer
+    assert '-TimestampServer "http://timestamp.digicert.com"' in signer
+
+
+def test_free_store_workflow_is_manual_pinned_and_payment_provider_free():
+    workflow = Path(".github/workflows/store-release.yml").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow
+    assert "publish:" in workflow
+    assert "tools/build_store_msix.py" in workflow
+    assert "makeappx.exe" in workflow
+    assert "YMcompany.30069A065C875" in workflow
+    assert "SSLcom" not in workflow
+    assert "ESIGNER_" not in workflow
+    assert (
+        "microsoft/microsoft-store-apppublisher@"
+        "15abd1c50fcc164b19cb240fb04ef3c49bf715a2"
+    ) in workflow
+    assert (
+        "actions/upload-artifact@"
+        "ea165f8d65b6e75b540449e92b4886f43607fa02"
+    ) in workflow
+    assert "AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}" in workflow
+    assert "STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}" in workflow
+    assert "msstore publish" in workflow

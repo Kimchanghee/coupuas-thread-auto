@@ -53,7 +53,7 @@ try {
     -FilePath $Path `
     -Certificate $cert `
     -HashAlgorithm SHA256 `
-    -TimestampServer "http://ts.ssl.com" | Out-Null
+    -TimestampServer "http://timestamp.digicert.com" | Out-Null
 
   $signature = Get-AuthenticodeSignature -FilePath $Path
   if (-not $signature.SignerCertificate) {

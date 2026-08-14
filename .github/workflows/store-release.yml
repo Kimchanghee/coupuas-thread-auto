@@ -1,0 +1,178 @@
+name: Build Free Microsoft Store Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Store version (optional, e.g. 3.0.71 or 3.0.71.0)"
+        required: false
+        type: string
+      publish:
+        description: "Submit the package to the Microsoft Store after building"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: store-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-store-package:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install locked dependencies
+        run: pip install --require-hashes -r requirements.lock
+
+      - name: Run automated tests
+        run: |
+          python -m pytest -q
+          node --test tests_js/*.test.mjs
+
+      - name: Resolve Store version
+        id: store-version
+        shell: pwsh
+        env:
+          STORE_VERSION_INPUT: ${{ inputs.version || '' }}
+        run: |
+          $resolved = python -c "import os; from pathlib import Path; from tools.build_store_msix import normalize_msix_version, read_app_version; raw=os.environ.get('STORE_VERSION_INPUT','').strip(); print(normalize_msix_version(raw) if raw else read_app_version(Path('login_main.py')))"
+          if ($LASTEXITCODE -ne 0 -or $resolved -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw "Invalid Microsoft Store version."
+          }
+          "version=$resolved" >> $env:GITHUB_OUTPUT
+          Write-Host "Microsoft Store package version: $resolved"
+
+      - name: Locate MakeAppx
+        id: makeappx
+        shell: pwsh
+        run: |
+          $sdkRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $tool = Get-ChildItem -Path $sdkRoot -Recurse -Filter makeappx.exe |
+            Where-Object { $_.Directory.Name -eq "x64" } |
+            Sort-Object FullName |
+            Select-Object -Last 1
+          if (-not $tool) {
+            throw "MakeAppx.exe was not found on the Windows runner."
+          }
+          "path=$($tool.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Build unsigned Store ingestion package
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: 1
+          STORE_VERSION: ${{ steps.store-version.outputs.version }}
+          MAKEAPPX_PATH: ${{ steps.makeappx.outputs.path }}
+        run: |
+          python tools/build_store_msix.py `
+            --makeappx "$env:MAKEAPPX_PATH" `
+            --version "$env:STORE_VERSION" `
+            --output-dir "dist\store"
+
+      - name: Validate Store package and checksum
+        shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ steps.store-version.outputs.version }}
+          MAKEAPPX_PATH: ${{ steps.makeappx.outputs.path }}
+        run: |
+          $packages = @(Get-ChildItem "dist\store\*.msix")
+          if ($packages.Count -ne 1) {
+            throw "Expected exactly one MSIX package, found $($packages.Count)."
+          }
+          $package = $packages[0]
+          $unpackRoot = Join-Path $env:RUNNER_TEMP "store-msix-validation"
+          & $env:MAKEAPPX_PATH unpack /p $package.FullName /d $unpackRoot /o
+          if ($LASTEXITCODE -ne 0) {
+            throw "MakeAppx failed to unpack the generated package."
+          }
+          [xml]$manifest = Get-Content -Raw (Join-Path $unpackRoot "AppxManifest.xml")
+          $identity = $manifest.Package.Identity
+          if ($identity.Name -ne "YMcompany.30069A065C875") {
+            throw "Unexpected Store package identity: $($identity.Name)"
+          }
+          if ($identity.Publisher -ne "CN=447AAE61-8C19-4267-91D6-45419445A405") {
+            throw "Unexpected Store publisher: $($identity.Publisher)"
+          }
+          if ($identity.Version -ne $env:EXPECTED_VERSION) {
+            throw "Unexpected Store version: $($identity.Version)"
+          }
+          $hash = (Get-FileHash $package.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash $($package.Name)" | Out-File "$($package.FullName).sha256" -Encoding ascii
+          Write-Host "Validated Microsoft Store ingestion package: $($package.Name)"
+          Write-Host "SHA256: $hash"
+
+      - name: Upload Store package artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: CoupangThreadAuto-Microsoft-Store-${{ steps.store-version.outputs.version }}
+          path: |
+            dist/store/*.msix
+            dist/store/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate Store publishing configuration
+        if: inputs.publish
+        shell: pwsh
+        env:
+          AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+          AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+          AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}
+        run: |
+          $required = [ordered]@{
+            AZURE_AD_APPLICATION_CLIENT_ID = $env:AZURE_AD_APPLICATION_CLIENT_ID
+            AZURE_AD_APPLICATION_SECRET = $env:AZURE_AD_APPLICATION_SECRET
+            AZURE_AD_TENANT_ID = $env:AZURE_AD_TENANT_ID
+            SELLER_ID = $env:SELLER_ID
+            MS_STORE_PRODUCT_ID = $env:STORE_PRODUCT_ID
+          }
+          $missing = @($required.GetEnumerator() | Where-Object { [string]::IsNullOrWhiteSpace($_.Value) } | ForEach-Object Key)
+          if ($missing) {
+            throw "Store publishing is not configured. Missing: $($missing -join ', ')"
+          }
+          if ($env:STORE_PRODUCT_ID -notmatch '^[A-Za-z0-9]{8,32}$') {
+            throw "MS_STORE_PRODUCT_ID has an invalid format."
+          }
+
+      - name: Configure Microsoft Store CLI
+        if: inputs.publish
+        uses: microsoft/microsoft-store-apppublisher@15abd1c50fcc164b19cb240fb04ef3c49bf715a2 # v1.1
+
+      - name: Publish package to Microsoft Store
+        if: inputs.publish
+        shell: pwsh
+        env:
+          AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+          AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+          AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+          SELLER_ID: ${{ secrets.SELLER_ID }}
+          STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}
+        run: |
+          msstore reconfigure `
+            --tenantId "$env:AZURE_AD_TENANT_ID" `
+            --sellerId "$env:SELLER_ID" `
+            --clientId "$env:AZURE_AD_APPLICATION_CLIENT_ID" `
+            --clientSecret "$env:AZURE_AD_APPLICATION_SECRET"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Store CLI authentication failed."
+          }
+          $package = Get-ChildItem "dist\store\*.msix" | Select-Object -First 1
+          msstore publish $package.FullName -id "$env:STORE_PRODUCT_ID"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft Store submission failed."
+          }
