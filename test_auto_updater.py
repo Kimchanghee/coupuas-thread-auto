@@ -45,7 +45,7 @@ def test_frozen_build_without_pinned_signer_does_not_offer_updates(monkeypatch):
     assert updater.check_for_updates() is None
 
 
-def test_verify_authenticode_accepts_pinned_self_signed_trust_chain_error(monkeypatch):
+def test_verify_authenticode_accepts_localized_pinned_self_signed_chain_error(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
     monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
 
@@ -53,9 +53,10 @@ def test_verify_authenticode_accepts_pinned_self_signed_trust_chain_error(monkey
         return _Completed(
             {
                 "Status": "UnknownError",
-                "StatusMessage": "A certificate chain processed, but terminated in a root certificate which is not trusted by the trust provider.",
+                "StatusMessage": "인증서 체인을 처리했지만 신뢰할 수 없는 루트에서 끝났습니다.",
                 "Subject": "CN=YM, O=YM",
                 "Thumbprint": "ABC123",
+                "ChainStatuses": ["UntrustedRoot"],
             }
         )
 
@@ -77,6 +78,29 @@ def test_verify_authenticode_rejects_hash_mismatch_even_when_thumbprint_matches(
                 "StatusMessage": "The hash value is not correct.",
                 "Subject": "CN=YM, O=YM",
                 "Thumbprint": "ABC123",
+                "ChainStatuses": ["UntrustedRoot"],
+            }
+        )
+
+    monkeypatch.setattr(auto_updater, "run_process", _fake_run)
+
+    updater = auto_updater.AutoUpdater("3.0.5")
+
+    assert updater._verify_authenticode_signature("update.exe") is False
+
+
+def test_verify_authenticode_rejects_other_chain_errors_even_when_pinned(monkeypatch):
+    monkeypatch.setattr(auto_updater.os, "name", "nt")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
+
+    def _fake_run(*args, **kwargs):
+        return _Completed(
+            {
+                "Status": "UnknownError",
+                "StatusMessage": "localized message",
+                "Subject": "CN=YM, O=YM",
+                "Thumbprint": "ABC123",
+                "ChainStatuses": ["UntrustedRoot", "Revoked"],
             }
         )
 

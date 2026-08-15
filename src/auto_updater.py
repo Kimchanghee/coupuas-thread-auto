@@ -91,6 +91,7 @@ class AutoUpdater:
 
         self.last_expected_sha256: Optional[str] = None
         self.last_update_asset_name: str = ""
+        self.last_error: str = ""
 
         self.session = requests.Session()
         self.session.headers.update(
@@ -215,11 +216,22 @@ class AutoUpdater:
             "$ErrorActionPreference='Stop';"
             f"$sig=Get-AuthenticodeSignature -FilePath '{escaped_file_path}';"
             "$cert=$sig.SignerCertificate;"
+            "$chainStatuses=@();"
+            "if($cert){"
+            "$chain=[System.Security.Cryptography.X509Certificates.X509Chain]::new();"
+            "try{"
+            "$chain.ChainPolicy.RevocationMode="
+            "[System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck;"
+            "[void]$chain.Build($cert);"
+            "$chainStatuses=@($chain.ChainStatus | ForEach-Object {$_.Status.ToString()})"
+            "}finally{$chain.Dispose()}"
+            "};"
             "$obj=[PSCustomObject]@{"
             "Status=$sig.Status.ToString();"
             "StatusMessage=$sig.StatusMessage;"
             "Subject=($(if($cert){$cert.Subject}else{''}));"
-            "Thumbprint=($(if($cert){$cert.Thumbprint}else{''}))"
+            "Thumbprint=($(if($cert){$cert.Thumbprint}else{''}));"
+            "ChainStatuses=$chainStatuses"
             "};"
             "$obj | ConvertTo-Json -Compress"
         )
@@ -235,9 +247,16 @@ class AutoUpdater:
             )
             data = json.loads((completed.stdout or "").strip() or "{}")
             status = str(data.get("Status", "")).strip().lower()
-            status_message = str(data.get("StatusMessage", "")).strip().lower()
             subject = str(data.get("Subject", "")).strip()
             thumbprint = str(data.get("Thumbprint", "")).strip().upper()
+            raw_chain_statuses = data.get("ChainStatuses") or []
+            if isinstance(raw_chain_statuses, str):
+                raw_chain_statuses = [raw_chain_statuses]
+            chain_statuses = {
+                str(item or "").strip().lower()
+                for item in raw_chain_statuses
+                if str(item or "").strip()
+            }
 
             if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
                 return False
@@ -245,13 +264,11 @@ class AutoUpdater:
             if self.trusted_publishers and not subject_identities.intersection(self.trusted_publishers):
                 return False
             if status != "valid":
-                trust_chain_only_error = status == "nottrusted" or (
-                    status == "unknownerror"
-                    and (
-                        "not trusted" in status_message
-                        or "root certificate" in status_message
-                        or "trust provider" in status_message
-                    )
+                allowed_chain_errors = {"untrustedroot", "partialchain"}
+                trust_chain_only_error = (
+                    status in {"nottrusted", "unknownerror"}
+                    and bool(chain_statuses)
+                    and chain_statuses.issubset(allowed_chain_errors)
                 )
                 if not (self.trusted_thumbprints and trust_chain_only_error):
                     return False
@@ -322,6 +339,7 @@ class AutoUpdater:
         }
 
     def download_update(self, update_info: Dict, progress_callback=None) -> Optional[str]:
+        self.last_error = ""
         try:
             download_url = str(update_info.get("download_url", ""))
             checksum_url = str(update_info.get("checksum_download_url", ""))
@@ -389,12 +407,13 @@ class AutoUpdater:
             return temp_file
 
         except Exception as e:
+            self.last_error = str(e).strip() or "업데이트 파일을 내려받지 못했습니다."
             if "temp_file" in locals():
                 try:
                     os.remove(temp_file)
                 except OSError:
                     pass
-            print(f"다운로드 오류: {e}")
+            print(f"다운로드 오류: {self.last_error}")
             return None
 
     def install_update(self, update_file: str, expected_sha256: str = "", asset_name: str = "") -> bool:

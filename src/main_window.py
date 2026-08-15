@@ -6805,7 +6805,9 @@ class MainWindow(QMainWindow):
                     ),
                 )
                 if not update_file:
-                    raise RuntimeError("검증된 업데이트 파일을 내려받지 못했습니다.")
+                    raise RuntimeError(
+                        updater.last_error or "검증된 업데이트 파일을 내려받지 못했습니다."
+                    )
                 self.signals.update_install_progress.emit({"stage": "installing"})
                 if not updater.install_update(
                     update_file,
