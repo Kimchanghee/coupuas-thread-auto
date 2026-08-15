@@ -62,3 +62,12 @@ test("privacy and terms pages include Korean signup-required disclosures", () =>
   assert.match(terms, /계약 해지/);
   assert.match(terms, /게시일: 2026년 8월 8일/);
 });
+
+test("release detail hides the duplicate top-level markdown heading", () => {
+  const source = read("notices.js");
+  const skipTopHeading = source.indexOf('if (/^#\\s+/.test(line))');
+  const renderSubHeading = source.indexOf('if (/^##\\s+/.test(line))');
+
+  assert.ok(skipTopHeading >= 0);
+  assert.ok(renderSubHeading > skipTopHeading);
+});

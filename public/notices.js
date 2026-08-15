@@ -77,6 +77,7 @@ function renderBody(body) {
   for (const raw of lines) {
     const line = raw.trim();
     if (!line || line.startsWith("<!--")) { flushList(); continue; }
+    if (/^#\s+/.test(line)) { flushList(); continue; }
     if (/^###\s+/.test(line)) { flushList(); fragment.append(el("h3", { text: cleanInlineMarkdown(line.replace(/^###\s+/, "")) })); continue; }
     if (/^##\s+/.test(line)) { flushList(); fragment.append(el("h2", { text: cleanInlineMarkdown(line.replace(/^##\s+/, "")) })); continue; }
     if (/^[-*]\s+/.test(line)) {

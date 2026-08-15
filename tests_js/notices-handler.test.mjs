@@ -51,6 +51,36 @@ test("release notices expose the installer and ignore unpublished builds", () =>
   assert.equal(payload.latest.summary, "공지사항을 추가했습니다.");
 });
 
+test("legacy internal release copy is replaced with plain Korean", () => {
+  const payload = combineNoticePayload(
+    [
+      {
+        id: 70,
+        tag_name: "v3.0.70",
+        name: "Thread Auto v3.0.70",
+        body: "fix(vercel): use request OIDC token for AI gateway",
+        published_at: "2026-08-14T00:00:00Z",
+      },
+      {
+        id: 68,
+        tag_name: "v3.0.68",
+        name: "Thread Auto v3.0.68",
+        body: "feat(affiliate): integrate seven Korean partner channels",
+        published_at: "2026-08-11T00:00:00Z",
+      },
+    ],
+    [],
+  );
+
+  assert.equal(payload.posts[0].summary, "각종 오류와 안정성 문제를 개선했습니다.");
+  assert.doesNotMatch(payload.posts[0].body, /OIDC|gateway|fix\(/i);
+  assert.equal(
+    payload.posts[1].summary,
+    "이용할 수 있는 국내 쇼핑 제휴 채널을 일곱 곳으로 늘렸습니다.",
+  );
+  assert.doesNotMatch(payload.posts[1].body, /affiliate|integrate|partner/i);
+});
+
 test("only owner-authored event issues are published", () => {
   const eventBody = [
     "### 한 줄 소개",
