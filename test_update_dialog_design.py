@@ -26,6 +26,9 @@ def test_update_dialog_is_responsive_and_uses_readable_korean_copy():
     assert "3.0.66" in dialog.status_label.text()
     assert dialog.install_btn.minimumHeight() >= 46
     assert dialog.changelog_text.font().family() != "Consolas"
+    assert dialog.font().family() == app.font().family()
+    assert dialog.changelog_text.font().family() == app.font().family()
+    assert dialog.status_label.font().family() == app.font().family()
 
     for width, height in ((560, 520), (720, 620)):
         dialog.resize(width, height)

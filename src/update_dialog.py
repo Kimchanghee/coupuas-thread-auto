@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 
 from src.app_icon import apply_window_icon
 from src.auto_updater import AutoUpdater
-from src.theme import Colors, Gradients, Radius, Typography, progress_bar_style
+from src.theme import Colors, Gradients, Radius, progress_bar_style
 
 
 class UpdateCheckThread(QThread):
@@ -67,6 +67,7 @@ class UpdateDialog(QDialog):
             )
         else:
             self.resize(640, 580)
+        self.setFont(QApplication.font())
         apply_window_icon(self)
 
         self._build_ui()
@@ -81,7 +82,6 @@ class UpdateDialog(QDialog):
             QDialog {{
                 background-color: {Colors.BG_DARK};
                 color: {Colors.TEXT_PRIMARY};
-                font-family: '{Typography.FAMILY}';
             }}
             QFrame#updateHero {{
                 background: {Gradients.CARD_SUBTLE};
@@ -100,10 +100,10 @@ class UpdateDialog(QDialog):
         title_box = QVBoxLayout()
         title_box.setSpacing(4)
         title = QLabel("새로운 업데이트")
-        title.setFont(QFont(Typography.FAMILY, 19, QFont.Weight.Bold))
+        title.setFont(self._ui_font(19, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
         subtitle = QLabel("안전하게 내려받고, 설치 후 하던 작업을 이어갈 수 있어요.")
-        subtitle.setFont(QFont(Typography.FAMILY, 10))
+        subtitle.setFont(self._ui_font(10))
         subtitle.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         subtitle.setWordWrap(True)
         title_box.addWidget(title)
@@ -138,13 +138,13 @@ class UpdateDialog(QDialog):
         hero_layout.addLayout(version_row)
 
         self.status_label = QLabel("최신 버전을 확인하고 있어요")
-        self.status_label.setFont(QFont(Typography.FAMILY, 12, QFont.Weight.Bold))
+        self.status_label.setFont(self._ui_font(12, QFont.Weight.Bold))
         self.status_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
         self.status_label.setWordWrap(True)
         hero_layout.addWidget(self.status_label)
 
         self.status_detail = QLabel("잠시만 기다려 주세요.")
-        self.status_detail.setFont(QFont(Typography.FAMILY, 9))
+        self.status_detail.setFont(self._ui_font(9))
         self.status_detail.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
         self.status_detail.setWordWrap(True)
         hero_layout.addWidget(self.status_detail)
@@ -152,12 +152,12 @@ class UpdateDialog(QDialog):
 
         changelog_header = QHBoxLayout()
         changelog_title = QLabel("이번 버전에서 달라진 점")
-        changelog_title.setFont(QFont(Typography.FAMILY, 10, QFont.Weight.Bold))
+        changelog_title.setFont(self._ui_font(10, QFont.Weight.Bold))
         changelog_title.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         changelog_header.addWidget(changelog_title)
         changelog_header.addStretch()
         self.size_label = QLabel("")
-        self.size_label.setFont(QFont(Typography.FAMILY, 9))
+        self.size_label.setFont(self._ui_font(9))
         self.size_label.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
         changelog_header.addWidget(self.size_label)
         root.addLayout(changelog_header)
@@ -165,7 +165,7 @@ class UpdateDialog(QDialog):
         self.changelog_text = QTextEdit()
         self.changelog_text.setReadOnly(True)
         self.changelog_text.setMinimumHeight(120)
-        self.changelog_text.setFont(QFont(Typography.FAMILY, 10))
+        self.changelog_text.setFont(self._ui_font(10))
         self.changelog_text.setPlaceholderText("업데이트 내용을 불러오는 중입니다.")
         self.changelog_text.setStyleSheet(
             f"QTextEdit {{ background-color: {Colors.BG_INPUT}; color: {Colors.TEXT_PRIMARY};"
@@ -224,6 +224,14 @@ class UpdateDialog(QDialog):
         # Compatibility alias for older callers and UI tests.
         self.download_btn = self.install_btn
 
+    def _ui_font(self, point_size, weight=None):
+        """Return the same family used by the rest of the application."""
+        font = QFont(self.font())
+        font.setPointSize(int(point_size))
+        if weight is not None:
+            font.setWeight(weight)
+        return font
+
     def _version_box(self, caption, value, color, value_label=None):
         frame = QFrame()
         frame.setStyleSheet(
@@ -234,12 +242,12 @@ class UpdateDialog(QDialog):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(3)
         caption_label = QLabel(caption)
-        caption_label.setFont(QFont(Typography.FAMILY, 8))
+        caption_label.setFont(self._ui_font(8))
         caption_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; border: none;")
         layout.addWidget(caption_label)
         label = value_label or QLabel(value)
         label.setText(value or label.text())
-        label.setFont(QFont(Typography.FAMILY, 12, QFont.Weight.Bold))
+        label.setFont(self._ui_font(12, QFont.Weight.Bold))
         label.setStyleSheet(f"color: {color}; border: none;")
         layout.addWidget(label)
         return frame
