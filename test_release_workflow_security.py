@@ -59,7 +59,7 @@ def test_free_store_workflow_is_manual_pinned_and_payment_provider_free():
     ) in workflow
     assert (
         "actions/upload-artifact@"
-        "ea165f8d65b6e75b540449e92b4886f43607fa02"
+        "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
     ) in workflow
     assert "AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}" in workflow
     assert "STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}" in workflow
