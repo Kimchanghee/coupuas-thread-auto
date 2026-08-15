@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -69,3 +70,12 @@ def test_installer_version_rejects_compiler_arguments():
     assert _validated_version("v3.0.72") == "3.0.72"
     with pytest.raises(ValueError):
         _validated_version("3.0.72 /DOutputDir=outside")
+
+
+def test_release_workflow_has_verified_installer_fallback():
+    workflow = Path(".github/workflows/build-release.yml").read_text(encoding="utf-8")
+
+    assert "foreach ($attempt in 1..3)" in workflow
+    assert "jrsoftware/issrc/releases/download/is-6_6_1/innosetup-6.6.1.exe" in workflow
+    assert "d243ce440c02705530699554fb9612b9b2bd7a2a90629cdb7f41e66f5faeb91f" in workflow
+    assert "Inno Setup installer checksum mismatch" in workflow
