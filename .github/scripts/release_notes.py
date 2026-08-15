@@ -78,6 +78,11 @@ def user_facing_changes(subjects: list[str]) -> list[str]:
         elif any(word in searchable for word in ("font", "typeface", "typography")):
             add("업데이트 화면의 글자 모양을 다른 화면과 같게 맞췄습니다.")
         elif any(
+            phrase in searchable
+            for phrase in ("manual download", "browser download", "download fallback")
+        ):
+            add("업데이트가 완료되지 않을 때 공식 설치 파일을 바로 받을 수 있게 했습니다.")
+        elif any(
             word in searchable
             for word in (
                 "update",

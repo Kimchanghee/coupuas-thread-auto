@@ -80,3 +80,14 @@ def test_release_notes_describe_security_notices_and_status_in_plain_korean():
     assert "서비스 연결 상태를 더 빠르게 확인할 수 있도록 개선했습니다." in body
     for internal_term in ("credential", "legacy", "readiness", "auth", "ops"):
         assert internal_term not in body.lower()
+
+
+def test_release_notes_name_manual_installer_fallback_in_plain_korean():
+    body = release_notes.render_release_notes(
+        "v3.0.74",
+        ["feat(updater): offer verified manual download fallback"],
+    )
+
+    assert "업데이트가 완료되지 않을 때 공식 설치 파일을 바로 받을 수 있게 했습니다." in body
+    for internal_term in ("updater", "verified", "fallback"):
+        assert internal_term not in body.lower()
