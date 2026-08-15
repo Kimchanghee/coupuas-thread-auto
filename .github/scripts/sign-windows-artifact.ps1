@@ -1,6 +1,8 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$Path
+  [string]$Path,
+
+  [switch]$AllowPinnedSelfSigned
 )
 
 Set-StrictMode -Version Latest
@@ -65,9 +67,12 @@ try {
     throw "Signed artifact thumbprint mismatch. Expected $expectedThumbprint, got $actualThumbprint."
   }
 
-  & (Join-Path $PSScriptRoot "assert-public-authenticode.ps1") `
-    -Path $Path `
-    -ExpectedThumbprint $expectedThumbprint
+  $verifyArgs = @{
+    Path = $Path
+    ExpectedThumbprint = $expectedThumbprint
+    AllowPinnedSelfSigned = $AllowPinnedSelfSigned
+  }
+  & (Join-Path $PSScriptRoot "assert-public-authenticode.ps1") @verifyArgs
 } finally {
   Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
 }

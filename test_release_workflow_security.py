@@ -15,7 +15,7 @@ def test_release_inputs_reach_shell_only_through_environment():
     assert 'Invalid explicit version format' in run_script
 
 
-def test_release_requires_publicly_trusted_timestamped_authenticode():
+def test_release_requires_timestamped_authenticode_with_an_exact_signer_pin():
     workflow = Path(".github/workflows/build-release.yml").read_text(encoding="utf-8")
     verifier = Path(".github/scripts/assert-public-authenticode.ps1").read_text(
         encoding="utf-8"
@@ -27,6 +27,7 @@ def test_release_requires_publicly_trusted_timestamped_authenticode():
     assert "SSLcom/esigner-codesign" not in workflow
     assert "ESIGNER_" not in workflow
     assert workflow.count("assert-public-authenticode.ps1") == 2
+    assert workflow.count("-AllowPinnedSelfSigned") == 4
     assert "branches:" not in workflow.split("workflow_dispatch:", 1)[0]
 
     assert "SignatureStatus]::Valid" in verifier
@@ -34,6 +35,9 @@ def test_release_requires_publicly_trusted_timestamped_authenticode():
     assert "TimeStamperCertificate" in verifier
     assert "Code Signing EKU" in verifier
     assert "self-signed" in verifier
+    assert "Assert-PinnedSelfSignedChain" in verifier
+    assert '$_ -ne "UntrustedRoot"' in verifier
+    assert "TimeStamperCertificate" in verifier
     assert "NotTrusted" not in signer
     assert "UnknownError" not in signer
     assert '-TimestampServer "http://timestamp.digicert.com"' in signer

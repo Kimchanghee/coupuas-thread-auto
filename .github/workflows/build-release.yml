@@ -103,7 +103,7 @@ jobs:
         run: |
           python build_exe.py
 
-      - name: Sign executable with configured public certificate
+      - name: Sign executable with configured pinned certificate
         shell: pwsh
         timeout-minutes: 5
         env:
@@ -111,16 +111,19 @@ jobs:
           WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
-          & ".github/scripts/sign-windows-artifact.ps1" -Path "dist\CoupangThreadAuto.exe"
+          & ".github/scripts/sign-windows-artifact.ps1" `
+            -Path "dist\CoupangThreadAuto.exe" `
+            -AllowPinnedSelfSigned
 
-      - name: Verify executable has public Authenticode trust
+      - name: Verify executable release signature
         shell: pwsh
         env:
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           & ".github/scripts/assert-public-authenticode.ps1" `
             -Path "dist\CoupangThreadAuto.exe" `
-            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
+            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT `
+            -AllowPinnedSelfSigned
 
       - name: Verify build
         run: |
@@ -197,7 +200,7 @@ jobs:
         run: |
           python build_installer.py
 
-      - name: Sign installer with configured public certificate
+      - name: Sign installer with configured pinned certificate
         shell: pwsh
         timeout-minutes: 5
         env:
@@ -205,16 +208,19 @@ jobs:
           WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
-          & ".github/scripts/sign-windows-artifact.ps1" -Path "dist\CoupangThreadAutoSetup.exe"
+          & ".github/scripts/sign-windows-artifact.ps1" `
+            -Path "dist\CoupangThreadAutoSetup.exe" `
+            -AllowPinnedSelfSigned
 
-      - name: Verify installer has public Authenticode trust
+      - name: Verify installer release signature
         shell: pwsh
         env:
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           & ".github/scripts/assert-public-authenticode.ps1" `
             -Path "dist\CoupangThreadAutoSetup.exe" `
-            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
+            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT `
+            -AllowPinnedSelfSigned
 
       - name: Verify installer
         run: |
