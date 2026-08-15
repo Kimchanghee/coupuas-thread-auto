@@ -46,3 +46,20 @@ def test_release_notes_name_major_user_facing_features():
     )
     assert "이용할 수 있는 쇼핑 제휴 채널을 늘렸습니다." in body
     assert "partner" not in body.lower()
+
+
+def test_release_notes_name_logout_return_without_development_terms():
+    body = release_notes.render_release_notes(
+        "v3.0.72",
+        [
+            "fix(auth): return to login screen after logout",
+            "chore(release): prepare v3.0.72",
+        ],
+    )
+
+    assert "로그아웃하면 프로그램을 닫지 않고 로그인 화면으로 돌아가도록 개선했습니다." in body
+    assert "각종 오류와 안정성 문제를 개선했습니다." in body
+    assert "auth" not in body.lower()
+    assert "release" not in body.lower()
+    assert "return to login" not in body.lower()
+    assert "업데이트가 끝까지 완료되지 않던 문제를 개선했습니다." not in body

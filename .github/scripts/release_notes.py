@@ -67,14 +67,15 @@ def user_facing_changes(subjects: list[str]) -> list[str]:
         if not subject or subject.lower().startswith("merge "):
             continue
         searchable = f"{scope} {subject}".casefold()
-        if any(word in searchable for word in ("font", "typeface", "typography")):
+        if "logout" in searchable:
+            add("로그아웃하면 프로그램을 닫지 않고 로그인 화면으로 돌아가도록 개선했습니다.")
+        elif any(word in searchable for word in ("font", "typeface", "typography")):
             add("업데이트 화면의 글자 모양을 다른 화면과 같게 맞췄습니다.")
         elif any(
             word in searchable
             for word in (
                 "update",
                 "updater",
-                "release",
                 "installer",
                 "install",
                 "signature",
