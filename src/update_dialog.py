@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Responsive update center used by both manual and automatic checks."""
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QThread, QUrl, Qt, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
@@ -194,6 +194,19 @@ class UpdateDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.setSpacing(12)
         buttons.addStretch()
+        self.manual_download_btn = QPushButton("설치 파일 받기")
+        self.manual_download_btn.setMinimumSize(140, 46)
+        self.manual_download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.manual_download_btn.setVisible(False)
+        self.manual_download_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {Colors.ACCENT_LIGHT};"
+            f"border: 1px solid {Colors.ACCENT_DARK}; border-radius: {Radius.MD};"
+            "padding: 0 18px; font-size: 10pt; font-weight: 700; }}"
+            f"QPushButton:hover {{ background: {Colors.ACCENT_SUBTLE}; }}"
+        )
+        self.manual_download_btn.clicked.connect(self._open_manual_download)
+        buttons.addWidget(self.manual_download_btn)
+
         self.close_btn = QPushButton("나중에")
         self.close_btn.setMinimumSize(120, 46)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -292,12 +305,21 @@ class UpdateDialog(QDialog):
         if self._busy or not isinstance(self.update_info, dict):
             return
         self._busy = True
+        self.manual_download_btn.setVisible(False)
         self.install_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
         self.status_label.setText("업데이트를 준비하고 있어요")
         self.status_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT};")
         self.status_detail.setText("현재 작업을 안전하게 확인한 뒤 다운로드를 시작합니다.")
         self.install_requested.emit(dict(self.update_info))
+
+    def _open_manual_download(self):
+        if not isinstance(self.update_info, dict):
+            return
+        download_url = str(self.update_info.get("download_url", "") or "").strip()
+        if not AutoUpdater._is_allowed_download_url(download_url):
+            return
+        QDesktopServices.openUrl(QUrl(download_url))
 
     def set_download_progress(self, percent):
         value = max(0, min(100, int(float(percent or 0))))
@@ -328,3 +350,11 @@ class UpdateDialog(QDialog):
         self.install_btn.setText("다시 시도")
         self.install_btn.setEnabled(True)
         self.close_btn.setEnabled(True)
+        download_url = (
+            str(self.update_info.get("download_url", "") or "").strip()
+            if isinstance(self.update_info, dict)
+            else ""
+        )
+        self.manual_download_btn.setVisible(
+            AutoUpdater._is_allowed_download_url(download_url)
+        )

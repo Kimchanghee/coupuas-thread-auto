@@ -69,3 +69,41 @@ def test_update_dialog_emits_install_request_and_shows_progress():
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_update_dialog_offers_safe_manual_download_after_install_error(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    download_url = (
+        "https://github.com/Kimchanghee/coupuas-thread-auto/releases/"
+        "download/v3.0.74/CoupangThreadAutoSetup.exe"
+    )
+    opened_urls = []
+    monkeypatch.setattr(
+        "src.update_dialog.QDesktopServices.openUrl",
+        lambda url: opened_urls.append(url.toString()) or True,
+    )
+
+    dialog = UpdateDialog(
+        "3.0.73",
+        update_info={
+            "version": "3.0.74",
+            "size_mb": 101.3,
+            "changelog": "업데이트 안정성을 개선했습니다.",
+            "download_url": download_url,
+        },
+    )
+    dialog.show()
+    app.processEvents()
+
+    assert dialog.manual_download_btn.isHidden()
+
+    dialog.set_install_error("자동 업데이트를 완료하지 못했습니다.")
+    app.processEvents()
+    assert dialog.manual_download_btn.isVisible()
+
+    dialog.manual_download_btn.click()
+    assert opened_urls == [download_url]
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
