@@ -63,3 +63,20 @@ def test_release_notes_name_logout_return_without_development_terms():
     assert "release" not in body.lower()
     assert "return to login" not in body.lower()
     assert "업데이트가 끝까지 완료되지 않던 문제를 개선했습니다." not in body
+
+
+def test_release_notes_describe_security_notices_and_status_in_plain_korean():
+    body = release_notes.render_release_notes(
+        "v3.0.73",
+        [
+            "security(auth): restrict credential destinations",
+            "fix(web): simplify legacy release notices",
+            "feat(ops): add production readiness check",
+        ],
+    )
+
+    assert "로그인 정보와 이용 기록이 안전하게 처리되도록 보호를 강화했습니다." in body
+    assert "공지의 어려운 표현과 제목이 겹쳐 보이던 문제를 개선했습니다." in body
+    assert "서비스 연결 상태를 더 빠르게 확인할 수 있도록 개선했습니다." in body
+    for internal_term in ("credential", "legacy", "readiness", "auth", "ops"):
+        assert internal_term not in body.lower()

@@ -69,6 +69,12 @@ def user_facing_changes(subjects: list[str]) -> list[str]:
         searchable = f"{scope} {subject}".casefold()
         if "logout" in searchable:
             add("로그아웃하면 프로그램을 닫지 않고 로그인 화면으로 돌아가도록 개선했습니다.")
+        elif any(word in searchable for word in ("notice", "release copy", "release title")):
+            add("공지의 어려운 표현과 제목이 겹쳐 보이던 문제를 개선했습니다.")
+        elif prefix == "security" or any(
+            word in searchable for word in ("credential", "sensitive data", "trusted destination")
+        ):
+            add("로그인 정보와 이용 기록이 안전하게 처리되도록 보호를 강화했습니다.")
         elif any(word in searchable for word in ("font", "typeface", "typography")):
             add("업데이트 화면의 글자 모양을 다른 화면과 같게 맞췄습니다.")
         elif any(
@@ -89,6 +95,8 @@ def user_facing_changes(subjects: list[str]) -> list[str]:
             word in searchable for word in ("affiliate", "partner", "marketplace", "channel")
         ):
             add("이용할 수 있는 쇼핑 제휴 채널을 늘렸습니다.")
+        elif any(word in searchable for word in ("readiness", "service status")):
+            add("서비스 연결 상태를 더 빠르게 확인할 수 있도록 개선했습니다.")
         elif any(word in searchable for word in ("login", "signup", "register", "auth")):
             add("로그인과 회원가입 과정에서 불편했던 점을 개선했습니다.")
         elif prefix in {"fix", "bugfix", "security", "reliability", "perf"}:
