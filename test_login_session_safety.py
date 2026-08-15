@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
-from src import auth_client, login_window, main_window
+from src import auth_client, computer_use_agent, login_window, main_window
 
 
 def test_login_entrypoint_has_qtimer_for_immediate_transition():
@@ -83,6 +83,145 @@ def test_session_expiry_redirect_does_not_wait_for_logout_network_call():
 
     assert "auth_client.clear_local_session()" in redirect
     assert "auth_client.logout()" not in redirect
+
+
+def test_logout_returns_to_login_screen_without_quitting(monkeypatch):
+    events = []
+
+    class FakeCleanupAgent:
+        def __init__(self, **kwargs):
+            events.append(("cleanup_created", kwargs["profile_dir"]))
+
+        def clear_saved_session(self):
+            events.append(("cleanup_finished", None))
+
+    class FakeWindow:
+        is_running = False
+
+        def _get_profile_dir(self):
+            return "test-profile"
+
+        def _redirect_to_login_window(self, message, *, reason):
+            events.append(("redirect", (message, reason)))
+
+    monkeypatch.setattr(main_window, "ask_yes_no", lambda *_args: True)
+    monkeypatch.setattr(auth_client, "logout", lambda: events.append(("logout", None)))
+    monkeypatch.setattr(computer_use_agent, "ComputerUseAgent", FakeCleanupAgent)
+    monkeypatch.setattr(
+        main_window.QApplication,
+        "quit",
+        lambda: (_ for _ in ()).throw(AssertionError("logout must keep the app open")),
+    )
+
+    main_window.MainWindow._do_logout(FakeWindow())
+
+    assert events == [
+        ("logout", None),
+        ("cleanup_created", "test-profile"),
+        ("cleanup_finished", None),
+        (
+            "redirect",
+            ("로그아웃되었습니다. 다시 로그인해 주세요.", "logout"),
+        ),
+    ]
+
+
+def test_login_redirect_shows_login_before_closing_main(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    events = []
+
+    class FakePassword:
+        def clear(self):
+            events.append("password_cleared")
+
+    class FakeLoginWindow:
+        login_pw = FakePassword()
+        login_status = _Label()
+
+        def show(self):
+            events.append("login_shown")
+
+        def raise_(self):
+            events.append("login_raised")
+
+        def activateWindow(self):
+            events.append("login_activated")
+
+    class FakeWindow:
+        _redirecting_to_login = False
+        _closed = False
+        _login_ref = FakeLoginWindow()
+
+        def close(self):
+            events.append("main_closed")
+
+    window = FakeWindow()
+    app._main_window = window
+    monkeypatch.setattr(
+        auth_client,
+        "clear_local_session",
+        lambda: events.append("local_session_cleared"),
+    )
+
+    main_window.MainWindow._redirect_to_login_window(
+        window,
+        "로그아웃되었습니다. 다시 로그인해 주세요.",
+        reason="logout",
+    )
+
+    assert events == [
+        "local_session_cleared",
+        "password_cleared",
+        "login_shown",
+        "login_raised",
+        "login_activated",
+        "main_closed",
+    ]
+    assert window._force_close_for_relogin is True
+    assert app._main_window is None
+    assert window._login_ref.login_status.text == "로그아웃되었습니다. 다시 로그인해 주세요."
+
+
+def test_real_windows_show_login_again_after_logout(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+
+    class FakeCleanupAgent:
+        def __init__(self, **_kwargs):
+            pass
+
+        def clear_saved_session(self):
+            pass
+
+    monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})
+    monkeypatch.setattr(auth_client, "logout", lambda: None)
+    monkeypatch.setattr(auth_client, "clear_local_session", lambda: None)
+    monkeypatch.setattr(computer_use_agent, "ComputerUseAgent", FakeCleanupAgent)
+    monkeypatch.setattr(main_window, "ask_yes_no", lambda *_args: True)
+
+    login = login_window.LoginWindow()
+    window = main_window.MainWindow()
+    window._login_ref = login
+    window._get_profile_dir = lambda: "test-profile"
+    window._save_resume_state = lambda *_args: None
+    app._login_window = login
+    app._main_window = window
+    login.hide()
+    window.show()
+    app.processEvents()
+
+    window._do_logout()
+    app.processEvents()
+
+    assert login.isVisible() is True
+    assert window.isVisible() is False
+    assert app._main_window is None
+    assert login.login_pw.text() == ""
+    assert login.login_status.text() == "로그아웃되었습니다. 다시 로그인해 주세요."
+
+    login.close()
+    login.deleteLater()
+    window.deleteLater()
+    app.processEvents()
 
 
 def test_login_request_is_ignored_while_another_login_is_in_flight(monkeypatch):

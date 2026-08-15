@@ -6549,18 +6549,18 @@ class MainWindow(QMainWindow):
         self._server_label.setText("서버 연결: 오류")
         self.status_label.setText("연결 오류")
 
-    def _redirect_to_login_window(self, status_message: str = ""):
-        """세션 만료 시 로그인 창으로 복귀하고 현재 메인 창을 정리한다."""
+    def _redirect_to_login_window(self, status_message: str = "", *, reason: str = "session_expired"):
+        """로그인 창으로 복귀하고 현재 메인 창을 정리한다."""
         if self._redirecting_to_login or self._closed:
             return
         self._redirecting_to_login = True
-        logger.warning("세션 만료로 로그인 창 복귀를 시작합니다.")
+        logger.info("로그인 창 복귀를 시작합니다: reason=%s", reason)
 
         try:
             if hasattr(self, "_heartbeat_timer") and self._heartbeat_timer is not None:
                 self._heartbeat_timer.stop()
         except Exception:
-            logger.exception("세션 만료 복귀 중 하트비트 타이머 중지 실패")
+            logger.exception("로그인 창 복귀 중 하트비트 타이머 중지 실패")
 
         try:
             from src import auth_client
@@ -6568,7 +6568,7 @@ class MainWindow(QMainWindow):
             # local token immediately instead of blocking the UI on logout I/O.
             auth_client.clear_local_session()
         except Exception:
-            logger.debug("세션 만료 복귀 중 로컬 세션 정리에 실패했습니다.", exc_info=True)
+            logger.debug("로그인 창 복귀 중 로컬 세션 정리에 실패했습니다.", exc_info=True)
 
         login_win = getattr(self, "_login_ref", None)
         if login_win is not None:
@@ -6580,7 +6580,7 @@ class MainWindow(QMainWindow):
                 login_win.raise_()
                 login_win.activateWindow()
             except Exception:
-                logger.exception("세션 만료 복귀 중 로그인 창 표시에 실패했습니다.")
+                logger.exception("로그인 창 복귀 중 로그인 창 표시에 실패했습니다.")
 
         app = QApplication.instance()
         if app is not None and getattr(app, "_main_window", None) is self:
@@ -6590,7 +6590,7 @@ class MainWindow(QMainWindow):
         self.close()
 
     def _do_logout(self):
-        """로그아웃 처리 후 앱 종료."""
+        """로그아웃 처리 후 로그인 화면으로 복귀."""
         logger.info("로그아웃 요청")
         if self.is_running:
             show_warning(self, "알림", "작업 중에는 로그아웃할 수 없습니다.\n먼저 작업을 중지해주세요.")
@@ -6598,7 +6598,7 @@ class MainWindow(QMainWindow):
         if ask_yes_no(
             self,
             "로그아웃",
-            "로그아웃하고 프로그램을 종료하시겠습니까?",
+            "로그아웃하고 로그인 화면으로 돌아가시겠습니까?",
         ):
             try:
                 from src import auth_client
@@ -6616,7 +6616,10 @@ class MainWindow(QMainWindow):
                 cleanup_agent.clear_saved_session()
             except Exception:
                 logger.exception("로그아웃 중 저장된 브라우저 세션 삭제 실패")
-            QApplication.quit()
+            self._redirect_to_login_window(
+                "로그아웃되었습니다. 다시 로그인해 주세요.",
+                reason="logout",
+            )
 
     def check_for_updates(self):
         """Open the update center and use the same safe installation path."""
