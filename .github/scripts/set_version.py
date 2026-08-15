@@ -15,7 +15,7 @@ def _normalize_version(value: str) -> tuple[str, str]:
     raw = str(value or "").strip()
     if raw.startswith("refs/tags/"):
         raw = raw.rsplit("/", 1)[-1]
-    if not re.fullmatch(r"v?\d+\.\d+\.\d+", raw):
+    if not re.fullmatch(r"v?[0-9]{1,5}(?:\.[0-9]{1,5}){2}", raw):
         raise SystemExit(f"Invalid semantic version: {value!r}")
     dotted = raw[1:] if raw.startswith("v") else raw
     return f"v{dotted}", dotted

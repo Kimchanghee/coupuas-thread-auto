@@ -96,6 +96,14 @@ class ThreadsPlaywrightHelper:
             print(f"  로그인 확인 중 오류: {e}")
             return False
 
+    @staticmethod
+    def _is_trusted_session_cookie_domain(value: str) -> bool:
+        domain = str(value or "").strip().lower().lstrip(".")
+        return any(
+            domain == root or domain.endswith(f".{root}")
+            for root in ("threads.net", "threads.com", "instagram.com")
+        )
+
     def _has_auth_cookie(self) -> bool:
         """Return True when browser context has authenticated session cookies."""
         try:
@@ -111,12 +119,8 @@ class ThreadsPlaywrightHelper:
             if not isinstance(cookie, dict):
                 continue
             name = str(cookie.get("name") or "").strip().lower()
-            domain = str(cookie.get("domain") or "").strip().lower()
-            if name in auth_cookie_names and (
-                "threads.net" in domain
-                or "threads.com" in domain
-                or "instagram.com" in domain
-            ):
+            trusted_domain = self._is_trusted_session_cookie_domain(cookie.get("domain"))
+            if name in auth_cookie_names and trusted_domain:
                 return True
         return False
 

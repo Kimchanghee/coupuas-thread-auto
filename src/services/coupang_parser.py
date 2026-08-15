@@ -833,7 +833,7 @@ Access Denied 페이지이거나 상품 정보를 찾을 수 없으면 빈 객�
         """상품명에서 검색 키워드 추출"""
         # 불필요한 문자 제거
         keywords = re.sub(r'[\[\]()（）\d+개입\d+ml\d+g\d+kg\d+팩]', ' ', title)
-        keywords = re.sub(r'[^\w\s가-힣a-zA-Z]', ' ', keywords)
+        keywords = re.sub(r'[^\w\s]', ' ', keywords)
 
         # 중복 공백 제거
         keywords = re.sub(r'\s+', ' ', keywords).strip()

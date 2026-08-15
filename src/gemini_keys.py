@@ -169,6 +169,15 @@ def _classify_probe_error(exc: BaseException) -> Optional[bool]:
     return False
 
 
+def _safe_probe_error_message(exc: BaseException) -> str:
+    message = str(exc or "").lower()
+    if any(marker in message for marker in _NETWORK_ERROR_MARKERS):
+        return "네트워크 상태를 확인할 수 없어 API 키 검증을 보류했습니다."
+    if any(marker in message for marker in _KEY_ERROR_MARKERS):
+        return "API 키가 유효하지 않거나 사용 한도에 도달했습니다."
+    return "API 키를 확인하지 못했습니다."
+
+
 def probe_gemini_api_key(api_key: str) -> Tuple[Optional[bool], str]:
     key = str(api_key or "").strip()
     if len(key) < 10:
@@ -191,7 +200,7 @@ def probe_gemini_api_key(api_key: str) -> Tuple[Optional[bool], str]:
         return None, "google-genai SDK가 없어 API 키 검증을 건너뜁니다."
     except Exception as exc:
         verdict = _classify_probe_error(exc)
-        return verdict, str(exc)
+        return verdict, _safe_probe_error_message(exc)
 
 
 def select_working_gemini_api_key(validate: bool = True) -> str:

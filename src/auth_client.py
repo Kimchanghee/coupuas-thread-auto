@@ -64,9 +64,23 @@ _DEPRECATED_API_SERVER_HOSTS = {
 }
 
 
-def _normalize_api_server_url(raw: str) -> str:
+def _normalize_api_server_url(raw: str, *, frozen: Optional[bool] = None) -> str:
     url = (raw or "").strip().rstrip("/")
     if not url or url in _DEPRECATED_API_SERVER_URLS:
+        return _DEFAULT_API_SERVER_URL
+    is_frozen = getattr(sys, "frozen", False) if frozen is None else bool(frozen)
+    if is_frozen:
+        return _DEFAULT_API_SERVER_URL
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").strip().lower()
+    if parsed.scheme == "http" and host in {"localhost", "127.0.0.1", "::1"}:
+        return url
+    trusted_override = (
+        os.getenv("THREAD_AUTO_ALLOW_CUSTOM_API_URL", "").strip() == "1"
+        and os.getenv("THREAD_AUTO_TRUST_CUSTOM_API_URL", "").strip() == "1"
+    )
+    if url != _DEFAULT_API_SERVER_URL and not trusted_override:
         return _DEFAULT_API_SERVER_URL
     return url
 
@@ -158,6 +172,7 @@ def _resolve_tls_pin_set() -> set[str]:
 
 def _get_server_cert_sha256(host: str, port: int = 443) -> str:
     context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     with socket.create_connection((host, port), timeout=5) as sock:
         with context.wrap_socket(sock, server_hostname=host) as secure_sock:
             der = secure_sock.getpeercert(binary_form=True)
@@ -189,6 +204,14 @@ def _check_api_url() -> Optional[str]:
         return f"서버 URL 형식이 올바르지 않습니다: {API_SERVER_URL}"
 
     parsed = urlparse(API_SERVER_URL)
+    if (
+        parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        return "보안 정책으로 올바르지 않은 API 서버 주소를 차단했습니다."
     if parsed.scheme == "http":
         host = (parsed.hostname or "").lower()
         if getattr(sys, "frozen", False):
@@ -1763,8 +1786,8 @@ def logout() -> bool:
                 timeout=10,
             )
             server_ok = resp.status_code == 200
-        except Exception as e:
-            logger.warning("로그아웃 API 호출 중 오류가 발생했지만 무시합니다: %s", e)
+        except Exception:
+            logger.warning("로그아웃 API 호출 중 통신 오류가 발생했습니다.")
             server_ok = False
 
     clear_local_session()
@@ -2040,16 +2063,15 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
             with _LOG_ACTION_FAILURE_LOCK:
                 _LOG_ACTION_FAILURE_COUNT = 0
                 _LOG_ACTION_FAILURE_SUPPRESS_UNTIL = 0.0
-    except Exception as e:
+    except Exception:
         with _LOG_ACTION_FAILURE_LOCK:
             _LOG_ACTION_FAILURE_COUNT += 1
             _LOG_ACTION_FAILURE_SUPPRESS_UNTIL = time.monotonic() + _LOG_ACTION_FAILURE_SUPPRESS_SECONDS
             count = _LOG_ACTION_FAILURE_COUNT
         logger.debug(
-            "활동 로그 전송에 실패했습니다(%s회). %.0f초 동안 재시도를 줄입니다: %s",
+            "활동 로그 전송에 실패했습니다(%s회). %.0f초 동안 재시도를 줄입니다.",
             count,
             _LOG_ACTION_FAILURE_SUPPRESS_SECONDS,
-            e,
         )
 
 

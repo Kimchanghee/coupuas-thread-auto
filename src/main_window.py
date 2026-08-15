@@ -4819,7 +4819,7 @@ class MainWindow(QMainWindow):
                 level="ERROR",
             )
             show_error(self, "결제 요청 실패", "결제 URL을 받지 못했습니다. 관리자에게 문의해주세요.")
-            logger.warning("결제 성공 응답에 URL 누락: %s", result)
+            logger.warning("결제 성공 응답에 결제 주소가 누락되었습니다.")
             self._set_payment_busy(False, "결제 페이지 주소를 받지 못했습니다.")
             return
 

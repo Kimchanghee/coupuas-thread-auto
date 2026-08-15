@@ -114,7 +114,11 @@ def _sanitize_log_text(text: str) -> str:
     safe = str(text or "")
     for pattern, replacement in _SENSITIVE_PATTERNS:
         safe = pattern.sub(replacement, safe)
-    return safe
+    safe = "".join(
+        " " if char in {"\r", "\n"} or (ord(char) < 32 and char != "\t") else char
+        for char in safe
+    )
+    return re.sub(r"[ \t]+", " ", safe).strip()
 
 
 def _localize_log_text(text: str) -> str:

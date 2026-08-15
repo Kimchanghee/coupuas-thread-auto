@@ -2,7 +2,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.services.managed_ai_client import ManagedAiClient, ManagedAiClientError
+from src.services.managed_ai_client import (
+    DEFAULT_MANAGED_AI_URL,
+    ManagedAiClient,
+    ManagedAiClientError,
+)
 
 
 def _success_payload():
@@ -41,7 +45,7 @@ def test_managed_client_uses_application_login(monkeypatch):
     response.json.return_value = _success_payload()
     session = Mock()
     session.post.return_value = response
-    client = ManagedAiClient("https://managed.example", session=session)
+    client = ManagedAiClient(DEFAULT_MANAGED_AI_URL, session=session)
 
     result = client.generate_variants(
         {
@@ -68,7 +72,7 @@ def test_managed_client_requires_login(monkeypatch):
         staticmethod(lambda: {}),
     )
     with pytest.raises(ManagedAiClientError) as exc_info:
-        ManagedAiClient("https://managed.example").generate_variants(
+        ManagedAiClient(DEFAULT_MANAGED_AI_URL).generate_variants(
             {"title": "상품", "original_url": "https://example.com"}
         )
     assert exc_info.value.code == "AUTH_REQUIRED"
@@ -88,10 +92,25 @@ def test_managed_client_surfaces_subscription_error(monkeypatch):
     }
     session = Mock()
     session.post.return_value = response
-    client = ManagedAiClient("https://managed.example", session=session)
+    client = ManagedAiClient(DEFAULT_MANAGED_AI_URL, session=session)
 
     with pytest.raises(ManagedAiClientError) as exc_info:
         client.generate_variants(
             {"title": "상품", "original_url": "https://example.com"}
         )
     assert exc_info.value.code == "SUBSCRIPTION_REQUIRED"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://coupuas-thread-auto-ten.vercel.app",
+        "https://evil.example",
+        "https://coupuas-thread-auto-ten.vercel.app.evil.example",
+        "https://user:pass@coupuas-thread-auto-ten.vercel.app",
+        "https://coupuas-thread-auto-ten.vercel.app/other",
+    ],
+)
+def test_managed_client_rejects_untrusted_login_token_destinations(base_url):
+    with pytest.raises(ValueError, match="not trusted"):
+        ManagedAiClient(base_url)

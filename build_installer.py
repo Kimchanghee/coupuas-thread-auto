@@ -12,18 +12,26 @@ from pathlib import Path
 APP_EXE_PATH = Path("dist") / "CoupangThreadAuto.exe"
 INSTALLER_SCRIPT = Path("installer") / "CoupangThreadAuto.iss"
 INSTALLER_OUTPUT = Path("dist") / "CoupangThreadAutoSetup.exe"
+_VERSION_PATTERN = re.compile(r"[0-9]{1,5}(?:\.[0-9]{1,5}){2}")
+
+
+def _validated_version(value: str) -> str:
+    normalized = str(value or "").strip().lstrip("v")
+    if not _VERSION_PATTERN.fullmatch(normalized):
+        raise ValueError("Application version must use major.minor.patch digits")
+    return normalized
 
 
 def _resolve_app_version() -> str:
     env_version = str(os.getenv("COUPUAS_APP_VERSION", "")).strip()
     if env_version:
-        return env_version.lstrip("v")
+        return _validated_version(env_version)
 
     try:
         main_py = Path("login_main.py").read_text(encoding="utf-8")
         match = re.search(r'^\s*VERSION\s*=\s*["\']([^"\']+)["\']', main_py, re.MULTILINE)
         if match:
-            return str(match.group(1)).strip().lstrip("v")
+            return _validated_version(match.group(1))
     except Exception:
         pass
 

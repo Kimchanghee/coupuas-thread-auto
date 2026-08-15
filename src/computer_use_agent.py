@@ -117,7 +117,7 @@ class ComputerUseAgent:
 
         self.profile_name = self._normalize_profile_name(profile_dir)
         self.profile_path = self._resolve_profile_path(self.profile_name)
-        self.legacy_profile_path = Path(os.path.abspath(profile_dir))
+        self.legacy_profile_path = self._resolve_legacy_profile_path(profile_dir)
         self.profile_dir = str(self.profile_path)
 
     @classmethod
@@ -207,6 +207,22 @@ class ComputerUseAgent:
         secure_dir_permissions(profile_path)
         return profile_path
 
+    @staticmethod
+    def _resolve_legacy_profile_path(value: str) -> Optional[Path]:
+        """Confine one-time plaintext migration to a direct child of the app cwd."""
+        raw = str(value or "").strip()
+        candidate = Path(raw)
+        if (
+            not raw
+            or candidate.is_absolute()
+            or len(candidate.parts) != 1
+            or candidate.name in {"", ".", ".."}
+        ):
+            return None
+        root = Path.cwd().resolve()
+        resolved = (root / candidate.name).resolve(strict=False)
+        return resolved if resolved.parent == root else None
+
     def _get_storage_state_path(self) -> str:
         return str(self.profile_path / "storage_state.sec")
 
@@ -224,8 +240,12 @@ class ComputerUseAgent:
                 pass
 
         # Legacy plaintext migration path.
-        legacy_path = self.legacy_profile_path / "storage_state.json"
-        if legacy_path.exists():
+        legacy_path = (
+            self.legacy_profile_path / "storage_state.json"
+            if self.legacy_profile_path is not None
+            else None
+        )
+        if legacy_path is not None and legacy_path.exists():
             try:
                 data = json.loads(legacy_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -239,12 +259,16 @@ class ComputerUseAgent:
 
     def _write_storage_state(self, state: Dict[str, Any]) -> bool:
         secure_path = Path(self._get_storage_state_path())
-        legacy_path = self.legacy_profile_path / "storage_state.json"
+        legacy_path = (
+            self.legacy_profile_path / "storage_state.json"
+            if self.legacy_profile_path is not None
+            else None
+        )
         payload = json.dumps(state, ensure_ascii=False)
         protected = protect_secret(payload, f"shorts_thread_maker.session.{self.profile_name}")
         if not protected:
             # Fail closed: remove legacy plaintext even when secure storage is unavailable.
-            if legacy_path.exists():
+            if legacy_path is not None and legacy_path.exists():
                 try:
                     legacy_path.unlink()
                 except OSError:
@@ -255,7 +279,7 @@ class ComputerUseAgent:
         secure_file_permissions(secure_path)
 
         # Remove legacy plaintext if present.
-        if legacy_path.exists():
+        if legacy_path is not None and legacy_path.exists():
             try:
                 legacy_path.unlink()
             except OSError:
@@ -443,8 +467,14 @@ class ComputerUseAgent:
     def clear_saved_session(self) -> None:
         """Delete persisted browser session state for this profile."""
         secure_path = Path(self._get_storage_state_path())
-        legacy_path = self.legacy_profile_path / "storage_state.json"
+        legacy_path = (
+            self.legacy_profile_path / "storage_state.json"
+            if self.legacy_profile_path is not None
+            else None
+        )
         for path in (secure_path, legacy_path):
+            if path is None:
+                continue
             try:
                 if path.exists():
                     path.unlink()

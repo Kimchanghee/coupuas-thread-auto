@@ -6,11 +6,33 @@ import os
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
 
 DEFAULT_MANAGED_AI_URL = "https://coupuas-thread-auto-ten.vercel.app"
+_ALLOWED_MANAGED_AI_HOSTS = frozenset({"coupuas-thread-auto-ten.vercel.app"})
+
+
+def _trusted_managed_ai_base_url(value: str) -> str:
+    """Return an owned HTTPS origin before attaching a login token."""
+    candidate = str(value or DEFAULT_MANAGED_AI_URL).strip().rstrip("/")
+    parsed = urlparse(candidate)
+    host = (parsed.hostname or "").strip().lower()
+    if (
+        parsed.scheme != "https"
+        or host not in _ALLOWED_MANAGED_AI_HOSTS
+        or parsed.username
+        or parsed.password
+        or parsed.port not in {None, 443}
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Managed AI service URL is not trusted")
+    return f"https://{host}"
 
 
 @dataclass(frozen=True)
@@ -54,7 +76,7 @@ class ManagedAiClient:
             or os.getenv("THREAD_AUTO_MANAGED_AI_URL", "")
             or DEFAULT_MANAGED_AI_URL
         ).strip()
-        self.base_url = resolved.rstrip("/")
+        self.base_url = _trusted_managed_ai_base_url(resolved)
         self._session = session or requests.Session()
         self.timeout = float(timeout)
 

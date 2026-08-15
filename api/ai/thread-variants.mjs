@@ -12,9 +12,9 @@ import {
 } from "../_lib/managed-ai.mjs";
 import { gatewayToken } from "../_lib/gateway-auth.mjs";
 
-const AUTH_API_URL = String(
-  process.env.AUTH_API_URL || "https://newshopping-shorts-auth.vercel.app",
-).replace(/\/$/, "");
+// Authentication tokens must never be forwarded to a configurable origin.
+// Keep the production authentication boundary pinned to the owned service.
+const AUTH_API_URL = "https://newshopping-shorts-auth.vercel.app";
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const PRIMARY_MODEL = process.env.PRIMARY_AI_MODEL || "xai/grok-4.3";
 
