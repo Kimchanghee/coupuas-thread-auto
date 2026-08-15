@@ -183,7 +183,7 @@ def test_main_builds_with_explicit_makeappx_path(monkeypatch, tmp_path, capsys):
 
     assert result == 0
     assert captured["makeappx_path"] == makeappx.resolve()
-    assert captured["version"] == "3.0.71.0"
+    assert captured["version"] == "3.0.72.0"
     assert "package.msix" in capsys.readouterr().out
 
 
@@ -212,13 +212,13 @@ def test_main_accepts_explicit_store_version(monkeypatch, tmp_path):
             "--output-dir",
             str(tmp_path / "out"),
             "--version",
-            "v3.0.71",
+            "v3.0.72",
         ],
         repo_root=REPO_ROOT,
     )
 
     assert result == 0
-    assert captured["version"] == "3.0.71.0"
+    assert captured["version"] == "3.0.72.0"
 
 
 def test_store_build_script_can_be_invoked_directly():
