@@ -75,7 +75,8 @@ def test_installer_version_rejects_compiler_arguments():
 def test_release_workflow_has_verified_installer_fallback():
     workflow = Path(".github/workflows/build-release.yml").read_text(encoding="utf-8")
 
-    assert "foreach ($attempt in 1..3)" in workflow
+    assert "choco install innosetup" not in workflow
+    assert workflow.index("$isccCandidates = @(") < workflow.index("$downloadUrl =")
     assert "jrsoftware/issrc/releases/download/is-6_6_1/innosetup-6.6.1.exe" in workflow
     assert "d243ce440c02705530699554fb9612b9b2bd7a2a90629cdb7f41e66f5faeb91f" in workflow
     assert "Inno Setup installer checksum mismatch" in workflow
