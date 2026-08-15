@@ -208,6 +208,8 @@ jobs:
           if (-not $installed) {
             Write-Warning "Chocolatey was unavailable. Using the verified immutable upstream release."
             $installerPath = Join-Path $env:RUNNER_TEMP "innosetup-6.6.1.exe"
+            $portableToolDir = Join-Path $env:RUNNER_TEMP "Inno Setup 6"
+            $installLogPath = Join-Path $env:RUNNER_TEMP "innosetup-6.6.1-install.log"
             $downloadUrl = "https://github.com/jrsoftware/issrc/releases/download/is-6_6_1/innosetup-6.6.1.exe"
             $expectedHash = "d243ce440c02705530699554fb9612b9b2bd7a2a90629cdb7f41e66f5faeb91f"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
@@ -215,13 +217,37 @@ jobs:
             if ($actualHash -ne $expectedHash) {
               throw "Inno Setup installer checksum mismatch."
             }
-            $process = Start-Process -FilePath $installerPath -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $installerPath
+            $startInfo.UseShellExecute = $false
+            foreach ($argument in @(
+              "/PORTABLE=1",
+              "/SILENT",
+              "/CURRENTUSER",
+              "/SUPPRESSMSGBOXES",
+              "/NORESTART",
+              "/SP-",
+              "/DIR=$portableToolDir",
+              "/LOG=$installLogPath"
+            )) {
+              [void]$startInfo.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::Start($startInfo)
+            if (-not $process.WaitForExit(120000)) {
+              $process.Kill($true)
+              throw "Inno Setup fallback installation timed out."
+            }
             if ($process.ExitCode -notin 0, 1641, 3010) {
+              if (Test-Path -LiteralPath $installLogPath) {
+                Get-Content -LiteralPath $installLogPath -Tail 100
+              }
               throw "Inno Setup fallback installation failed with exit code $($process.ExitCode)."
             }
           }
 
           $isccCandidates = @(
+            (Join-Path $env:RUNNER_TEMP "Inno Setup 6\ISCC.exe"),
             (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
             (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
             (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
