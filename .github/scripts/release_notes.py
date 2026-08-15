@@ -14,6 +14,8 @@ GROUPS = (
     ("보안 및 안정성", ("security", "reliability", "perf")),
 )
 
+GENERIC_IMPROVEMENT = "각종 오류와 안정성 문제를 개선했습니다."
+
 
 def normalize_subject(subject: str) -> tuple[str, str]:
     text = str(subject or "").strip()
@@ -44,32 +46,76 @@ def categorize_subjects(subjects: list[str]) -> dict[str, list[str]]:
     return result
 
 
+def _subject_parts(subject: str) -> tuple[str, str, str]:
+    text = str(subject or "").strip()
+    match = re.match(r"^([a-zA-Z]+)(?:\(([^)]*)\))?!?:\s*(.+)$", text)
+    if not match:
+        return "other", "", text
+    return match.group(1).lower(), (match.group(2) or "").lower(), match.group(3).strip()
+
+
+def user_facing_changes(subjects: list[str]) -> list[str]:
+    """Turn internal commit subjects into short, plain Korean release notes."""
+    changes: list[str] = []
+
+    def add(message: str) -> None:
+        if message and message not in changes:
+            changes.append(message)
+
+    for raw in subjects:
+        prefix, scope, subject = _subject_parts(raw)
+        if not subject or subject.lower().startswith("merge "):
+            continue
+        searchable = f"{scope} {subject}".casefold()
+        if any(word in searchable for word in ("font", "typeface", "typography")):
+            add("업데이트 화면의 글자 모양을 다른 화면과 같게 맞췄습니다.")
+        elif any(
+            word in searchable
+            for word in (
+                "update",
+                "updater",
+                "release",
+                "installer",
+                "install",
+                "signature",
+                "signing",
+                "authenticode",
+                "timestamp",
+            )
+        ):
+            add("업데이트가 끝까지 완료되지 않던 문제를 개선했습니다.")
+        elif prefix in {"feat", "feature"} and any(
+            word in searchable for word in ("affiliate", "partner", "marketplace", "channel")
+        ):
+            add("이용할 수 있는 쇼핑 제휴 채널을 늘렸습니다.")
+        elif any(word in searchable for word in ("login", "signup", "register", "auth")):
+            add("로그인과 회원가입 과정에서 불편했던 점을 개선했습니다.")
+        elif prefix in {"fix", "bugfix", "security", "reliability", "perf"}:
+            add(GENERIC_IMPROVEMENT)
+        elif prefix in {"feat", "feature"} and re.search(r"[가-힣]", subject):
+            add(subject if subject.endswith((".", "!", "?")) else f"{subject}.")
+
+    add(GENERIC_IMPROVEMENT)
+    return changes
+
+
 def render_release_notes(version: str, subjects: list[str]) -> str:
     normalized_version = str(version or "").strip()
-    sections = categorize_subjects(subjects)
+    changes = user_facing_changes(subjects)
     lines = [
         f"# Thread Auto {normalized_version}",
         "",
-        "이번 버전에 포함된 주요 변경 사항입니다.",
+        "## 이번 버전에서 달라진 점",
+        "",
+        *(f"- {item}" for item in changes),
     ]
-    wrote_change = False
-    for title, _prefixes in (*GROUPS, ("그 밖의 변경 사항", ())):
-        items = sections[title]
-        if not items:
-            continue
-        wrote_change = True
-        lines.extend(["", f"## {title}", ""])
-        lines.extend(f"- {item}" for item in items)
-    if not wrote_change:
-        lines.extend(["", "## 주요 변경 사항", "", "- 안정성과 배포 구성을 개선했습니다."])
     lines.extend(
         [
             "",
-            "## Windows 설치",
+            "## 설치 안내",
             "",
-            "- 권장 설치 파일: `CoupangThreadAutoSetup.exe`",
-            "- 각 실행 파일의 SHA-256 체크섬을 함께 제공합니다.",
-            "- 기존 설정과 계정별 대기열은 업데이트 후에도 유지됩니다.",
+            "- 아래 설치 파일을 받아 실행해 주세요.",
+            "- 사용하던 설정과 남은 작업은 그대로 유지됩니다.",
             "",
         ]
     )
