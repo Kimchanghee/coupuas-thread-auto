@@ -67,6 +67,34 @@ def test_verify_authenticode_accepts_localized_pinned_self_signed_chain_error(mo
     assert updater._verify_authenticode_signature("update.exe") is True
 
 
+def test_verify_authenticode_explicitly_loads_windows_security_module(monkeypatch):
+    monkeypatch.setattr(auto_updater.os, "name", "nt")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
+    captured = {}
+
+    def _fake_run(args, **kwargs):
+        captured["script"] = args[-1]
+        return _Completed(
+            {
+                "Status": "Valid",
+                "StatusMessage": "",
+                "Subject": "CN=YM, O=YM",
+                "Thumbprint": "ABC123",
+                "ChainStatuses": [],
+            }
+        )
+
+    monkeypatch.setattr(auto_updater, "run_process", _fake_run)
+
+    updater = auto_updater.AutoUpdater("3.0.75")
+
+    assert updater._verify_authenticode_signature("update.exe") is True
+    assert "Microsoft.PowerShell.Security.psd1" in captured["script"]
+    assert captured["script"].index("Import-Module") < captured["script"].index(
+        "Get-AuthenticodeSignature"
+    )
+
+
 def test_verify_authenticode_rejects_hash_mismatch_even_when_thumbprint_matches(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
     monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
@@ -222,7 +250,11 @@ def test_installer_runner_waits_installs_relaunches_and_self_cleans(tmp_path, mo
     assert "Get-Process -Id $ParentPid" in content
     assert "[System.IO.File]::Open" in content
     assert "Get-FileHash -LiteralPath $Installer" in content
+    assert "Microsoft.PowerShell.Security.psd1" in content
+    assert content.index("Import-Module") < content.index("Get-AuthenticodeSignature")
     assert "Get-AuthenticodeSignature -FilePath $Installer" in content
+    assert "ChainStatus" in content
+    assert "$statusMessage -match" not in content
     assert "Installer signer thumbprint is not trusted" in content
     assert "Start-Process -FilePath $Installer" in content
     assert "Start-Process -FilePath $AppExe" in content
@@ -239,4 +271,9 @@ def test_standalone_runner_locks_update_during_verification(tmp_path, monkeypatc
     assert "$updateLock = [System.IO.File]::Open" in content
     assert "[System.IO.FileShare]::Read" in content
     assert "Get-FileHash -LiteralPath $UpdateFile" in content
+    assert "Microsoft.PowerShell.Security.psd1" in content
+    assert content.index("Import-Module") < content.index("Get-AuthenticodeSignature")
+    assert "ChainStatus" in content
+    assert "$status -ne 'Valid'" in content
+    assert "UntrustedRoot" in content
     assert "$updateLock.Dispose()" in content

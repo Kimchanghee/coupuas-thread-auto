@@ -214,6 +214,9 @@ class AutoUpdater:
         escaped_file_path = str(file_path).replace("'", "''")
         ps_script = (
             "$ErrorActionPreference='Stop';"
+            "$securityModule=Join-Path $env:SystemRoot "
+            "'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1';"
+            "Import-Module -Name $securityModule -ErrorAction Stop;"
             f"$sig=Get-AuthenticodeSignature -FilePath '{escaped_file_path}';"
             "$cert=$sig.SignerCertificate;"
             "$chainStatuses=@();"
@@ -532,6 +535,8 @@ class AutoUpdater:
 )
 $ErrorActionPreference = 'Stop'
 $installerLock = $null
+$securityModule = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'
+Import-Module -Name $securityModule -ErrorAction Stop
 
 function Normalize-Identity([string]$value) {{
     if (-not $value) {{ return '' }}
@@ -585,6 +590,14 @@ try {{
     $signature = Get-AuthenticodeSignature -FilePath $Installer
     $certificate = $signature.SignerCertificate
     if (-not $certificate) {{ throw 'Installer signer certificate is missing.' }}
+    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    try {{
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        [void]$chain.Build($certificate)
+        $chainStatuses = @($chain.ChainStatus | ForEach-Object {{ $_.Status.ToString() }})
+    }} finally {{
+        $chain.Dispose()
+    }}
     $thumbprint = $certificate.Thumbprint.ToUpperInvariant()
     $trustedThumbSet = Parse-TrustedList $TrustedThumbprints $false
     if ($trustedThumbSet.Count -eq 0 -or -not $trustedThumbSet.Contains($thumbprint)) {{
@@ -604,10 +617,12 @@ try {{
 
     $status = $signature.Status.ToString()
     if ($status -ne 'Valid') {{
-        $statusMessage = [string]$signature.StatusMessage
-        $chainOnly = $status -eq 'NotTrusted' -or (
-            $status -eq 'UnknownError' -and
-            $statusMessage -match '(?i)not trusted|root certificate|trust provider'
+        $allowedChainErrors = @('UntrustedRoot', 'PartialChain')
+        $unexpectedChainErrors = @($chainStatuses | Where-Object {{ $_ -notin $allowedChainErrors }})
+        $chainOnly = (
+            $status -in @('NotTrusted', 'UnknownError') -and
+            $chainStatuses.Count -gt 0 -and
+            $unexpectedChainErrors.Count -eq 0
         )
         if (-not $chainOnly) {{
             throw ('Installer signature status is not allowed: ' + $status)
@@ -660,6 +675,8 @@ try {{
 )
 $ErrorActionPreference = 'Stop'
 $updateLock = $null
+$securityModule = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'
+Import-Module -Name $securityModule -ErrorAction Stop
 
 function Normalize-Identity([string]$value) {
     if (-not $value) { return '' }
@@ -710,12 +727,18 @@ try {
     }
     $sig = Get-AuthenticodeSignature -FilePath $UpdateFile
     $status = $sig.Status.ToString()
-    if ($status -ne 'Valid') {
-        throw ('Update signature status is not allowed: ' + $status)
-    }
     $cert = $sig.SignerCertificate
     if (-not $cert) {
         throw 'Update signer certificate is missing.'
+    }
+
+    $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    try {
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        [void]$chain.Build($cert)
+        $chainStatuses = @($chain.ChainStatus | ForEach-Object { $_.Status.ToString() })
+    } finally {
+        $chain.Dispose()
     }
 
     $thumb = ''
@@ -723,8 +746,21 @@ try {
         $thumb = $cert.Thumbprint.ToUpperInvariant()
     }
     $trustedThumbSet = Parse-TrustedList($TrustedThumbprints)
-    if ($trustedThumbSet.Count -gt 0 -and -not $trustedThumbSet.Contains($thumb)) {
+    if ($trustedThumbSet.Count -eq 0 -or -not $trustedThumbSet.Contains($thumb)) {
         throw 'Update signer thumbprint is not trusted.'
+    }
+
+    if ($status -ne 'Valid') {
+        $allowedChainErrors = @('UntrustedRoot', 'PartialChain')
+        $unexpectedChainErrors = @($chainStatuses | Where-Object { $_ -notin $allowedChainErrors })
+        $chainOnly = (
+            $status -in @('NotTrusted', 'UnknownError') -and
+            $chainStatuses.Count -gt 0 -and
+            $unexpectedChainErrors.Count -eq 0
+        )
+        if (-not $chainOnly) {
+            throw ('Update signature status is not allowed: ' + $status)
+        }
     }
 
     $trustedPublisherSet = New-Object 'System.Collections.Generic.HashSet[string]'
