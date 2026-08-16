@@ -247,6 +247,49 @@ def test_login_request_is_ignored_while_another_login_is_in_flight(monkeypatch):
     app.processEvents()
 
 
+def test_successful_registration_uses_issued_session_without_second_login(monkeypatch):
+    emitted = []
+
+    class _Signal:
+        def emit(self, value):
+            emitted.append(value)
+
+    class FakeWindow:
+        btn_register = _Button()
+        login_success = _Signal()
+
+    monkeypatch.setattr(
+        login_window,
+        "show_info",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("successful registration should enter the app immediately")
+        ),
+    )
+    result = {
+        "success": True,
+        "data": {
+            "user_id": 42,
+            "username": "new_user",
+            "token": "issued-token",
+            "work_count": 5,
+        },
+    }
+
+    login_window.LoginWindow._on_register_result(FakeWindow(), result)
+
+    assert emitted == [
+        {
+            "status": True,
+            "id": 42,
+            "user_id": 42,
+            "username": "new_user",
+            "key": "issued-token",
+            "token": "issued-token",
+            "work_count": 5,
+        }
+    ]
+
+
 def test_duplicate_login_is_blocked_without_session_replacement():
     login_attempts = []
 

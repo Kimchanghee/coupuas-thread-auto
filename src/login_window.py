@@ -774,6 +774,26 @@ class LoginWindow(QMainWindow):
         self.btn_register.setText("회원가입")
 
         if result.get("success"):
+            account = result.get("data") if isinstance(result.get("data"), dict) else {}
+            user_id = account.get("user_id")
+            token = str(account.get("token") or "").strip()
+            if user_id is not None and token:
+                username = str(
+                    account.get("username") or self.reg_username.text().strip().lower()
+                )
+                self.login_success.emit(
+                    {
+                        "status": True,
+                        "id": user_id,
+                        "user_id": user_id,
+                        "username": username,
+                        "key": token,
+                        "token": token,
+                        "work_count": account.get("work_count", 0),
+                    }
+                )
+                return
+
             show_info(self, "가입 완료", "회원가입이 완료되었습니다!\n바로 로그인해주세요.")
             # Auto-fill login
             self.login_id.setText(self.reg_username.text().strip().lower())
