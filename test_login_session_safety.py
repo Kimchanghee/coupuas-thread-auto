@@ -247,32 +247,25 @@ def test_login_request_is_ignored_while_another_login_is_in_flight(monkeypatch):
     app.processEvents()
 
 
-def test_forced_duplicate_login_failure_does_not_reopen_confirmation(monkeypatch):
-    prompts = []
-    forced_attempts = []
+def test_duplicate_login_is_blocked_without_session_replacement():
+    login_attempts = []
 
     class FakeWindow:
         btn_login = _Button()
         login_status = _Label()
         _login_in_flight = True
-        _duplicate_login_prompt_open = False
-        _force_login_attempted = True
 
-        def _do_login(self, force=False):
-            forced_attempts.append(force)
+        def _do_login(self):
+            login_attempts.append(True)
 
-    monkeypatch.setattr(
-        login_window,
-        "ask_yes_no",
-        lambda *_args: prompts.append(True) or True,
-    )
     window = FakeWindow()
 
     login_window.LoginWindow._on_login_result(window, {"status": "EU003"})
 
-    assert prompts == []
-    assert forced_attempts == []
-    assert "기존 세션" in window.login_status.text
+    assert not hasattr(login_window, "ask_yes_no")
+    assert login_attempts == []
+    assert "이미 로그인" in window.login_status.text
+    assert "로그아웃" in window.login_status.text
 
 
 def test_registration_requires_legal_consent_and_exposes_policy_links(monkeypatch):
@@ -459,8 +452,6 @@ def test_login_success_callback_does_not_perform_network_or_credential_io(monkey
         btn_login = _Button()
         login_status = _Label()
         _login_in_flight = True
-        _duplicate_login_prompt_open = False
-        _force_login_attempted = False
         login_success = type("Signal", (), {"emit": lambda self, value: emitted.append(value)})()
 
     monkeypatch.setattr(

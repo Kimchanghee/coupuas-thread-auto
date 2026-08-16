@@ -145,6 +145,19 @@ def test_login_payload_includes_required_ip(monkeypatch):
     assert payload["ip"] == "10.20.30.40"
 
 
+def test_login_never_requests_active_session_replacement(monkeypatch):
+    _reset_auth_state()
+    response = _FakeResponse(200, {"status": "EU003", "message": "EU003"})
+    session = _FakeSession(response)
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("SampleUser", "SamplePass123", force=True)
+
+    assert result["status"] == "EU003"
+    assert session.calls[0]["json"]["force"] is False
+
+
 def test_login_422_uses_nested_validation_error_message(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(

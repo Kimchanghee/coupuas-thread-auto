@@ -28,7 +28,7 @@ from src.theme import (
 )
 from src.app_icon import apply_window_icon
 from src import auth_client
-from src.ui_messages import ask_yes_no, show_info, show_warning
+from src.ui_messages import show_info, show_warning
 
 logger = logging.getLogger(__name__)
 _TELEMETRY_EXECUTOR = ThreadPoolExecutor(
@@ -104,8 +104,6 @@ class LoginWindow(QMainWindow):
         self._app_version = _resolve_app_version()
         self._auto_login_pending = False
         self._login_in_flight = False
-        self._duplicate_login_prompt_open = False
-        self._force_login_attempted = False
         self._setup_ui()
         if self._auto_login_pending:
             QTimer.singleShot(450, self._maybe_start_auto_login)
@@ -593,7 +591,7 @@ class LoginWindow(QMainWindow):
         widget.setStyleSheet(input_style())
 
     # ─── Login logic ────────────────────────────────────────
-    def _do_login(self, force=False):
+    def _do_login(self):
         if self._login_in_flight:
             return
 
@@ -607,11 +605,6 @@ class LoginWindow(QMainWindow):
             self.login_status.setText(f"비밀번호는 최소 {MIN_LOGIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
 
-        if force:
-            self._force_login_attempted = True
-        else:
-            self._force_login_attempted = False
-
         self._login_in_flight = True
         self.btn_login.setEnabled(False)
         self.remember_cb.setEnabled(False)
@@ -623,7 +616,6 @@ class LoginWindow(QMainWindow):
         self._login_thread = LoginWorker(
             uid,
             pw,
-            force,
             remember_credentials=self.remember_cb.isChecked(),
             auto_login=self.auto_login_cb.isChecked(),
         )
@@ -641,32 +633,14 @@ class LoginWindow(QMainWindow):
 
         status = result.get("status")
         if status is True:
-            self._duplicate_login_prompt_open = False
-            self._force_login_attempted = False
             logger.info("로그인 성공: user_id=%s", result.get("id") or result.get("user_id"))
             self.login_success.emit(result)
         elif status == "EU003":
-            if self._force_login_attempted:
-                self.login_status.setText(
-                    "기존 세션을 종료하지 못했습니다. 잠시 후 다시 시도하거나 다른 기기의 프로그램을 종료해 주세요."
-                )
-                self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
-                return
-            if self._duplicate_login_prompt_open:
-                return
-            self._duplicate_login_prompt_open = True
-            try:
-                replace_session = ask_yes_no(
-                    self,
-                    "중복 로그인",
-                    "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?",
-                )
-            finally:
-                self._duplicate_login_prompt_open = False
-            if replace_session:
-                self._do_login(force=True)
+            self.login_status.setText(
+                "다른 곳에서 이미 로그인되어 있습니다. 기존 기기에서 로그아웃한 뒤 다시 시도해 주세요."
+            )
+            self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
         else:
-            self._force_login_attempted = False
             msg = auth_client.friendly_login_message(result)
             self.login_status.setText(msg)
             self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
@@ -845,7 +819,6 @@ class LoginWorker(QThread):
         self,
         username,
         password,
-        force=False,
         *,
         remember_credentials=False,
         auto_login=False,
@@ -853,7 +826,6 @@ class LoginWorker(QThread):
         super().__init__()
         self.username = username
         self._password_bytes = bytearray(str(password or "").encode("utf-8"))
-        self.force = force
         self.remember_credentials = bool(remember_credentials)
         self.auto_login = bool(auto_login)
 
@@ -862,7 +834,7 @@ class LoginWorker(QThread):
         result = {"status": False, "message": "로그인 처리 중 오류가 발생했습니다."}
         try:
             password = self._password_bytes.decode("utf-8", errors="ignore")
-            result = auth_client.login(self.username, password, self.force)
+            result = auth_client.login(self.username, password)
             if result.get("status") is True:
                 try:
                     if self.remember_credentials:

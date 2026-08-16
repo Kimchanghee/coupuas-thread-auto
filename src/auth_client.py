@@ -1668,6 +1668,10 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
 
     backend_password = _normalize_password_for_backend(password)
 
+    # Keep the legacy argument for older call sites, but never allow the
+    # desktop client to replace another active login.
+    force = False
+
     body = {
         "id": username,
         "pw": backend_password,
