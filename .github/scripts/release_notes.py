@@ -69,6 +69,17 @@ def user_facing_changes(subjects: list[str]) -> list[str]:
         searchable = f"{scope} {subject}".casefold()
         if "logout" in searchable:
             add("로그아웃하면 프로그램을 닫지 않고 로그인 화면으로 돌아가도록 개선했습니다.")
+        elif "duplicate login" in searchable and "program" in searchable:
+            add(
+                "같은 프로그램에서는 한 계정을 여러 곳에서 동시에 사용할 수 없도록 하고, "
+                "다른 프로그램은 함께 사용할 수 있게 개선했습니다."
+            )
+        elif "registration" in searchable and any(
+            phrase in searchable for phrase in ("enter app", "issued session", "reuse session")
+        ):
+            add("회원가입이 끝나면 다시 로그인하지 않고 바로 사용할 수 있게 개선했습니다.")
+        elif all(word in searchable for word in ("login", "registration", "username")):
+            add("로그인, 회원가입, 아이디 확인이 더 빠르게 끝나도록 개선했습니다.")
         elif any(
             phrase in searchable
             for phrase in ("duplicate login", "concurrent login", "concurrent account login")

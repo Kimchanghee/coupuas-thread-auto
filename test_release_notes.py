@@ -102,3 +102,20 @@ def test_release_notes_name_duplicate_login_protection_in_plain_korean():
     assert "한 계정을 여러 곳에서 동시에 사용할 수 없도록 로그인 보호를 강화했습니다." in body
     for internal_term in ("auth", "concurrent", "account"):
         assert internal_term not in body.lower()
+
+
+def test_release_notes_explain_program_scope_and_faster_account_flow_plainly():
+    body = release_notes.render_release_notes(
+        "v3.0.76",
+        [
+            "fix(auth): scope duplicate login protection by program",
+            "perf(auth): speed up login registration and username checks",
+            "fix(auth): enter app after registration",
+        ],
+    )
+
+    assert "같은 프로그램에서는 한 계정을 여러 곳에서 동시에 사용할 수 없도록 하고, 다른 프로그램은 함께 사용할 수 있게 개선했습니다." in body
+    assert "로그인, 회원가입, 아이디 확인이 더 빠르게 끝나도록 개선했습니다." in body
+    assert "회원가입이 끝나면 다시 로그인하지 않고 바로 사용할 수 있게 개선했습니다." in body
+    for internal_term in ("auth", "scope", "program", "username"):
+        assert internal_term not in body.lower()
