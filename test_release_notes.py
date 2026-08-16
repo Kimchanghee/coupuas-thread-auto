@@ -91,3 +91,14 @@ def test_release_notes_name_manual_installer_fallback_in_plain_korean():
     assert "업데이트가 완료되지 않을 때 공식 설치 파일을 바로 받을 수 있게 했습니다." in body
     for internal_term in ("updater", "verified", "fallback"):
         assert internal_term not in body.lower()
+
+
+def test_release_notes_name_duplicate_login_protection_in_plain_korean():
+    body = release_notes.render_release_notes(
+        "v3.0.75",
+        ["feat(auth): prevent concurrent account login"],
+    )
+
+    assert "한 계정을 여러 곳에서 동시에 사용할 수 없도록 로그인 보호를 강화했습니다." in body
+    for internal_term in ("auth", "concurrent", "account"):
+        assert internal_term not in body.lower()
