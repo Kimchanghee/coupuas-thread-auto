@@ -17,7 +17,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import build_exe
+import build_exe  # noqa: E402 - repository root must be added before import
 
 
 PACKAGE_IDENTITY_NAME = "YMcompany.30069A065C875"

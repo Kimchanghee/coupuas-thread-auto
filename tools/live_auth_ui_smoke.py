@@ -9,6 +9,7 @@ generated password. Run manually:
 from __future__ import annotations
 
 import argparse
+import atexit
 import secrets
 import string
 import sys
@@ -68,6 +69,30 @@ def main() -> int:
     contact = f"0100000{secrets.randbelow(10000):04d}"
 
     app = QApplication.instance() or QApplication(sys.argv)
+    cleanup_windows = []
+
+    def _cleanup_live_smoke() -> None:
+        nonlocal password
+        for cleanup_window in reversed(cleanup_windows):
+            try:
+                cleanup_window.close()
+            except Exception:
+                pass
+        try:
+            app.processEvents()
+        except Exception:
+            pass
+        try:
+            auth_client.logout()
+        except Exception:
+            pass
+        try:
+            auth_client.remember_login_credentials("", "")
+        except Exception:
+            pass
+        password = ""
+
+    atexit.register(_cleanup_live_smoke)
     notices: list[tuple[str, str]] = []
     warnings: list[tuple[str, str]] = []
     login_result: dict = {}
@@ -80,6 +105,7 @@ def main() -> int:
     )
 
     window = LoginWindow()
+    cleanup_windows.append(window)
     window.login_success.connect(lambda result: login_result.update(result or {}))
     window.show()
     if not _wait_for(app, window.isVisible, timeout=5):
@@ -147,6 +173,7 @@ def main() -> int:
 
     restart_result: dict = {}
     restart_window = LoginWindow()
+    cleanup_windows.append(restart_window)
     restart_window.login_success.connect(
         lambda result: restart_result.update(result or {})
     )
@@ -160,6 +187,7 @@ def main() -> int:
     )
 
     main_window = MainWindow()
+    cleanup_windows.append(main_window)
     main_window._auth_data = dict(restart_result)
     main_window.show()
     restart_window.hide()

@@ -43,6 +43,44 @@ def test_release_requires_timestamped_authenticode_with_an_exact_signer_pin():
     assert '-TimestampServer "http://timestamp.digicert.com"' in signer
 
 
+def test_release_smokes_signed_gui_and_gates_live_auth_side_effects():
+    workflow = Path(".github/workflows/build-release.yml").read_text(encoding="utf-8")
+    packaged_smoke = Path("tools/packaged_gui_smoke.ps1").read_text(encoding="utf-8")
+
+    assert "run_live_auth_smoke:" in workflow
+    assert "default: false" in workflow
+    assert "github.event_name == 'workflow_dispatch' && inputs.run_live_auth_smoke" in workflow
+    assert 'tools\\live_auth_gui_smoke.ps1" -HoldSeconds 5' in workflow
+    assert workflow.index("- name: Validate release version") < workflow.index(
+        "- name: Run explicitly approved live authentication GUI smoke"
+    )
+
+    signature_index = workflow.index("- name: Verify executable release signature")
+    gui_smoke_index = workflow.index("- name: Launch signed packaged login window")
+    build_verification_index = workflow.index("- name: Verify build")
+    assert signature_index < gui_smoke_index < build_verification_index
+
+    assert 'THREAD_AUTO_DISABLE_AUTOSTART_SYNC = "1"' in packaged_smoke
+    assert "$env:USERPROFILE = $smokeHome" in packaged_smoke
+    assert "$env:LOCALAPPDATA = $localDir" in packaged_smoke
+    assert 'MainWindowTitle -eq "스레드 쇼핑 자동화 - 로그인"' in packaged_smoke
+    assert "$windowProcess.CloseMainWindow()" in packaged_smoke
+    assert 'Get-CimInstance -ClassName Win32_Process' in packaged_smoke
+    assert '-Filter "ParentProcessId = $currentId"' in packaged_smoke
+    assert "$process.ExitCode -ne 0" in packaged_smoke
+    assert "processes did not terminate during cleanup" in packaged_smoke
+    assert "Refusing to remove GUI smoke data outside the temporary directory" in packaged_smoke
+
+    live_smoke = Path("tools/live_auth_ui_smoke.py").read_text(encoding="utf-8")
+    assert "atexit.register(_cleanup_live_smoke)" in live_smoke
+    assert 'auth_client.remember_login_credentials("", "")' in live_smoke
+
+    live_wrapper = Path("tools/live_auth_gui_smoke.ps1").read_text(encoding="utf-8")
+    assert "$env:USERPROFILE = $smokeHome" in live_wrapper
+    assert "$env:LOCALAPPDATA = $localDir" in live_wrapper
+    assert "Refusing to remove live-auth smoke data outside the temporary directory" in live_wrapper
+
+
 def test_free_store_workflow_is_manual_pinned_and_payment_provider_free():
     workflow = Path(".github/workflows/store-release.yml").read_text(encoding="utf-8")
 

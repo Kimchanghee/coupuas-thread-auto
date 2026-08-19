@@ -26,13 +26,14 @@ REQUIRED_MARKERS = {
         "def _open_threads_login",
         "def _check_login_status",
         "self._add_gemini_key_btn",
-        "카카오톡 문의하기",
-        "구독 결제",
+        "self._contact_btn = QPushButton",
+        "self._pay_weekly_btn",
     ],
     "src/auth_client.py": [
         "def create_payapp_checkout",
         "def get_free_trial_work_count",
-        "_FIXED_PAYAPP_PLAN_ID",
+        "_WEEKLY_PAYAPP_PLAN_ID",
+        "_MONTHLY_PAYAPP_PLAN_ID",
     ],
     "src/coupang_uploader.py": [
         "AI fallback 기능이 제거되어",

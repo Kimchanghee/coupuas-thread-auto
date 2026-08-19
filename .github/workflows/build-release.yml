@@ -19,6 +19,11 @@ on:
           - patch
           - minor
           - major
+      run_live_auth_smoke:
+        description: "Create an isolated live trial account and run the authentication GUI smoke"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -87,6 +92,13 @@ jobs:
             exit 1
           fi
 
+      - name: Run explicitly approved live authentication GUI smoke
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_auth_smoke }}
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          & "tools\live_auth_gui_smoke.ps1" -HoldSeconds 5
+
       - name: Sync version in source files
         shell: bash
         run: |
@@ -124,6 +136,14 @@ jobs:
             -Path "dist\CoupangThreadAuto.exe" `
             -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT `
             -AllowPinnedSelfSigned
+
+      - name: Launch signed packaged login window
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          & "tools\packaged_gui_smoke.ps1" `
+            -ExePath "dist\CoupangThreadAuto.exe" `
+            -TimeoutSeconds 60
 
       - name: Verify build
         run: |
