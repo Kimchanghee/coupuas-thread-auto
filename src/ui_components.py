@@ -25,7 +25,7 @@ class HelpButton(QPushButton):
         self.setStyleSheet(
             f"QPushButton {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_SECONDARY};"
             f" border: 1px solid {Colors.BORDER}; border-radius: 16px; font-size: 10pt;"
-            " font-weight: 700; padding: 0; min-height: 0; }}"
+            " font-weight: 700; padding: 0; min-height: 0; }"
             f"QPushButton:hover, QPushButton:focus {{ color: {Colors.TEXT_PRIMARY};"
             f" border: 2px solid {Colors.ACCENT}; background-color: {Colors.ACCENT_SUBTLE}; }}"
             f"QPushButton:checked {{ color: {Colors.BG_DARK}; background-color: {Colors.ACCENT};"

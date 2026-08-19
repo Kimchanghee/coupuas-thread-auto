@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import re
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
@@ -47,6 +49,83 @@ _KIND_META = {
 }
 
 
+_INTERNAL_MESSAGE_MAP = {
+    "process_error": "작업 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+    "quota_commit_failed": "게시 완료 후 작업량 동기화에 실패했습니다. 잠시 후 다시 확인해주세요.",
+    "quota_commit_pending": "게시 완료 후 작업량 확인이 필요합니다.",
+    "quota_reservation_unsupported": "작업량을 안전하게 확인할 수 없어 작업을 중단했습니다.",
+    "reservation_release_pending": "작업량 예약 해제를 확인하는 중입니다. 잠시 후 다시 시도해주세요.",
+    "uncertain_external_post": "게시 결과를 확인하지 못했습니다. Threads에서 게시 여부를 확인해주세요.",
+    "upload_failed": "게시글 업로드를 완료하지 못했습니다. Threads 로그인 상태를 확인해주세요.",
+}
+_TECHNICAL_MESSAGE_RE = re.compile(
+    r"(?:traceback|\bexception\b|"
+    r"\b(?:runtime|value|type|key|os|io|filenotfound|permission|connection|"
+    r"timeout|request|http|ssl|jsondecode|playwright)error\b|"
+    r"target page, context or browser has been closed|"
+    r"browser has been closed|context has been closed|"
+    r"\blocator\.[a-z]+\b|strict mode violation|"
+    r"\bsqlstate\b|\bno module named\b|\bis not defined\b|"
+    r"not attached to the dom|\bnet::err_[a-z_]+\b|"
+    r"\bstack\s*trace\b|\bsyntaxerror\b|\bnameerror\b|"
+    r"https?connectionpool|maximum retries|max retries exceeded|"
+    r"provider unavailable|permission denied|exit code\s*\d+|"
+    r"(?:[a-z]:\\|/)[^\n]*\.py\b|\bline\s+\d+\b)",
+    re.IGNORECASE,
+)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_HANGUL_RE = re.compile(r"[가-힣]")
+_USER_SAFE_ASCII_TERMS = {
+    "ai",
+    "api",
+    "chrome",
+    "cli",
+    "coupang",
+    "gemini",
+    "grok",
+    "id",
+    "mb",
+    "oauth",
+    "payapp",
+    "pc",
+    "qr",
+    "threads",
+    "url",
+    "windows",
+}
+
+
+def user_friendly_message(value, fallback: str) -> str:
+    """Return user-safe Korean copy while keeping raw details out of the UI."""
+    fallback_text = str(fallback or "문제가 발생했습니다. 잠시 후 다시 시도해주세요.").strip()
+    text = _CONTROL_CHAR_RE.sub("", str(value or "")).strip()
+    if not text:
+        return fallback_text
+
+    normalized = re.sub(r"\s+", "_", text.lower()).strip("_.: ")
+    mapped = _INTERNAL_MESSAGE_MAP.get(normalized)
+    if mapped:
+        return mapped
+
+    if _TECHNICAL_MESSAGE_RE.search(text):
+        return fallback_text
+
+    # A server or subprocess may return an arbitrary English implementation
+    # detail. Product/brand names inside otherwise Korean guidance are kept.
+    if re.search(r"[A-Za-z]", text) and not _HANGUL_RE.search(text):
+        return fallback_text
+    ascii_terms = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_]*", text)
+    }
+    if ascii_terms.difference(_USER_SAFE_ASCII_TERMS):
+        return fallback_text
+
+    if len(text) > 600:
+        text = text[:597].rstrip() + "..."
+    return text
+
+
 class ThemedAlertDialog(QDialog):
     def __init__(
         self,
@@ -64,7 +143,7 @@ class ThemedAlertDialog(QDialog):
         self._default_yes = bool(default_yes)
         self._meta = _KIND_META.get(kind, _KIND_META["info"])
 
-        self.setWindowTitle(str(title or "?뚮┝"))
+        self.setWindowTitle(str(title or "알림"))
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self.setMinimumWidth(460)
@@ -256,10 +335,21 @@ class ThemedAlertDialog(QDialog):
 
 
 def _show(parent, title: str, message: str, kind: str) -> None:
+    display_message = str(message or "")
+    if kind == "warning":
+        display_message = user_friendly_message(
+            display_message,
+            "요청을 처리하지 못했습니다. 입력 내용과 연결 상태를 확인한 뒤 다시 시도해주세요.",
+        )
+    elif kind == "error":
+        display_message = user_friendly_message(
+            display_message,
+            "문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+        )
     dialog = ThemedAlertDialog(
         parent,
         title=title,
-        message=message,
+        message=display_message,
         kind=kind,
         ask_yes_no=False,
     )

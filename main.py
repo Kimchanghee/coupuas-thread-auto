@@ -5,6 +5,8 @@ Stitch Blue 테마
 개발자 자동 진입 엔트리포인트입니다.
 실제 로그인 시작 엔트리포인트는 login_main.py 입니다.
 """
+# 환경과 경로를 먼저 고정한 뒤 GUI 모듈을 불러와야 합니다.
+# ruff: noqa: E402
 import sys
 import os
 import io
@@ -12,10 +14,6 @@ import time
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
-
-# main.py is a developer auto-entrypoint. Enable unlimited local test runs
-# unless the environment explicitly overrides this flag.
-os.environ.setdefault("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "1")
 
 def _to_utf8_text_stream(stream, std_stream=None):
     """
@@ -63,14 +61,14 @@ from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import (
     QPixmap, QFont, QPainter, QColor, QLinearGradient,
-    QPainterPath, QPen, QBrush, QFontDatabase, QIcon
+    QPainterPath, QPen, QBrush, QFontDatabase
 )
 
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
-VERSION = "v3.0.77"
+VERSION = "v3.0.78"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -88,10 +86,10 @@ def _exit_if_already_running():
 
 def _sync_auto_start_setting() -> None:
     try:
-        from src.autostart import sync_auto_start
+        from src.autostart import sync_configured_auto_start
         from src.config import config
 
-        sync_auto_start(bool(getattr(config, "auto_start_enabled", True)))
+        sync_configured_auto_start(bool(getattr(config, "auto_start_enabled", False)))
     except Exception:
         logger.exception("자동 실행 설정을 반영하지 못했습니다.")
 
@@ -389,6 +387,11 @@ def _inject_developer_auth_state(auth_result: dict) -> None:
 
 
 def main():
+    # Environment changes belong to the executable entrypoint. Importing this
+    # module for VERSION or helpers must never enable quota bypass implicitly.
+    os.environ.setdefault("THREAD_AUTO_DEV_ENTRYPOINT", "1")
+    os.environ.setdefault("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "1")
+
     single_instance_guard = _exit_if_already_running()
     if single_instance_guard is None:
         return

@@ -111,8 +111,8 @@ class Gradients:
         f"stop:0 #38DDC8, stop:1 {Colors.ACCENT})"
     )
     ACCENT_BTN_HOVER = (
-        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 #64EBD7, stop:1 #38DDC8)"
+        "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+        "stop:0 #64EBD7, stop:1 #38DDC8)"
     )
     ACCENT_BTN_PRESSED = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
@@ -144,8 +144,8 @@ class Gradients:
 
     # Login splash — warm coral wash
     LOGIN_SPLASH = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-        f"stop:0 #090E1A, stop:0.48 #102332, stop:0.82 #155E61, stop:1 #0F766E)"
+        "qlineargradient(x1:0, y1:0, x2:1, y2:1, "
+        "stop:0 #090E1A, stop:0.48 #102332, stop:0.82 #155E61, stop:1 #0F766E)"
     )
 
 

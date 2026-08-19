@@ -20,7 +20,6 @@ import queue
 import sys
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel,
     QPushButton, QTextEdit, QPlainTextEdit, QFrame,
@@ -51,7 +50,6 @@ from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
 from src.gemini_keys import (
     MAX_GEMINI_API_KEYS,
     normalize_gemini_api_keys,
-    save_configured_gemini_api_keys,
     select_working_gemini_api_key,
 )
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
@@ -64,6 +62,13 @@ from src.services.marketplaces import (
 from src.services.thread_payload import build_product_thread_payload
 from src.services.account_queue import AccountQueueStore
 from src.services.multi_account_runtime import MultiAccountRuntime
+from src.services.retry_policy import (
+    MAX_TRANSIENT_RETRIES,
+    is_transient_error,
+    retry_delay_seconds,
+)
+from src.models.threads_account import normalize_threads_username
+from src.runtime_security import development_quota_bypass_enabled
 from src.update_resume import UpdateResumeStore, active_account_ids, update_completed
 from src.update_dialog import UpdateDialog
 from src.theme import (
@@ -77,7 +82,13 @@ from src.theme import (
     hint_text_style,
     section_title_style,
 )
-from src.ui_messages import ask_yes_no, show_error, show_info, show_warning
+from src.ui_messages import (
+    ask_yes_no,
+    show_error,
+    show_info,
+    show_warning,
+    user_friendly_message,
+)
 from src.events import LoginStatusEvent
 from src.autostart import sync_auto_start
 from src.hidpi import apply_window_size_policy
@@ -279,7 +290,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Thread Auto - Multi-market Shopping Automation")
+        self.setWindowTitle("Thread Auto - 멀티 쇼핑 자동화")
         apply_window_size_policy(self)
 
         self.pipeline = CoupangPartnersPipeline(
@@ -293,6 +304,9 @@ class MainWindow(QMainWindow):
         self.processed_urls = set()
         self._closed = False
         self._browser_cancel = threading.Event()
+        self._threads_login_account_id = ""
+        self._login_check_request_seq = 0
+        self._login_check_inflight = {}
         self._link_url_row_map = {}  # url -> table row index
         self._active_pipeline = None
         self._resume_state_path = Path(config.config_dir) / "upload_resume_queue.json"
@@ -592,7 +606,7 @@ class MainWindow(QMainWindow):
         )
 
         # Subtitle
-        sub_label = QLabel("THREAD SHOPPING AUTOMATION", header)
+        sub_label = QLabel("멀티 쇼핑 자동화", header)
         sub_label.setGeometry(62, 38, 260, 20)
         sub_label.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600;"
@@ -3072,6 +3086,38 @@ class MainWindow(QMainWindow):
             self._save_resume_state("posted_commit_reconcile")
         return state
 
+    def _ask_ambiguous_post_result(self, title: str) -> str:
+        """Ask for a posting outcome with explicit Korean button labels."""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("게시 결과 확인")
+        dialog.setIcon(QMessageBox.Icon.Question)
+        dialog.setText(
+            f"'{title[:60]}' 게시 중 프로그램이 중단되었거나 결과를 확인하지 못했습니다."
+        )
+        dialog.setInformativeText(
+            "Threads에서 게시 여부를 직접 확인한 뒤 선택해주세요."
+        )
+        posted_button = dialog.addButton(
+            "게시됨",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        not_posted_button = dialog.addButton(
+            "게시 안 됨",
+            QMessageBox.ButtonRole.DestructiveRole,
+        )
+        later_button = dialog.addButton(
+            "나중에 확인",
+            QMessageBox.ButtonRole.RejectRole,
+        )
+        dialog.setDefaultButton(later_button)
+        dialog.exec()
+        choice = dialog.clickedButton()
+        if choice is posted_button:
+            return "posted"
+        if choice is not_posted_button:
+            return "not_posted"
+        return "later"
+
     def _reconcile_ambiguous_post_items(self, state: dict) -> dict:
         """Let the user resolve an external post whose result is unknowable."""
         items = state.get("items", []) if isinstance(state, dict) else []
@@ -3083,23 +3129,9 @@ class MainWindow(QMainWindow):
             }:
                 continue
             title = str(item.get("product_title") or item.get("url") or "게시글")
-            choice = QMessageBox.question(
-                self,
-                "게시 결과 확인",
-                (
-                    f"'{title[:60]}' 게시 중 프로그램이 중단되었거나 결과를 확인하지 못했습니다.\n\n"
-                    "Threads에서 게시됐는지 확인한 뒤 선택하세요.\n"
-                    "예: 게시됨(작업량 확정)\n"
-                    "아니요: 게시 안 됨(예약 해제 후 다시 대기)\n"
-                    "취소: 지금은 그대로 보관"
-                ),
-                QMessageBox.StandardButton.Yes
-                | QMessageBox.StandardButton.No
-                | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel,
-            )
+            choice = self._ask_ambiguous_post_result(title)
             reservation_id = str(item.get("reservation_id") or "").strip()
-            if choice == QMessageBox.StandardButton.Yes:
+            if choice == "posted":
                 if reservation_id:
                     try:
                         from src import auth_client
@@ -3117,7 +3149,7 @@ class MainWindow(QMainWindow):
                 item.pop("idempotency_key", None)
                 item.pop("last_error", None)
                 changed = True
-            elif choice == QMessageBox.StandardButton.No:
+            elif choice == "not_posted":
                 if reservation_id:
                     try:
                         from src import auth_client
@@ -3482,36 +3514,18 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _normalize_threads_username(value):
-        """Extract a clean Threads/Instagram username from id or profile URL."""
+        """Validate a Threads username without silently changing its identity."""
         raw = str(value or "").strip()
         if not raw:
             return ""
-
-        candidate = raw
-        lower_candidate = candidate.lower()
-        if "://" in candidate or lower_candidate.startswith("www."):
-            url_text = candidate if "://" in candidate else f"https://{candidate}"
-            try:
-                parsed = urlparse(url_text)
-                path = unquote(str(parsed.path or ""))
-                segments = [seg.strip() for seg in path.split("/") if seg.strip()]
-                if segments:
-                    candidate = segments[-1]
-                else:
-                    candidate = str(parsed.netloc or "")
-            except Exception:
-                pass
-
-        if "/" in candidate:
-            candidate = candidate.rsplit("/", 1)[-1]
-
-        candidate = candidate.split("?", 1)[0].split("#", 1)[0].strip()
-        if candidate.startswith("@"):
-            candidate = candidate[1:]
-
-        # Threads/Instagram username character set
-        candidate = re.sub(r"[^A-Za-z0-9._]", "", candidate)
-        return candidate[:30]
+        if raw.lower().startswith(
+            ("threads.com/", "www.threads.com/", "threads.net/", "www.threads.net/")
+        ):
+            raw = f"https://{raw}"
+        try:
+            return normalize_threads_username(raw)
+        except ValueError:
+            return ""
 
     @staticmethod
     def _sanitize_profile_name(username):
@@ -3603,11 +3617,11 @@ class MainWindow(QMainWindow):
 
                 status = get_grok_cli_status()
                 self.signals.grok_status.emit(status.code, status.message, "check")
-            except Exception as exc:
+            except Exception:
                 logger.exception("Grok CLI 상태 확인에 실패했습니다.")
                 self.signals.grok_status.emit(
                     "error",
-                    f"Grok 상태 확인 실패: {exc}",
+                    "Grok 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
                     "check",
                 )
 
@@ -3644,7 +3658,14 @@ class MainWindow(QMainWindow):
                 self.signals.grok_status.emit(status.code, status.message, "login")
             except Exception as exc:
                 code = str(getattr(exc, "code", "error") or "error")
-                self.signals.grok_status.emit(code, str(exc), "login")
+                self.signals.grok_status.emit(
+                    code,
+                    user_friendly_message(
+                        exc,
+                        "Grok 로그인을 완료하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                    ),
+                    "login",
+                )
 
         threading.Thread(target=worker, daemon=True, name="grok-login").start()
 
@@ -3668,7 +3689,12 @@ class MainWindow(QMainWindow):
             "free_limit": "#F59E0B",
         }
         color = colors.get(str(code), "#EF4444")
-        label.setText(str(message or "Grok 상태를 확인할 수 없습니다."))
+        label.setText(
+            user_friendly_message(
+                message,
+                "Grok 상태를 확인할 수 없습니다. 잠시 후 다시 시도해주세요.",
+            )
+        )
         label.setStyleSheet(
             f"color: {color}; font-size: 12px; background: transparent; border: none;"
         )
@@ -4005,7 +4031,21 @@ class MainWindow(QMainWindow):
             self.links_text.setPlainText(self._account_drafts.get(str(account_id or ""), ""))
             self.links_text.blockSignals(blocked)
             self._update_link_count()
+        self._render_threads_account_login_status(account)
         self._render_account_queue(str(account_id or ""))
+
+    def _render_threads_account_login_status(self, account):
+        if not hasattr(self, "login_status_label"):
+            return
+        if account is None:
+            self._update_login_status("unknown", "Threads 계정을 선택해 주세요.")
+            return
+        verified = str(account.last_verified_username or "").lstrip("@").lower()
+        expected = str(account.expected_username or "").lstrip("@").lower()
+        if verified and verified == expected:
+            self._update_login_status("success", f"@{expected} · 마지막 확인")
+        else:
+            self._update_login_status("unknown", f"@{expected} · 확인 필요")
 
     def _on_threads_account_selected(self, index):
         combo = self.threads_account_combo
@@ -4015,7 +4055,15 @@ class MainWindow(QMainWindow):
             self._account_drafts[previous_id] = self.links_text.toPlainText()
         if account_id:
             config.set_active_threads_account(account_id)
-            config.save()
+            if not config.save():
+                config.load()
+                self._refresh_threads_account_ui(config.active_threads_account_id)
+                show_error(
+                    self,
+                    "계정 선택 저장 실패",
+                    "선택한 계정을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+                )
+                return
         tabs = getattr(self, "_upload_account_tabs", None)
         tab_index = self._upload_tab_index(tabs, account_id) if tabs is not None else -1
         if tabs is not None and tabs.currentIndex() != tab_index:
@@ -4106,7 +4154,11 @@ class MainWindow(QMainWindow):
             if account is not None
             else account_id[:8]
         )
-        self.signals.log.emit(f"[{label}] {message}")
+        safe_message = user_friendly_message(
+            message,
+            "작업 중 문제가 발생했습니다. 로그인 상태와 네트워크를 확인해주세요.",
+        )
+        self.signals.log.emit(f"[{label}] {safe_message}")
 
     def _on_account_runtime_state(self, account_id, state):
         payload = dict(state or {})
@@ -4139,7 +4191,13 @@ class MainWindow(QMainWindow):
             self.signals.run_state.emit(
                 {
                     "phase": phase,
-                    "message": blocked_reason or (
+                    "message": (
+                        user_friendly_message(
+                            blocked_reason,
+                            "이 계정의 작업이 중단되었습니다. 설정과 로그인 상태를 확인해주세요.",
+                        )
+                        if blocked_reason
+                        else
                         f"계정별 대기열 {pending}개"
                         if pending
                         else "이 계정의 대기열 작업이 완료되었습니다."
@@ -4189,14 +4247,28 @@ class MainWindow(QMainWindow):
                 f"현재 요금제는 Threads 계정 {self._threads_account_limit()}개까지 추가할 수 있습니다.",
             )
             return
-        username = self._normalize_threads_username(self.username_edit.text())
+        raw_username = self.username_edit.text().strip()
+        username = self._normalize_threads_username(raw_username)
         if not username:
-            show_warning(self, "계정 이름", "Threads 사용자명을 먼저 입력하세요.")
+            show_warning(
+                self,
+                "계정 이름",
+                "Threads 사용자명에는 영문, 숫자, 마침표, 밑줄만 사용할 수 있습니다.",
+            )
             return
+        previous_active_id = str(config.active_threads_account_id or "")
         try:
             account = config.add_threads_account(username, display_name=username, upload_interval=max(30, int(config.upload_interval)))
             config.set_active_threads_account(account.account_id)
-            config.save()
+            if not config.save():
+                config.remove_threads_account(account.account_id)
+                config.active_threads_account_id = previous_active_id
+                show_error(
+                    self,
+                    "계정 저장 실패",
+                    "Threads 계정을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+                )
+                return
         except (ValueError, KeyError) as exc:
             show_warning(self, "계정 추가", str(exc))
             return
@@ -4233,7 +4305,15 @@ class MainWindow(QMainWindow):
                 return
         try:
             config.remove_threads_account(account_id)
-            config.save()
+            if not config.save():
+                config.load()
+                self._refresh_threads_account_ui(config.active_threads_account_id)
+                show_error(
+                    self,
+                    "계정 삭제 실패",
+                    "계정 변경 내용을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+                )
+                return
         except KeyError:
             return
         self._account_drafts.pop(account_id, None)
@@ -4278,7 +4358,7 @@ class MainWindow(QMainWindow):
 
         self.video_check.setChecked(config.prefer_video)
         if hasattr(self, "_auto_start_check"):
-            self._auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", True)))
+            self._auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", False)))
         selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
         self._set_post_concept_combo_value(self.settings_post_concept_combo, selected_concept)
         self.username_edit.setText(config.instagram_username)
@@ -4307,103 +4387,6 @@ class MainWindow(QMainWindow):
                 f" border: 2px solid {Colors.ACCENT}; color: {Colors.TEXT_PRIMARY}; }}"
             )
             self._relayout_header_account_card()
-            return
-            if hasattr(self, "logout_btn"):
-                self.logout_btn.setFixedSize(86, 30)
-            if hasattr(self, "tutorial_btn"):
-                self.tutorial_btn.setFixedSize(86, 30)
-            if hasattr(self, "_work_label"):
-                self._work_label.setStyleSheet(
-                    "QPushButton {"
-                    " background-color: #E31639;"
-                    " color: #FFFFFF;"
-                    " border: none;"
-                    " border-radius: 8px;"
-                    " padding: 8px 16px;"
-                    " font-size: 11px;"
-                    " font-weight: 700;"
-                    "}"
-                    "QPushButton:hover {"
-                    " background-color: #C41231;"
-                    "}"
-                    "QPushButton:pressed {"
-                    " background-color: #A01028;"
-                    "}"
-                )
-                self._work_label.setFixedHeight(30)
-                self._work_label.setMinimumWidth(110)
-                self._work_label.setMaximumWidth(110)
-            if hasattr(self, "_header_username_label"):
-                self._header_username_label.setStyleSheet(
-                    "color: #B8B8B8; font-size: 11px; font-weight: 500; background: transparent;"
-                )
-            if hasattr(self, "_online_dot"):
-                self._online_dot.setStyleSheet("background-color: #9CA3AF; border-radius: 4px;")
-                self._online_dot.setFixedSize(8, 8)
-            if hasattr(self, "_connection_label"):
-                self._connection_label.setStyleSheet(
-                    "color: #9CA3AF; font-size: 10px; font-weight: 500; background: transparent;"
-                )
-            if hasattr(self, "_plan_badge"):
-                self._plan_badge.setStyleSheet(
-                    "QPushButton {"
-                    " background-color: rgba(255, 255, 255, 0.05);"
-                    " color: #B8B8B8;"
-                    " border: 1px solid rgba(255, 255, 255, 0.05);"
-                    " border-radius: 6px;"
-                    " padding: 6px 12px;"
-                    " font-size: 10px;"
-                    " font-weight: 700;"
-                    "}"
-                    "QPushButton:hover {"
-                    " background-color: rgba(255, 255, 255, 0.10);"
-                    " border-color: #E31639;"
-                    " color: #FFFFFF;"
-                    "}"
-                )
-                self._plan_badge.setFixedHeight(30)
-                self._plan_badge.setMinimumWidth(92)
-                self._plan_badge.setMaximumWidth(92)
-            if hasattr(self, "_relayout_header_account_card"):
-                self._relayout_header_account_card()
-            if all(
-                hasattr(self, name)
-                for name in (
-                    "_work_label",
-                    "_header_username_label",
-                    "_online_dot",
-                    "_connection_label",
-                    "_plan_badge",
-                    "_header_nav_buttons",
-                )
-            ):
-                nav_buttons = [btn for btn in self._header_nav_buttons if btn is not None]
-                if nav_buttons:
-                    nav_left = min(btn.x() for btn in nav_buttons)
-                    right = nav_left - 12
-                    top = 19
-                    control_h = 30
-                    min_left = 250
-
-                    plan_w = 92
-                    work_w = 110
-                    self._plan_badge.setGeometry(max(min_left, right - plan_w), top, plan_w, control_h)
-                    right = self._plan_badge.x() - 8
-
-                    conn_text = self._connection_label.text() or ""
-                    conn_w = min(max(self._connection_label.fontMetrics().horizontalAdvance(conn_text) + 8, 84), 112)
-                    self._connection_label.setGeometry(max(min_left, right - conn_w), top + 6, conn_w, 18)
-                    right = self._connection_label.x() - 8
-
-                    self._online_dot.setGeometry(max(min_left, right - 8), top + 11, 8, 8)
-                    right = self._online_dot.x() - 8
-
-                    user_text = self._header_username_label.text() or ""
-                    user_w = min(max(self._header_username_label.fontMetrics().horizontalAdvance(user_text) + 6, 52), 110)
-                    self._header_username_label.setGeometry(max(min_left, right - user_w), top + 4, user_w, 20)
-                    right = self._header_username_label.x() - 8
-
-                    self._work_label.setGeometry(max(min_left, right - work_w), top, work_w, control_h)
         self._apply_top_right_status_styles = _apply_top_right_status_styles
         _apply_top_right_status_styles()
         try:
@@ -4443,19 +4426,15 @@ class MainWindow(QMainWindow):
                 rows[0]["edit"].setFocus()
             show_warning(self, "설정 필요", "최소 1개의 Gemini API 키를 입력해주세요.")
             return
-        if key_values:
-            save_configured_gemini_api_keys(key_values)
-
-        config.upload_interval = interval
-        config.ai_provider = selected_provider
-        config.prefer_video = self.video_check.isChecked()
-        config.auto_start_enabled = (
-            self._auto_start_check.isChecked()
-            if hasattr(self, "_auto_start_check")
-            else bool(getattr(config, "auto_start_enabled", True))
-        )
-        config.post_concept = normalize_concept_id(self.settings_post_concept_combo.currentData())
-        username = self._normalize_threads_username(self.username_edit.text().strip())
+        raw_username = self.username_edit.text().strip()
+        username = self._normalize_threads_username(raw_username)
+        if raw_username and not username:
+            show_warning(
+                self,
+                "계정 설정",
+                "Threads 사용자명에는 영문, 숫자, 마침표, 밑줄만 사용할 수 있습니다.",
+            )
+            return
         account_id = self.selected_threads_account_id()
         if account_id:
             try:
@@ -4467,8 +4446,28 @@ class MainWindow(QMainWindow):
             except (KeyError, ValueError) as exc:
                 show_warning(self, "계정 설정", str(exc))
                 return
+
+        config.set_gemini_api_keys(key_values)
+        config.upload_interval = interval
+        config.ai_provider = selected_provider
+        config.prefer_video = self.video_check.isChecked()
+        config.auto_start_enabled = (
+            self._auto_start_check.isChecked()
+            if hasattr(self, "_auto_start_check")
+            else bool(getattr(config, "auto_start_enabled", False))
+        )
+        config.post_concept = normalize_concept_id(self.settings_post_concept_combo.currentData())
         config.instagram_username = username
-        config.save()
+        if not config.save():
+            config.load()
+            self._load_settings()
+            self._refresh_threads_account_ui(config.active_threads_account_id)
+            show_error(
+                self,
+                "설정 저장 실패",
+                "설정을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인한 뒤 다시 시도해주세요.",
+            )
+            return
         self._refresh_multi_account_runtime()
         self._refresh_threads_account_ui(account_id)
         auto_start_synced = sync_auto_start(bool(config.auto_start_enabled))
@@ -4778,7 +4777,10 @@ class MainWindow(QMainWindow):
                 f"reason=api_rejected; message={str(result.get('message') or '').strip()}",
                 level="WARNING",
             )
-            message = str(result.get("message") or "결제 요청에 실패했습니다.").strip()
+            message = user_friendly_message(
+                result.get("message"),
+                "결제 요청에 실패했습니다. 잠시 후 다시 시도해주세요.",
+            )
             show_error(self, "결제 요청 실패", message)
             logger.warning("결제 요청 실패: %s", message)
             self._set_payment_busy(False, message)
@@ -4856,21 +4858,22 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(delay_ms, self._send_heartbeat)
 
     def _cancel_payapp_subscription(self):
-        choice = QMessageBox.question(
+        if not ask_yes_no(
             self,
             "월 정기결제 해지",
             "다음 자동결제를 중단하시겠습니까?\n현재 승인된 이용 기간은 만료일까지 유지됩니다.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if choice != QMessageBox.StandardButton.Yes:
+            default_yes=False,
+        ):
             return
         try:
             from src import auth_client
 
             status = auth_client.get_payapp_subscriptions()
             if not isinstance(status, dict) or not status.get("success"):
-                message = str((status or {}).get("message") or "정기결제 상태를 확인하지 못했습니다.")
+                message = user_friendly_message(
+                    (status or {}).get("message"),
+                    "정기결제 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                )
                 show_error(self, "정기결제 해지", message)
                 return
             candidates = status.get("subscriptions") or status.get("items") or status.get("data") or []
@@ -4894,7 +4897,10 @@ class MainWindow(QMainWindow):
             rebill_no = str(active.get("rebill_no") or active.get("rebillNo") or "").strip()
             result = auth_client.cancel_payapp_subscription(rebill_no)
             if not isinstance(result, dict) or not result.get("success"):
-                message = str((result or {}).get("message") or "정기결제를 해지하지 못했습니다.")
+                message = user_friendly_message(
+                    (result or {}).get("message"),
+                    "정기결제를 해지하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                )
                 show_error(self, "정기결제 해지", message)
                 return
             self._log_user_activity("payment_subscription_cancelled", "status=success")
@@ -4919,6 +4925,14 @@ class MainWindow(QMainWindow):
         raw_username = self.username_edit.text().strip()
         username = self._normalize_threads_username(raw_username)
 
+        if raw_username and not username:
+            show_warning(
+                self,
+                "Threads 계정",
+                "Threads 사용자명 또는 Threads 프로필 주소를 올바르게 입력해주세요.",
+            )
+            return
+
         if raw_username and username and raw_username != username:
             self.username_edit.setText(username)
             self._log_user_activity(
@@ -4934,7 +4948,15 @@ class MainWindow(QMainWindow):
                     config.update_threads_account(account_id, expected_username=username)
                 except (KeyError, ValueError):
                     pass
-            config.save()
+            if not config.save():
+                config.load()
+                self._refresh_threads_account_ui(config.active_threads_account_id)
+                show_error(
+                    self,
+                    "계정 저장 실패",
+                    "Threads 계정 정보를 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+                )
+                return
 
         if getattr(self, "_threads_login_browser_open", False):
             self._log_user_activity(
@@ -4948,9 +4970,15 @@ class MainWindow(QMainWindow):
             self.signals.log.emit("로그인 브라우저가 이미 열려 있습니다. 로그인 후 창을 닫아주세요.")
             return
 
+        login_account_id = self.selected_threads_account_id()
+        self._threads_login_account_id = login_account_id
         self.threads_login_btn.setEnabled(False)
         self.threads_login_btn.setText("여는 중...")
-        self._update_login_status("pending", "브라우저 여는 중...")
+        self._update_login_status_for_account(
+            login_account_id,
+            "pending",
+            "브라우저 여는 중...",
+        )
 
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
@@ -5131,7 +5159,11 @@ class MainWindow(QMainWindow):
             self._threads_login_browser_open = True
             self.threads_login_btn.setEnabled(False)
             self.threads_login_btn.setText("로그인 창 열림")
-            self._update_login_status("pending", "브라우저가 열렸습니다. 로그인 완료 후 창을 닫아주세요.")
+            self._update_login_status_for_account(
+                self._threads_login_account_id,
+                "pending",
+                "브라우저가 열렸습니다. 로그인 완료 후 창을 닫아주세요.",
+            )
             opened_url = str(detail or "").strip()
             self._log_user_activity("threads_login_browser_opened", f"url={opened_url or '(unknown)'}")
             if opened_url:
@@ -5144,7 +5176,12 @@ class MainWindow(QMainWindow):
         self._restore_login_btn()
         reason = str(detail or "").strip() or "원인을 확인할 수 없습니다."
         logger.warning("Threads 로그인 브라우저 실행 실패 원본: %s", reason)
-        self._update_login_status("error", "브라우저 실행 실패")
+        self._update_login_status_for_account(
+            self._threads_login_account_id,
+            "error",
+            "브라우저 실행 실패",
+        )
+        self._threads_login_account_id = ""
         self._log_user_activity(
             "threads_login_launch_failed",
             f"reason={reason}",
@@ -5168,28 +5205,52 @@ class MainWindow(QMainWindow):
     def _on_threads_browser_closed(self):
         if self._closed:
             return
+        account_id = str(self._threads_login_account_id or "")
+        self._threads_login_account_id = ""
         self._threads_login_browser_open = False
         self._restore_login_btn()
         self._log_user_activity("threads_login_browser_closed", "session_saved=True")
-        self._update_login_status("pending", "저장된 로그인 계정을 확인하는 중...")
+        self._update_login_status_for_account(
+            account_id,
+            "pending",
+            "저장된 로그인 계정을 확인하는 중...",
+        )
         self.signals.log.emit("Threads 브라우저가 닫혀 세션을 저장했습니다. 계정을 확인합니다.")
-        self._check_login_status()
+        self._check_login_status(account_id)
 
-    def _check_login_status(self):
-        account = self.selected_threads_account()
+    def _check_login_status(self, account_id=None):
+        account = (
+            config.get_threads_account(account_id)
+            if account_id
+            else self.selected_threads_account()
+        )
         if account is None:
             show_warning(self, "Threads 계정", "먼저 확인할 계정을 선택해 주세요.")
             return
+        account_id = account.account_id
+        if account_id in self._login_check_inflight:
+            self._update_login_status_for_account(
+                account_id,
+                "pending",
+                "이미 로그인 상태를 확인하고 있습니다.",
+            )
+            return
+        self._login_check_request_seq += 1
+        request_id = self._login_check_request_seq
+        self._login_check_inflight[account_id] = request_id
         self.check_login_btn.setEnabled(False)
         self.check_login_btn.setText("확인 중...")
-        self._update_login_status("pending", "저장된 로그인 계정을 확인하는 중...")
-        account_id = account.account_id
+        self._update_login_status_for_account(
+            account.account_id,
+            "pending",
+            "저장된 로그인 계정을 확인하는 중...",
+        )
         expected_username = account.expected_username
         profile_id = account.profile_id
 
         def run_check():
             agent = None
-            result = (False, None, account_id, expected_username)
+            result = (False, None, account_id, expected_username, request_id)
             try:
                 from src.computer_use_agent import ComputerUseAgent
                 from src.threads_playwright_helper import ThreadsPlaywrightHelper
@@ -5212,7 +5273,13 @@ class MainWindow(QMainWindow):
                 verified = bool(
                     logged_in and helper.verify_account(expected_username)
                 )
-                result = (verified, username, account_id, expected_username)
+                result = (
+                    verified,
+                    username,
+                    account_id,
+                    expected_username,
+                    request_id,
+                )
             except Exception:
                 logger.exception("Threads 로그인 계정 확인에 실패했습니다.")
             finally:
@@ -5249,6 +5316,12 @@ class MainWindow(QMainWindow):
             dedupe_key=f"threads-status:{state}:{text}",
         )
 
+    def _update_login_status_for_account(self, account_id, state, text):
+        target = str(account_id or "")
+        if target and target != self.selected_threads_account_id():
+            return
+        self._update_login_status(state, text)
+
     def event(self, evt):
         if evt.type() == LoginStatusEvent.EventType:
             if self._closed:
@@ -5257,16 +5330,30 @@ class MainWindow(QMainWindow):
             is_logged_in, username = result[:2]
             account_id = result[2] if len(result) > 2 else ""
             expected_username = result[3] if len(result) > 3 else ""
+            request_id = result[4] if len(result) > 4 else 0
+            if request_id:
+                current_request_id = self._login_check_inflight.get(account_id)
+                if current_request_id != request_id:
+                    return True
+                self._login_check_inflight.pop(account_id, None)
+            selected_account_id = self.selected_threads_account_id()
+            result_is_for_selected_account = bool(
+                account_id and account_id == selected_account_id
+            )
             self._log_user_activity(
                 "threads_login_check_result",
                 f"is_logged_in={bool(is_logged_in)}; username={username or ''}",
             )
-            self.check_login_btn.setEnabled(True)
-            self.check_login_btn.setText("로그인 상태 확인")
+            checks_pending = bool(self._login_check_inflight)
+            self.check_login_btn.setEnabled(not checks_pending)
+            self.check_login_btn.setText(
+                "확인 중..." if checks_pending else "로그인 상태 확인"
+            )
 
             if is_logged_in:
-                name = f"@{username}" if username else "연결됨"
-                self._update_login_status("success", name)
+                if result_is_for_selected_account:
+                    name = f"@{username}" if username else "연결됨"
+                    self._update_login_status("success", name)
                 if account_id:
                     try:
                         config.update_threads_account(
@@ -5274,11 +5361,17 @@ class MainWindow(QMainWindow):
                             last_verified_username=username or expected_username,
                             last_verified_at=datetime.now().astimezone().isoformat(),
                         )
-                        config.save()
-                        self._refresh_threads_account_ui(account_id)
+                        if not config.save():
+                            config.load()
+                            show_error(
+                                self,
+                                "계정 저장 실패",
+                                "로그인 확인 결과를 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+                            )
+                        self._refresh_threads_account_ui(selected_account_id)
                     except (KeyError, ValueError):
                         logger.exception("Threads 계정 검증 결과 저장에 실패했습니다.")
-            else:
+            elif result_is_for_selected_account:
                 self._update_login_status("error", "로그인 또는 계정 일치 확인 실패")
             return True
         return super().event(evt)
@@ -5289,8 +5382,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _is_dev_quota_bypass_enabled():
-        value = str(os.getenv("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "") or "").strip().lower()
-        return value in {"1", "true", "yes", "y", "on"}
+        return development_quota_bypass_enabled()
 
     @staticmethod
     def _is_work_allowed(work_response):
@@ -5714,6 +5806,8 @@ class MainWindow(QMainWindow):
 
         total_links = self.link_queue.qsize()
         quota_bypass = self._is_dev_quota_bypass_enabled()
+        transient_retry_counts = {}
+        transient_retry_not_before = {}
 
         def log(msg):
             message_text = str(msg or "").strip()
@@ -5860,9 +5954,16 @@ class MainWindow(QMainWindow):
                     results["cancelled"] = True
                     break
 
-                processed_count += 1
                 url, keyword = item if isinstance(item, tuple) else (item, None)
-                results["total"] += 1
+                retry_at = float(transient_retry_not_before.get(url, 0.0) or 0.0)
+                if retry_at > time.time():
+                    self.link_queue.put(item)
+                    time.sleep(min(1.0, max(0.05, retry_at - time.time())))
+                    continue
+
+                if url not in transient_retry_counts:
+                    processed_count += 1
+                    results["total"] += 1
                 self._mark_resume_item(url, "running")
 
                 log(f"{processed_count}번째 항목 처리 중 (대기열: {self.link_queue.qsize()})")
@@ -5964,13 +6065,38 @@ class MainWindow(QMainWindow):
                     self.signals.reset_steps.emit()
                     break
                 except Exception as exc:
+                    retry_count = int(transient_retry_counts.get(url, 0) or 0) + 1
+                    if is_transient_error(exc) and retry_count <= MAX_TRANSIENT_RETRIES:
+                        delay = retry_delay_seconds(retry_count)
+                        transient_retry_counts[url] = retry_count
+                        transient_retry_not_before[url] = time.time() + delay
+                        self._mark_resume_item(url, "pending", error="temporary_retry")
+                        self.link_queue.put((url, keyword))
+                        log(
+                            f"일시적인 연결 문제로 {delay}초 후 다시 시도합니다. "
+                            f"({retry_count}/{MAX_TRANSIENT_RETRIES})"
+                        )
+                        self.signals.step_update.emit(1, "error")
+                        self.signals.link_status.emit(url, "대기", "자동 재시도")
+                        self.signals.reset_steps.emit()
+                        continue
+                    transient_retry_counts.pop(url, None)
+                    transient_retry_not_before.pop(url, None)
                     results["parse_failed"] += 1
                     self._mark_resume_item(url, "parse_failed", error=str(exc))
-                    log(f"분석 오류: {str(exc)[:80]}")
+                    log(
+                        user_friendly_message(
+                            exc,
+                            "상품 정보를 분석하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                        )
+                    )
                     self.signals.step_update.emit(1, "error")
                     self.signals.link_status.emit(url, "실패", "오류")
                     self.signals.reset_steps.emit()
                     continue
+
+                transient_retry_counts.pop(url, None)
+                transient_retry_not_before.pop(url, None)
 
                 # Step 2: Upload to Threads
                 self.signals.step_update.emit(2, "active")
@@ -5989,6 +6115,12 @@ class MainWindow(QMainWindow):
                     post_data.get("managed_ai_quota_mode") or "reservation"
                 ).strip().lower()
                 reservation_supported = bool(reserved_work_id) and managed_quota_mode != "legacy"
+                reservation_request_id = str(
+                    getattr(self, "_resume_recovered_idempotency_keys", {}).get(url)
+                    or post_data.get("managed_ai_job_id")
+                    or reserved_work_id
+                    or ""
+                ).strip()
 
                 try:
                     if not ensure_threads_ready():
@@ -6163,10 +6295,11 @@ class MainWindow(QMainWindow):
                                 else:
                                     use_result = auth_client.use_work()
                                 if not isinstance(use_result, dict) or not self._is_work_allowed(use_result):
-                                    billing_msg = (
-                                        use_result.get("message", "알 수 없음")
+                                    billing_msg = user_friendly_message(
+                                        use_result.get("message", "")
                                         if isinstance(use_result, dict)
-                                        else "알 수 없음"
+                                        else "",
+                                        "서버와 작업량을 동기화하지 못했습니다.",
                                     )
                                     recorded_success = False
                                     stop_for_billing_sync = True
@@ -6223,10 +6356,14 @@ class MainWindow(QMainWindow):
                             results["cancelled"] = True
                             blocker = helper_error or "threads_ui_unavailable"
                             self._mark_resume_item(url, "posting_unknown", product_name, blocker)
-                            log(f"Threads 로그인/작성창 확인 필요: {blocker}. 현재 항목을 보존하고 중단합니다.")
+                            user_blocker = (
+                                "Threads 로그인 또는 작성 화면을 확인해주세요. "
+                                "현재 항목은 안전하게 보존했습니다."
+                            )
+                            log(user_blocker)
                             emit_run_state(
                                 "blocked",
-                                f"Threads 로그인/작성창 확인 필요: {blocker}",
+                                user_blocker,
                                 product_name or current_label,
                                 pending=self.link_queue.qsize() + 1,
                                 completed=max(processed_count - 1, 0),
@@ -6277,10 +6414,14 @@ class MainWindow(QMainWindow):
                     if any(token in exc_text for token in browser_blocker_tokens):
                         results["cancelled"] = True
                         self._mark_resume_item(url, "pending", product_name, exc_text)
-                        log(f"Threads 브라우저 상태 확인 필요: {exc_text[:120]}. 현재 항목을 보존하고 중단합니다.")
+                        browser_message = (
+                            "Threads 브라우저가 닫혔거나 응답하지 않습니다. "
+                            "로그인 상태를 확인해주세요. 현재 항목은 안전하게 보존했습니다."
+                        )
+                        log(browser_message)
                         emit_run_state(
                             "blocked",
-                            f"Threads 브라우저 상태 확인 필요: {exc_text[:120]}",
+                            browser_message,
                             product_name or current_label,
                             pending=self.link_queue.qsize() + 1,
                             completed=max(processed_count - 1, 0),
@@ -6290,7 +6431,12 @@ class MainWindow(QMainWindow):
                         break
                     results["failed"] += 1
                     self._mark_resume_item(url, "failed", product_name, exc_text)
-                    log(f"업로드 오류: {exc_text[:80]}")
+                    log(
+                        user_friendly_message(
+                            exc,
+                            "게시글 업로드에 실패했습니다. 로그인 상태와 네트워크를 확인해주세요.",
+                        )
+                    )
                     self.signals.step_update.emit(2, "error")
                     self.signals.link_status.emit(url, "실패", product_name)
 
@@ -6370,12 +6516,16 @@ class MainWindow(QMainWindow):
 
         except Exception as exc:
             logger.exception("_run_upload_queue에서 치명적 오류 발생")
-            log(f"치명적 오류: {exc}")
+            user_message = (
+                "작업을 계속할 수 없는 문제가 발생했습니다. "
+                "남은 항목은 보존했으니 프로그램을 다시 실행해주세요."
+            )
+            log(user_message)
             self.signals.status.emit("오류")
             self.signals.run_state.emit(
                 {
                     "phase": "error",
-                    "message": f"치명적 오류: {str(exc)[:120]}",
+                    "message": user_message,
                     "pending": self.link_queue.qsize(),
                     "total": total_links,
                     "completed": max(total_links - self.link_queue.qsize(), 0),
@@ -6776,14 +6926,17 @@ class MainWindow(QMainWindow):
         self.update_btn.setEnabled(False)
         try:
             marker = self._prepare_update_resume(update_info) if resume_after else None
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to preserve work before update")
             self._update_installing = False
             self.update_btn.setEnabled(True)
             saved_marker = self._update_resume_store.load()
             if saved_marker:
                 self._resume_update_work(saved_marker)
-            message = f"현재 작업을 안전하게 저장하지 못해 업데이트를 시작하지 않았습니다.\n{exc}"
+            message = (
+                "현재 작업을 안전하게 저장하지 못해 업데이트를 시작하지 않았습니다. "
+                "저장 폴더 권한과 디스크 공간을 확인한 뒤 다시 시도해주세요."
+            )
             dialog = getattr(self, "_update_dialog", None)
             if dialog is not None:
                 dialog.set_install_error(message)
@@ -6821,7 +6974,10 @@ class MainWindow(QMainWindow):
                 result = {"success": True, "resume_marker": marker}
             except Exception as exc:
                 logger.exception("Automatic update flow failed")
-                result["message"] = str(exc) or result["message"]
+                result["message"] = user_friendly_message(
+                    exc,
+                    "업데이트를 완료하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                )
             try:
                 self.signals.update_install_complete.emit(result)
             except RuntimeError:
@@ -6953,7 +7109,9 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         if not config.tutorial_shown:
             config.tutorial_shown = True
-            config.save()
+            if not config.save():
+                config.load()
+                logger.warning("도움말 표시 상태를 저장하지 못했습니다.")
             QTimer.singleShot(0, lambda: self.toggle_inline_help(True))
 
     def resizeEvent(self, event):
@@ -6995,9 +7153,19 @@ class MainWindow(QMainWindow):
             self.stop_upload()
         elif self.is_running and (forced_relogin or forced_update):
             self.stop_upload()
+        pipeline = self._active_pipeline or self.pipeline
+        if pipeline is not None:
+            pipeline.cancel()
         runtime = getattr(self, "_multi_account_runtime", None)
-        if runtime is not None:
-            runtime.stop_all()
+        if runtime is not None and not runtime.stop_and_join(30):
+            logger.error("종료 전 계정별 업로드 작업을 안전하게 끝내지 못했습니다.")
+            show_warning(
+                self,
+                "종료 대기",
+                "진행 중인 작업을 안전하게 정리하고 있습니다. 잠시 후 다시 종료해주세요.",
+            )
+            event.ignore()
+            return
         self._save_resume_state("window_close")
         self._closed = True
         self._browser_cancel.set()

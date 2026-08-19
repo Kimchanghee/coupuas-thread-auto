@@ -4,6 +4,8 @@ Stitch Blue 테마
 
 백엔드 project-user-dashboard(.env)를 함께 로드합니다.
 """
+# 환경과 경로를 먼저 고정한 뒤 GUI 모듈을 불러와야 합니다.
+# ruff: noqa: E402
 import sys
 import os
 import io
@@ -58,14 +60,14 @@ from PyQt6.QtWidgets import QApplication, QSplashScreen
 from PyQt6.QtCore import Qt, QRectF, QTimer
 from PyQt6.QtGui import (
     QPixmap, QFont, QPainter, QColor, QLinearGradient,
-    QPainterPath, QPen, QBrush, QFontDatabase, QIcon
+    QPainterPath, QPen, QBrush, QFontDatabase
 )
 
 from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
-VERSION = "v3.0.77"
+VERSION = "v3.0.78"
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -83,10 +85,10 @@ def _exit_if_already_running():
 
 def _sync_auto_start_setting() -> None:
     try:
-        from src.autostart import sync_auto_start
+        from src.autostart import sync_configured_auto_start
         from src.config import config
 
-        sync_auto_start(bool(getattr(config, "auto_start_enabled", True)))
+        sync_configured_auto_start(bool(getattr(config, "auto_start_enabled", False)))
     except Exception:
         logger.exception("자동 실행 설정을 반영하지 못했습니다.")
 

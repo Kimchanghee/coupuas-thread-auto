@@ -66,6 +66,11 @@ def test_update_dialog_emits_install_request_and_shows_progress():
     assert dialog.install_btn.isEnabled()
     assert "네트워크" in dialog.status_detail.text()
 
+    dialog.set_install_error("RuntimeError: provider unavailable")
+    assert "RuntimeError" not in dialog.status_detail.text()
+    assert "provider unavailable" not in dialog.status_detail.text()
+    assert "업데이트" in dialog.status_detail.text()
+
     dialog.close()
     dialog.deleteLater()
     app.processEvents()

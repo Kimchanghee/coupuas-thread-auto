@@ -115,8 +115,10 @@ def _classify_failure(output: str, return_code: int) -> GrokCliError:
         return GrokCliError("timeout", "Grok 응답 시간이 초과되었습니다.")
     if any(marker in lowered for marker in ("network", "connection", "dns", "tls")):
         return GrokCliError("network", "Grok 서버에 연결할 수 없습니다.")
-    detail = normalized[-500:] if normalized else f"exit code {return_code}"
-    return GrokCliError("process_error", f"Grok CLI 실행 실패: {detail}")
+    return GrokCliError(
+        "process_error",
+        "Grok CLI 실행에 실패했습니다. 설치 상태를 확인한 뒤 다시 시도해주세요.",
+    )
 
 
 class GrokCliProvider:
@@ -167,7 +169,10 @@ class GrokCliProvider:
         except subprocess.TimeoutExpired as exc:
             raise GrokCliError("timeout", "Grok 응답 시간이 초과되었습니다.") from exc
         except OSError as exc:
-            raise GrokCliError("process_error", f"Grok CLI를 실행할 수 없습니다: {exc}") from exc
+            raise GrokCliError(
+                "process_error",
+                "Grok CLI를 실행할 수 없습니다. 설치 상태와 실행 권한을 확인해주세요.",
+            ) from exc
 
     def status(self) -> GrokCliStatus:
         executable = self.executable or find_grok_cli()

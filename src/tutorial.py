@@ -8,13 +8,13 @@
 """
 from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox, QFrame
 from PyQt6.QtCore import Qt, QRectF, QRect, QPoint
-from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QRegion, QPainterPath, QFont
+from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QPainterPath, QFont
 
 from src.app_icon import apply_window_icon
 from src.theme import (
     Colors, Radius, Gradients,
-    close_btn_style, ghost_btn_style, accent_btn_style,
-    muted_text_style, header_title_style, dialog_style
+    close_btn_style, ghost_btn_style,
+    muted_text_style, header_title_style
 )
 
 
@@ -851,7 +851,8 @@ class TutorialOverlay(QWidget):
         from src.config import config
         if self._dont_show_again:
             config.tutorial_shown = True
-            config.save()
+            if not config.save():
+                config.load()
         self.hide()
 
     def mousePressEvent(self, event):

@@ -7,7 +7,9 @@
   B. 같은 부모 안 형제 위젯끼리 겹치는지 (overlap)
   C. QLabel/QPushButton/QCheckBox의 텍스트 sizeHint가 실제 width보다 큰지 (텍스트 잘림)
 """
-import sys, os, io
+import sys
+import os
+import io
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", line_buffering=True)
@@ -16,9 +18,9 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QCheckBox, QLineEdit,
-    QSpinBox, QTextEdit, QPlainTextEdit, QFrame
+    QSpinBox
 )
-from PyQt6.QtCore import Qt, QRect
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPalette, QColor, QFontMetrics
 
 from src.theme import Colors, global_stylesheet, resolve_fonts

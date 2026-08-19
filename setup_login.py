@@ -17,9 +17,9 @@ if sys.platform == "win32":
 
 def main() -> None:
     print("=" * 60)
-    print("Threads Initial Login Setup")
+    print("Threads 최초 로그인 설정")
     print("=" * 60)
-    print("Run once to store an encrypted local browser session.")
+    print("암호화된 로컬 브라우저 세션을 저장하기 위해 한 번만 실행합니다.")
     print()
 
     google_api_key = os.environ.get("GOOGLE_API_KEY") or "dummy-key-for-session-setup"
@@ -30,22 +30,22 @@ def main() -> None:
     )
 
     try:
-        print("Starting browser...")
+        print("브라우저를 시작합니다...")
         agent.start_browser()
 
-        print("Opening Threads...")
+        print("Threads를 엽니다...")
         agent.page.goto("https://www.threads.net", wait_until="domcontentloaded")
 
         print()
-        print("1. Log in with your Instagram account in the browser window.")
-        print("2. Confirm the Threads feed is visible.")
-        print("3. Return here and press Enter.")
-        input("Press Enter after login completes...")
+        print("1. 브라우저 창에서 Instagram 계정으로 로그인하세요.")
+        print("2. Threads 피드가 보이는지 확인하세요.")
+        print("3. 이 창으로 돌아와 Enter 키를 누르세요.")
+        input("로그인을 마쳤으면 Enter 키를 누르세요...")
 
-        print("Verifying login state...")
+        print("로그인 상태를 확인합니다...")
         time.sleep(2)
         current_url = agent.page.url
-        print(f"Current URL: {current_url}")
+        print(f"현재 주소: {current_url}")
 
         is_logged_in = False
         try:
@@ -55,39 +55,39 @@ def main() -> None:
                 is_logged_in = True
             if not is_logged_in and "login" not in current_url.lower():
                 is_logged_in = True
-        except Exception as exc:
-            print(f"Login verification warning: {exc}")
+        except Exception:
+            print("로그인 상태를 자동으로 확인하지 못했습니다.")
 
         if not is_logged_in:
-            confirm = input("Could not verify automatically. Continue anyway? (y/n): ").strip().lower()
+            confirm = input("자동 확인에 실패했습니다. 그래도 계속할까요? (y/n): ").strip().lower()
             if confirm != "y":
-                print("Cancelled. Run setup_login.py again.")
+                print("취소했습니다. setup_login.py를 다시 실행해주세요.")
                 return
 
-        print("Saving encrypted session...")
+        print("암호화된 세션을 저장합니다...")
         agent.save_session()
 
         storage_path = agent._get_storage_state_path()
         if os.path.exists(storage_path):
             file_size = os.path.getsize(storage_path)
-            print(f"Session file: {storage_path}")
-            print(f"Size: {file_size:,} bytes")
-            print("Session file is encrypted at rest (DPAPI).")
+            print(f"세션 파일: {storage_path}")
+            print(f"크기: {file_size:,}바이트")
+            print("세션 파일은 Windows DPAPI로 암호화되어 저장됩니다.")
 
         print()
-        print("Setup complete.")
-        print("Now run: python login_main.py")
+        print("설정이 완료되었습니다.")
+        print("이제 다음 명령을 실행하세요: python login_main.py")
 
-    except Exception as exc:
+    except Exception:
         print()
-        print(f"Error: {exc}")
-        print("Try again after checking network/browser access.")
+        print("설정 중 문제가 발생했습니다.")
+        print("네트워크와 브라우저 접근 상태를 확인한 뒤 다시 시도해주세요.")
 
     finally:
         print()
-        print("Closing browser...")
+        print("브라우저를 닫습니다...")
         agent.close()
-        print("Done")
+        print("완료")
 
 
 if __name__ == "__main__":

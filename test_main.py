@@ -1,6 +1,8 @@
 """
 메인 윈도우 테스트 실행 (로그인 없이)
 """
+# 환경·경로 초기화 뒤 Qt 모듈을 불러와야 합니다.
+# ruff: noqa: E402
 import sys
 import os
 import io
@@ -29,7 +31,7 @@ from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPalette, QColor
 
-from src.theme import Colors, global_stylesheet
+from src.theme import Colors
 from src.main_window import MainWindow
 from src.app_logging import setup_logging
 

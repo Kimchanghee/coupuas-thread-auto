@@ -27,6 +27,17 @@ def test_normal_close_quits_but_update_close_preserves_login():
     assert "app.quit()" in close_event
 
 
+def test_close_waits_for_multi_account_worker_before_quitting():
+    source = (Path(__file__).parent / "src" / "main_window.py").read_text(
+        encoding="utf-8"
+    )
+    close_event = source[source.index("    def closeEvent(self, event):") :]
+
+    assert "runtime.stop_and_join(30)" in close_event
+    assert close_event.index("runtime.stop_and_join(30)") < close_event.index("app.quit()")
+    assert "event.ignore()" in close_event
+
+
 def test_stale_grok_check_does_not_overwrite_active_oauth_login():
     from src.main_window import MainWindow
 

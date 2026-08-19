@@ -28,7 +28,7 @@ from src.theme import (
 )
 from src.app_icon import apply_window_icon
 from src import auth_client
-from src.ui_messages import show_info, show_warning
+from src.ui_messages import show_info, show_warning, user_friendly_message
 
 logger = logging.getLogger(__name__)
 _TELEMETRY_EXECUTOR = ThreadPoolExecutor(
@@ -244,7 +244,7 @@ class LoginWindow(QMainWindow):
         # Subtitle
         painter.setPen(QColor(Colors.ACCENT_LIGHT))
         painter.setFont(QFont(fn, 11))
-        painter.drawText(0, 298, panel_w, 22, Qt.AlignmentFlag.AlignCenter, "THREAD SHOPPING AUTOMATION")
+        painter.drawText(0, 298, panel_w, 22, Qt.AlignmentFlag.AlignCenter, "멀티 쇼핑 자동화")
 
         # Tagline
         painter.setPen(QColor(255, 255, 255, 230))
@@ -641,7 +641,10 @@ class LoginWindow(QMainWindow):
             )
             self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
         else:
-            msg = auth_client.friendly_login_message(result)
+            msg = user_friendly_message(
+                auth_client.friendly_login_message(result),
+                "로그인에 실패했습니다. 입력한 정보와 네트워크 상태를 확인해주세요.",
+            )
             self.login_status.setText(msg)
             self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
 
@@ -711,7 +714,11 @@ class LoginWindow(QMainWindow):
         else:
             self._username_available = False
             self._username_available_for = None
-            self.reg_user_status.setText(f"✗ {message}")
+            safe_message = user_friendly_message(
+                message,
+                "아이디 사용 가능 여부를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            )
+            self.reg_user_status.setText(f"✗ {safe_message}")
             self.reg_user_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
 
     def _do_register(self):
@@ -870,9 +877,12 @@ class LoginWorker(QThread):
                 except Exception:
                     logger.exception("아이디 저장 설정을 반영하지 못했습니다.")
                 _queue_telemetry("ui_login_success", "로그인 창에서 로그인 성공")
-        except Exception as exc:
+        except Exception:
             logger.exception("로그인 워커 실행에 실패했습니다.")
-            result = {"status": False, "message": f"로그인 처리 중 오류가 발생했습니다: {exc}"}
+            result = {
+                "status": False,
+                "message": "로그인 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            }
         finally:
             for i in range(len(self._password_bytes)):
                 self._password_bytes[i] = 0
@@ -925,9 +935,12 @@ class RegisterWorker(QThread):
                     "ui_register_success",
                     f"username={self.username}",
                 )
-        except Exception as exc:
+        except Exception:
             logger.exception("회원가입 워커 실행에 실패했습니다.")
-            result = {"success": False, "message": f"회원가입 처리 중 오류가 발생했습니다: {exc}"}
+            result = {
+                "success": False,
+                "message": "회원가입 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            }
         finally:
             for i in range(len(self._password_bytes)):
                 self._password_bytes[i] = 0

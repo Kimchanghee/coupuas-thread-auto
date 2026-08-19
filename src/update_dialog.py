@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from src.app_icon import apply_window_icon
 from src.auto_updater import AutoUpdater
 from src.theme import Colors, Gradients, Radius, progress_bar_style
+from src.ui_messages import user_friendly_message
 
 
 class UpdateCheckThread(QThread):
@@ -39,7 +40,12 @@ class UpdateCheckThread(QThread):
             else:
                 self.no_update.emit()
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(
+                user_friendly_message(
+                    exc,
+                    "업데이트 정보를 확인하지 못했습니다. 네트워크 연결을 확인해주세요.",
+                )
+            )
 
 
 class UpdateDialog(QDialog):
@@ -109,7 +115,7 @@ class UpdateDialog(QDialog):
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         top.addLayout(title_box, 1)
-        badge = QLabel("UPDATE")
+        badge = QLabel("업데이트")
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setFixedSize(76, 28)
         badge.setStyleSheet(
@@ -170,7 +176,7 @@ class UpdateDialog(QDialog):
         self.changelog_text.setStyleSheet(
             f"QTextEdit {{ background-color: {Colors.BG_INPUT}; color: {Colors.TEXT_PRIMARY};"
             f"border: 1px solid {Colors.BORDER}; border-radius: {Radius.LG};"
-            "padding: 14px; line-height: 1.5; }}"
+            "padding: 14px; line-height: 1.5; }"
         )
         root.addWidget(self.changelog_text, 1)
 
@@ -201,7 +207,7 @@ class UpdateDialog(QDialog):
         self.manual_download_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Colors.ACCENT_LIGHT};"
             f"border: 1px solid {Colors.ACCENT_DARK}; border-radius: {Radius.MD};"
-            "padding: 0 18px; font-size: 10pt; font-weight: 700; }}"
+            "padding: 0 18px; font-size: 10pt; font-weight: 700; }"
             f"QPushButton:hover {{ background: {Colors.ACCENT_SUBTLE}; }}"
         )
         self.manual_download_btn.clicked.connect(self._open_manual_download)
@@ -213,7 +219,7 @@ class UpdateDialog(QDialog):
         self.close_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Colors.TEXT_SECONDARY};"
             f"border: 1px solid {Colors.BORDER_LIGHT}; border-radius: {Radius.MD};"
-            "padding: 0 22px; font-size: 10pt; font-weight: 700; }}"
+            "padding: 0 22px; font-size: 10pt; font-weight: 700; }"
             f"QPushButton:hover {{ background: {Colors.BG_HOVER}; color: {Colors.TEXT_PRIMARY}; }}"
         )
         self.close_btn.clicked.connect(self.close)
@@ -298,7 +304,12 @@ class UpdateDialog(QDialog):
         self.target_version_value.setText("확인 실패")
         self.status_label.setText("업데이트 정보를 확인하지 못했어요")
         self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
-        self.status_detail.setText(str(error_message or "네트워크 연결을 확인해 주세요."))
+        self.status_detail.setText(
+            user_friendly_message(
+                error_message,
+                "업데이트 정보를 확인하지 못했습니다. 네트워크 연결을 확인해주세요.",
+            )
+        )
         self.changelog_text.setPlainText("잠시 후 다시 시도해 주세요.")
 
     def _request_install(self):
@@ -346,7 +357,12 @@ class UpdateDialog(QDialog):
         self.progress_label.setVisible(False)
         self.status_label.setText("업데이트를 완료하지 못했어요")
         self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
-        self.status_detail.setText(str(message or "잠시 후 다시 시도해 주세요."))
+        self.status_detail.setText(
+            user_friendly_message(
+                message,
+                "업데이트를 완료하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            )
+        )
         self.install_btn.setText("다시 시도")
         self.install_btn.setEnabled(True)
         self.close_btn.setEnabled(True)

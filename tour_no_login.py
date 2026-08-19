@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 """로그인 없이 MainWindow 직접 띄워 페이지별 캡처 (rate-limit 우회)."""
-import sys, os, io, logging
+import sys
+import os
+import io
+import logging
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", line_buffering=True)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
-from PyQt6.QtWidgets import QApplication, QDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPalette, QColor
 
@@ -46,15 +49,22 @@ def main():
     app.setStyleSheet(global_stylesheet())
 
     win = MainWindow()
-    win.move(100, 60); win.show(); win.raise_()
+    win.move(100, 60)
+    win.show()
+    win.raise_()
 
     # 자동 update dialog 자동 닫기 (5초간)
     from src.update_dialog import UpdateDialog
+
     def kill():
         for w in list(app.topLevelWidgets()):
-            if isinstance(w, QMessageBox) and w.isVisible(): w.close()
-            elif isinstance(w, UpdateDialog) and w.isVisible(): w.close()
-    for d in (300, 1200, 2400, 3600, 5000): QTimer.singleShot(d, kill)
+            if isinstance(w, QMessageBox) and w.isVisible():
+                w.close()
+            elif isinstance(w, UpdateDialog) and w.isVisible():
+                w.close()
+
+    for d in (300, 1200, 2400, 3600, 5000):
+        QTimer.singleShot(d, kill)
 
     def s1():
         log.info("page 0")
