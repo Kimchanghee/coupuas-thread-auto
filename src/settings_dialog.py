@@ -10,21 +10,21 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QFrame, QSpinBox, QComboBox,
     QScrollArea, QWidget
 )
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
+from src.models.threads_account import normalize_threads_username
 from src.autostart import sync_auto_start
 from src.app_icon import apply_window_icon
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.theme import (
-    Colors, Radius, Spacing, Gradients, Typography,
+    Colors,
     section_title_style, section_icon_style, header_title_style,
-    close_btn_style, ghost_btn_style, accent_btn_style,
-    input_style, muted_text_style, hint_text_style,
-    scroll_area_style, dialog_style, global_stylesheet
+    close_btn_style, hint_text_style,
+    scroll_area_style, global_stylesheet
 )
-from src.ui_messages import show_info
+from src.ui_messages import show_error, show_info, show_warning
 from src.events import LoginStatusEvent
 from src.threads_navigation import goto_threads_with_fallback, friendly_threads_navigation_error
 
@@ -361,7 +361,7 @@ class SettingsDialog(QDialog):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
-        self.auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", True)))
+        self.auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", False)))
         selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
         index = self.post_concept_combo.findData(selected_concept)
         self.post_concept_combo.setCurrentIndex(max(index, 0))
@@ -377,14 +377,30 @@ class SettingsDialog(QDialog):
             interval = 30
             show_info(self, "알림", "최소 업로드 간격은 30초입니다.")
 
-        config.gemini_api_key = self.gemini_key_edit.text().strip()
+        raw_username = self.username_edit.text().strip()
+        try:
+            username = normalize_threads_username(raw_username) if raw_username else ""
+        except ValueError as exc:
+            show_warning(self, "계정 설정", str(exc))
+            return
+
+        gemini_key = self.gemini_key_edit.text().strip()
+        config.set_gemini_api_keys([gemini_key] if gemini_key else [])
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
         config.auto_start_enabled = self.auto_start_check.isChecked()
         config.post_concept = normalize_concept_id(self.post_concept_combo.currentData())
-        config.instagram_username = self.username_edit.text().strip()
+        config.instagram_username = username
 
-        config.save()
+        if not config.save():
+            config.load()
+            self._load_settings()
+            show_error(
+                self,
+                "설정 저장 실패",
+                "설정을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+            )
+            return
         sync_auto_start(bool(config.auto_start_enabled))
 
         show_info(self, "저장 완료", "설정이 저장되었습니다.")
@@ -408,10 +424,21 @@ class SettingsDialog(QDialog):
         return ".threads_profile"
 
     def _open_threads_login(self):
-        username = self.username_edit.text().strip()
+        raw_username = self.username_edit.text().strip()
+        try:
+            username = normalize_threads_username(raw_username) if raw_username else ""
+        except ValueError as exc:
+            show_warning(self, "Threads 계정", str(exc))
+            return
         if username:
             config.instagram_username = username
-            config.save()
+            if not config.save():
+                show_error(
+                    self,
+                    "계정 저장 실패",
+                    "Threads 계정을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
+                )
+                return
 
         self.threads_login_btn.setEnabled(False)
         self.threads_login_btn.setText("여는 중...")

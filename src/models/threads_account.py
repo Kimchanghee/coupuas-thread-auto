@@ -31,17 +31,19 @@ def normalize_threads_username(value: object) -> str:
         parsed = urlparse(candidate)
         host = (parsed.hostname or "").lower()
         if host not in {"threads.net", "www.threads.net", "threads.com", "www.threads.com"}:
-            raise ValueError("expected_username must be a Threads username or profile URL")
+            raise ValueError("Threads 사용자명 또는 Threads 프로필 주소만 입력해주세요.")
         parts = [part for part in parsed.path.split("/") if part]
         if not parts:
-            raise ValueError("Threads profile URL does not contain a username")
-        candidate = parts[-1]
+            raise ValueError("Threads 프로필 주소에서 사용자명을 찾을 수 없습니다.")
+        if len(parts) != 1:
+            raise ValueError("Threads 게시물 주소가 아닌 프로필 주소를 입력해주세요.")
+        candidate = parts[0]
 
     if candidate.startswith("@"):
         candidate = candidate[1:]
     candidate = candidate.strip().lower()
     if not _USERNAME_RE.fullmatch(candidate):
-        raise ValueError("expected_username must contain only letters, numbers, periods, or underscores")
+        raise ValueError("Threads 사용자명에는 영문, 숫자, 마침표, 밑줄만 사용할 수 있습니다.")
     return candidate
 
 
@@ -81,20 +83,20 @@ class ThreadsAccount:
         try:
             account_id = str(UUID(str(self.account_id)))
         except (TypeError, ValueError, AttributeError) as exc:
-            raise ValueError("account_id must be a UUID") from exc
+            raise ValueError("Threads 계정 식별자 형식이 올바르지 않습니다.") from exc
         if not str(self.profile_id or "").strip():
-            raise ValueError("profile_id is required")
+            raise ValueError("Threads 브라우저 프로필 정보가 필요합니다.")
 
         expected_username = normalize_threads_username(self.expected_username)
         if not expected_username:
-            raise ValueError("expected_username is required")
+            raise ValueError("Threads 사용자명을 입력해주세요.")
         verified = str(self.last_verified_username or "").strip()
         if verified:
             verified = normalize_threads_username(verified)
 
         interval = int(self.upload_interval)
         if interval < 30:
-            raise ValueError("upload_interval must be at least 30 seconds")
+            raise ValueError("업로드 간격은 최소 30초여야 합니다.")
 
         object.__setattr__(self, "account_id", account_id)
         object.__setattr__(self, "profile_id", str(self.profile_id).strip())
@@ -121,7 +123,7 @@ class ThreadsAccount:
     @classmethod
     def from_dict(cls, values: Mapping[str, Any]) -> "ThreadsAccount":
         if not isinstance(values, Mapping):
-            raise ValueError("Threads account must be an object")
+            raise ValueError("저장된 Threads 계정 정보 형식이 올바르지 않습니다.")
         return cls.create(**dict(values))
 
     def to_dict(self) -> dict[str, Any]:
@@ -141,6 +143,6 @@ class ThreadsAccount:
     def updated(self, **changes: Any) -> "ThreadsAccount":
         forbidden = {"account_id", "profile_id"}.intersection(changes)
         if forbidden:
-            raise ValueError("account_id and profile_id are immutable")
+            raise ValueError("Threads 계정과 브라우저 프로필 식별자는 변경할 수 없습니다.")
         changes["updated_at"] = _utc_now()
         return replace(self, **changes)

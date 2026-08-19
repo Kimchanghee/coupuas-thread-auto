@@ -69,7 +69,7 @@ def test_fernet_key_is_not_published_when_acl_fails(monkeypatch, tmp_path):
     assert not key_path.exists()
 
 
-def test_secret_protection_failure_removes_stale_secret_file(monkeypatch, tmp_path):
+def test_secret_protection_failure_preserves_last_good_secret_file(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     cfg = Config()
     cfg.secrets_file.write_text('{"instagram_password":"stale"}', encoding="utf-8")
@@ -77,5 +77,49 @@ def test_secret_protection_failure_removes_stale_secret_file(monkeypatch, tmp_pa
     monkeypatch.setattr(config, "protect_secret", lambda *_args: None)
 
     assert cfg._save_secrets() is False
-    assert not cfg.secrets_file.exists()
+    assert cfg.secrets_file.read_text(encoding="utf-8") == '{"instagram_password":"stale"}'
+
+
+def test_config_save_rolls_back_both_files_when_secret_write_fails(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = Config()
+    cfg.instagram_password = "last-good-password"
+    cfg.upload_interval = 111
+    assert cfg.save() is True
+    old_config = cfg.config_file.read_bytes()
+    old_secrets = cfg.secrets_file.read_bytes()
+
+    cfg.instagram_password = "replacement-password"
+    cfg.upload_interval = 222
+
+    def fail_after_partial_secret_write():
+        cfg.secrets_file.write_text('{"partial":"write"}', encoding="utf-8")
+        return False
+
+    monkeypatch.setattr(cfg, "_save_secrets", fail_after_partial_secret_write)
+
+    assert cfg.save() is False
+    assert cfg.config_file.read_bytes() == old_config
+    assert cfg.secrets_file.read_bytes() == old_secrets
+
+
+@pytest.mark.parametrize(
+    ("stored_value", "expected"),
+    [("not-a-number", 60), (-10, 30), (0, 60)],
+)
+def test_malformed_upload_interval_falls_back_safely(
+    monkeypatch,
+    tmp_path,
+    stored_value,
+    expected,
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = Config()
+
+    cfg._load_from_dict({"upload_interval": stored_value})
+
+    assert cfg.upload_interval == expected
 

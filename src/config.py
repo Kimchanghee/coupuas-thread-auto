@@ -87,7 +87,12 @@ class Config:
                 self.save()
 
     def _load_from_dict(self, data: dict):
-        self.upload_interval = int(data.get("upload_interval", 60) or 60)
+        try:
+            upload_interval = int(data.get("upload_interval", 60) or 60)
+        except (TypeError, ValueError, OverflowError):
+            logger.warning("저장된 업로드 간격이 올바르지 않아 기본값을 사용합니다.")
+            upload_interval = 60
+        self.upload_interval = max(upload_interval, 30)
         self.instagram_username = str(data.get("instagram_username", "") or "")
         self.threads_accounts = self._deserialize_threads_accounts(data.get("threads_accounts"))
         self.active_threads_account_id = str(data.get("active_threads_account_id", "") or "")
@@ -102,7 +107,7 @@ class Config:
         self.media_download_dir = str(data.get("media_download_dir", "media") or "media")
         self.prefer_video = bool(data.get("prefer_video", True))
         self.allow_ai_fallback = bool(data.get("allow_ai_fallback", False))
-        self.auto_start_enabled = bool(data.get("auto_start_enabled", True))
+        self.auto_start_enabled = bool(data.get("auto_start_enabled", False))
         self.instruction = str(data.get("instruction", "") or "")
         self.post_concept = normalize_concept_id(data.get("post_concept"))
         self.tutorial_shown = bool(data.get("tutorial_shown", False))
@@ -186,7 +191,7 @@ class Config:
         self.media_download_dir = "media"
         self.prefer_video = True
         self.allow_ai_fallback = False
-        self.auto_start_enabled = True
+        self.auto_start_enabled = False
         self.instruction = ""
         self.post_concept = DEFAULT_POST_CONCEPT_ID
         self.tutorial_shown = False
@@ -260,10 +265,6 @@ class Config:
             payload[key] = protected
 
         if protection_failed:
-            try:
-                self.secrets_file.unlink(missing_ok=True)
-            except OSError:
-                logger.exception("기존 보안 설정 파일 삭제에 실패했습니다.")
             return False
 
         temp_path = None
@@ -294,12 +295,46 @@ class Config:
                     Path(temp_path).unlink(missing_ok=True)
                 except Exception:
                     pass
-            try:
-                # A failed update must not preserve stale passwords or API keys.
-                self.secrets_file.unlink(missing_ok=True)
-            except Exception:
-                pass
             return False
+
+    @staticmethod
+    def _read_file_snapshot(path: Path):
+        if not path.exists():
+            return False, b""
+        return True, path.read_bytes()
+
+    def _restore_file_snapshot(self, path: Path, existed: bool, payload: bytes) -> bool:
+        """Best-effort rollback for a configuration transaction."""
+        temp_path = None
+        try:
+            if not existed:
+                path.unlink(missing_ok=True)
+                return True
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=str(self.config_dir),
+                prefix=f"{path.stem}_rollback_",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                tmp.write(payload)
+                temp_path = tmp.name
+            if not secure_file_permissions(temp_path):
+                raise PermissionError("Rollback file ACL hardening failed")
+            os.replace(temp_path, path)
+            temp_path = None
+            if not secure_file_permissions(path):
+                raise PermissionError("Restored file ACL hardening failed")
+            return True
+        except Exception:
+            logger.exception("설정 저장 실패 후 이전 파일을 복원하지 못했습니다: %s", path)
+            return False
+        finally:
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def save(self):
         """Save non-sensitive config and encrypted secrets."""
@@ -319,8 +354,14 @@ class Config:
                 "post_concept": normalize_concept_id(getattr(self, "post_concept", "")),
                 "tutorial_shown": self.tutorial_shown,
             }
+            try:
+                config_existed, previous_config = self._read_file_snapshot(self.config_file)
+                secrets_existed, previous_secrets = self._read_file_snapshot(self.secrets_file)
+            except OSError:
+                logger.exception("설정 저장 전 기존 파일을 확인하지 못했습니다.")
+                return False
+
             temp_path = None
-            published = False
             config_saved = False
             try:
                 with tempfile.NamedTemporaryFile(
@@ -336,24 +377,42 @@ class Config:
                 if not secure_file_permissions(temp_path):
                     raise PermissionError("Temporary configuration ACL hardening failed")
                 os.replace(temp_path, self.config_file)
-                published = True
+                temp_path = None
                 if not secure_file_permissions(self.config_file):
                     raise PermissionError("Final configuration ACL hardening failed")
                 config_saved = True
-            except OSError:
+            except Exception:
                 logger.exception("설정 파일 저장에 실패했습니다.")
                 if temp_path:
                     try:
                         Path(temp_path).unlink(missing_ok=True)
                     except Exception:
                         pass
-                if published:
-                    try:
-                        self.config_file.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+            if not config_saved:
+                self._restore_file_snapshot(
+                    self.config_file,
+                    config_existed,
+                    previous_config,
+                )
+                return False
+
             secrets_saved = self._save_secrets()
-            return config_saved and secrets_saved
+            if secrets_saved:
+                return True
+
+            config_restored = self._restore_file_snapshot(
+                self.config_file,
+                config_existed,
+                previous_config,
+            )
+            secrets_restored = self._restore_file_snapshot(
+                self.secrets_file,
+                secrets_existed,
+                previous_secrets,
+            )
+            if not (config_restored and secrets_restored):
+                logger.critical("설정 저장 롤백이 완전히 끝나지 않았습니다.")
+            return False
 
     @classmethod
     def _normalize_gemini_keys(cls, values):
@@ -411,15 +470,15 @@ class Config:
     def add_threads_account(self, expected_username, **values):
         with self._lock:
             if len(self.threads_accounts) >= self._MAX_THREADS_ACCOUNTS:
-                raise ValueError("A maximum of 10 Threads accounts is supported")
+                raise ValueError("Threads 계정은 최대 10개까지 추가할 수 있습니다.")
             account = ThreadsAccount.create(expected_username, **values)
             if any(
                 existing.expected_username == account.expected_username
                 for existing in self.threads_accounts
             ):
-                raise ValueError("This Threads username is already configured")
+                raise ValueError("이미 등록된 Threads 사용자명입니다.")
             if any(existing.profile_id == account.profile_id for existing in self.threads_accounts):
-                raise ValueError("profile_id is already in use")
+                raise ValueError("이미 사용 중인 Threads 브라우저 프로필입니다.")
             self.threads_accounts.append(account)
             if not self.active_threads_account_id:
                 self.active_threads_account_id = account.account_id
@@ -435,17 +494,17 @@ class Config:
                         and existing.expected_username == updated.expected_username
                         for existing in self.threads_accounts
                     ):
-                        raise ValueError("This Threads username is already configured")
+                        raise ValueError("이미 등록된 Threads 사용자명입니다.")
                     self.threads_accounts[index] = updated
                     return updated
-            raise KeyError("Threads account was not found")
+            raise KeyError("Threads 계정을 찾을 수 없습니다.")
 
     def remove_threads_account(self, account_id):
         with self._lock:
             target = str(account_id or "")
             remaining = [account for account in self.threads_accounts if account.account_id != target]
             if len(remaining) == len(self.threads_accounts):
-                raise KeyError("Threads account was not found")
+                raise KeyError("Threads 계정을 찾을 수 없습니다.")
             self.threads_accounts = remaining
             if self.active_threads_account_id == target:
                 self.active_threads_account_id = remaining[0].account_id if remaining else ""
@@ -454,7 +513,7 @@ class Config:
         with self._lock:
             account = self.get_threads_account(account_id)
             if account is None:
-                raise KeyError("Threads account was not found")
+                raise KeyError("Threads 계정을 찾을 수 없습니다.")
             self.active_threads_account_id = account.account_id
             return account
 

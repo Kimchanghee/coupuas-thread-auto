@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -103,3 +104,11 @@ def sync_auto_start(enabled: bool) -> bool:
     if not is_supported():
         return True
     return enable_auto_start() if enabled else disable_auto_start()
+
+
+def sync_configured_auto_start(enabled: bool) -> bool:
+    """Apply the saved preference unless an isolated smoke test disabled registry writes."""
+    if os.getenv("THREAD_AUTO_DISABLE_AUTOSTART_SYNC", "").strip() == "1":
+        logger.info("Windows auto-start sync disabled for isolated verification.")
+        return True
+    return sync_auto_start(enabled)
