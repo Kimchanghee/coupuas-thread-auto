@@ -47,10 +47,11 @@ class FakeAgent:
 
 
 class FakeHelper:
-    def __init__(self, *, login=True, matches=True, upload=True):
+    def __init__(self, *, login=True, matches=True, upload=True, on_verify=None):
         self.login = login
         self.matches = matches
         self.upload = upload
+        self.on_verify = on_verify
         self.expected = ""
         self.last_error = ""
 
@@ -59,6 +60,8 @@ class FakeHelper:
 
     def verify_account(self, expected_username):
         self.expected = expected_username
+        if self.on_verify is not None:
+            self.on_verify()
         return self.matches
 
     def create_thread_direct(self, _payload):
@@ -107,6 +110,13 @@ def test_auth_quota_adapter_passes_stable_key_and_fails_closed(monkeypatch):
     )
     with pytest.raises(AccountBlockedError, match="안전한 작업 예약"):
         adapter.reserve("queue-key")
+
+    monkeypatch.setattr(
+        auth_client,
+        "release_reserved_work",
+        lambda _reservation_id: {"success": False, "unsupported": True},
+    )
+    assert adapter.release(QuotaReservation(reservation_id="r-1")) is False
 
 
 def _build_runner(tmp_path, helper, quota=None):
@@ -175,6 +185,50 @@ def test_runner_reuses_managed_ai_reservation_without_double_reserving(tmp_path)
     assert result.success
     assert quota.reserved == 0
     assert quota.committed == 1
+
+
+def test_stop_after_login_releases_managed_reservation_before_requeue(tmp_path):
+    helper = FakeHelper()
+    runner, queue, _history, pipeline, _events, quota = _build_runner(
+        tmp_path,
+        helper,
+    )
+    helper.on_verify = lambda: queue.request_stop(True)
+    pipeline.managed_reservation_id = "managed-reservation-stop"
+    item = queue.enqueue("https://link.coupang.com/a/managed-stop")
+
+    result = runner.process_one("account-a")
+
+    state = queue.snapshot()
+    assert result.processed is False
+    assert quota.reserved == 0
+    assert quota.released == 1
+    assert state["current_item"] is None
+    assert state["pending_items"][0]["item_id"] == item["item_id"]
+    assert "reservation_id" not in state["pending_items"][0]
+
+
+def test_failed_managed_release_persists_recovery_metadata(tmp_path):
+    helper = FakeHelper()
+    quota = FakeQuota(release=False)
+    runner, queue, _history, pipeline, _events, _quota = _build_runner(
+        tmp_path,
+        helper,
+        quota,
+    )
+    helper.on_verify = lambda: queue.request_stop(True)
+    pipeline.managed_reservation_id = "managed-reservation-pending"
+    item = queue.enqueue("https://link.coupang.com/a/managed-pending")
+
+    result = runner.process_one("account-a")
+
+    state = queue.snapshot()
+    assert result.block_reason == "reservation_release_pending"
+    assert state["current_item"]["item_id"] == item["item_id"]
+    assert state["current_item"]["stage"] == "reservation_release_pending"
+    assert state["current_item"]["reservation_id"] == "managed-reservation-pending"
+    assert state["pending_items"] == []
+    assert quota.released == 1
 
 
 def test_account_mismatch_requeues_item_and_blocks_only_that_account(tmp_path):
@@ -250,6 +304,30 @@ def test_uncertain_post_is_blocked_instead_of_requeued(tmp_path):
     assert state["current_item"]["stage"] == "posting_unknown"
     assert not history.is_uploaded(url)
     assert quota.released == 0
+
+
+def test_transient_analysis_failure_is_requeued_with_backoff(tmp_path):
+    helper = FakeHelper()
+    runner, queue, _history, pipeline, events, quota = _build_runner(
+        tmp_path,
+        helper,
+    )
+    pipeline.process_link = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        TimeoutError("provider timeout")
+    )
+    item = queue.enqueue("https://link.coupang.com/a/retry")
+
+    result = runner.process_one("account-a")
+
+    state = queue.snapshot()
+    assert result.processed is False
+    assert result.pending_count == 1
+    assert result.next_allowed_at is not None
+    assert state["stats"]["failed"] == 0
+    assert state["pending_items"][0]["item_id"] == item["item_id"]
+    assert state["pending_items"][0]["retry_count"] == 1
+    assert events == []
+    assert quota.reserved == 0
 
 
 def test_failed_reservation_release_stays_blocked_without_new_reservation(

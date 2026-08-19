@@ -156,7 +156,9 @@ def save_configured_gemini_api_keys(keys: Iterable[str]) -> list[str]:
         config.set_gemini_api_keys(normalized)
     else:
         config.gemini_api_key = normalized[0] if normalized else ""
-    config.save()
+    if not config.save():
+        config.load()
+        raise OSError("Gemini API 키 설정을 저장하지 못했습니다.")
     return normalized
 
 
@@ -233,6 +235,10 @@ def select_working_gemini_api_key(validate: bool = True) -> str:
 
     if selected != keys[0]:
         reordered = [selected] + [k for k in keys if k != selected]
-        save_configured_gemini_api_keys(reordered)
-        logger.warning("Gemini API 키 자동 전환 완료: 기존 1번 키에서 다음 키로 변경")
+        try:
+            save_configured_gemini_api_keys(reordered)
+        except OSError:
+            logger.exception("Gemini API 키 자동 전환 결과를 저장하지 못했습니다.")
+        else:
+            logger.warning("Gemini API 키 자동 전환 완료: 기존 1번 키에서 다음 키로 변경")
     return selected

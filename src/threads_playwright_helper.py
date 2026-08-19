@@ -7,7 +7,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, List
+from typing import Any, Optional
 
 try:
     from playwright.sync_api import Page
@@ -981,7 +981,7 @@ class ThreadsPlaywrightHelper:
                 'form div[tabindex]',
             ]
 
-            print(f"  '스레드에 추가' 버튼 찾는 중...")
+            print("  '스레드에 추가' 버튼 찾는 중...")
 
             for i, selector in enumerate(selectors):
                 try:
@@ -997,17 +997,17 @@ class ThreadsPlaywrightHelper:
 
                         # text selector는 정확하므로 바로 클릭
                         if selector.startswith('text='):
-                            print(f"    text selector - 바로 클릭")
+                            print("    text selector - 바로 클릭")
                             btn.click()
-                            print(f"    '스레드에 추가' 버튼 클릭 완료")
+                            print("    '스레드에 추가' 버튼 클릭 완료")
                             time.sleep(2)
                             return True
 
                         # "스레드에 추가"가 포함되어 있으면 우선 허용
                         if "스레드에 추가" in element_text or "add to thread" in element_text.lower():
-                            print(f"    '스레드에 추가' 텍스트 포함 - 클릭")
+                            print("    '스레드에 추가' 텍스트 포함 - 클릭")
                             btn.click()
-                            print(f"    '스레드에 추가' 버튼 클릭 완료")
+                            print("    '스레드에 추가' 버튼 클릭 완료")
                             time.sleep(2)
                             return True
 
@@ -1030,12 +1030,12 @@ class ThreadsPlaywrightHelper:
                                 print(f"    제외됨: '{element_text[:30]}' (관련 텍스트 없음)")
                                 continue
 
-                        print(f"    올바른 버튼 확인")
+                        print("    올바른 버튼 확인")
                         btn.click()
-                        print(f"    '스레드에 추가' 버튼 클릭 완료")
+                        print("    '스레드에 추가' 버튼 클릭 완료")
                         time.sleep(2)  # UI 업데이트 대기
                         return True
-                except Exception as e:
+                except Exception:
                     # 이 selector는 실패, 다음으로
                     continue
 
@@ -1109,7 +1109,7 @@ class ThreadsPlaywrightHelper:
 
                         # 마우스로 직접 클릭
                         self.page.mouse.click(click_x, click_y)
-                        print(f"  게시 버튼 마우스 클릭 완료")
+                        print("  게시 버튼 마우스 클릭 완료")
                         time.sleep(5)
                         return True
 
@@ -1277,10 +1277,10 @@ class ThreadsPlaywrightHelper:
             if file_input.count() > 0:
                 file_input.set_input_files(os.path.abspath(image_path))
                 time.sleep(3)  # 이미지 업로드 대기
-                print(f"  이미지 업로드 완료")
+                print("  이미지 업로드 완료")
                 return True
             else:
-                print(f"  이미지 업로드 input 요소를 찾을 수 없음")
+                print("  이미지 업로드 input 요소를 찾을 수 없음")
                 return False
 
         except Exception as e:
@@ -1381,7 +1381,7 @@ class ThreadsPlaywrightHelper:
 
                 # 3-1. UI가 자동으로 생성하는지 잠시 대기
                 if textarea_count_before < expected_count:
-                    print(f"    UI 자동 생성 대기 중...")
+                    print("    UI 자동 생성 대기 중...")
                     time.sleep(1)
                     textarea_count_after_wait = self.count_textareas()
                     if textarea_count_after_wait >= expected_count:
@@ -1395,9 +1395,9 @@ class ThreadsPlaywrightHelper:
                     print(f"    Textarea {expected_count}개 존재 (버튼 클릭 불필요)")
                 else:
                     # 3-2. '스레드에 추가' 클릭
-                    print(f"    '스레드에 추가' 버튼 클릭 필요...")
+                    print("    '스레드에 추가' 버튼 클릭 필요...")
                     if not self.click_add_to_thread():
-                        print(f"    '스레드에 추가' 버튼을 찾을 수 없음")
+                        print("    '스레드에 추가' 버튼을 찾을 수 없음")
                         return False
 
                     # 3-3. 버튼 클릭 후 textarea 개수 확인
@@ -1407,7 +1407,7 @@ class ThreadsPlaywrightHelper:
 
                     if textarea_count_after < expected_count:
                         print(f"    Textarea 생성 실패 ({textarea_count_after}/{expected_count})")
-                        print(f"    잘못된 요소를 클릭했거나 UI가 변경됨")
+                        print("    잘못된 요소를 클릭했거나 UI가 변경됨")
                         # 디버그 스크린샷
                         try:
                             debug_path = self._save_debug_screenshot(f"debug_failed_add_{i}")
@@ -1444,7 +1444,7 @@ class ThreadsPlaywrightHelper:
                         return False
 
             # 4. 최종 검증
-            print(f"\n  최종 검증...")
+            print("\n  최종 검증...")
             final_count = self.count_textareas()
             if final_count != total:
                 print(f"  Textarea 개수 불일치 ({final_count}/{total})")
@@ -1452,7 +1452,7 @@ class ThreadsPlaywrightHelper:
             # 5. Post 버튼 클릭
             if is_timed_out("before_click_post"):
                 return False
-            print(f"\n  게시 중...")
+            print("\n  게시 중...")
             if not self.click_post_button():
                 return False
 
@@ -1463,7 +1463,7 @@ class ThreadsPlaywrightHelper:
                 print("  게시 검증 실패 (프로필에서 최신 글 확인 불가)")
                 return False
 
-            print(f"\n  스레드 게시 완료")
+            print("\n  스레드 게시 완료")
             return True
 
         except Exception as e:
@@ -1502,7 +1502,7 @@ class ThreadsPlaywrightHelper:
             # 마지막으로 URL 변경 확인 (compose에서 벗어났는지)
             current_url = self.page.url
             if '/compose' not in current_url.lower():
-                print(f"  compose 페이지에서 이동됨 - 게시 성공 추정")
+                print("  compose 페이지에서 이동됨 - 게시 성공 추정")
                 return True
 
             # compose 상태가 유지되면 실제 게시 실패로 판단

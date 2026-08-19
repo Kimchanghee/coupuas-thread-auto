@@ -28,6 +28,8 @@ _SUSPICIOUS_ENV_VARS = (
     "THREAD_AUTO_ALLOW_ANALYSIS_MODE",
     "COUPUAS_ALLOW_UNPINNED_UPDATER_SIGNER",
     "THREAD_AUTO_SECURITY_BYPASS",
+    "THREAD_AUTO_DEV_BYPASS_WORK_QUOTA",
+    "THREAD_AUTO_DEV_ENTRYPOINT",
 )
 
 _SUSPICIOUS_PROCESS_NAMES = {
@@ -58,6 +60,17 @@ _SUSPICIOUS_PROCESS_NAMES = {
 
 def _is_frozen_build() -> bool:
     return bool(getattr(sys, "frozen", False))
+
+
+def development_quota_bypass_enabled() -> bool:
+    """Allow quota bypass only from the explicit source-only dev entrypoint."""
+    if _is_frozen_build():
+        return False
+    entrypoint = str(os.getenv("THREAD_AUTO_DEV_ENTRYPOINT", "") or "").strip().lower()
+    if entrypoint not in {"1", "true", "yes", "y", "on"}:
+        return False
+    value = str(os.getenv("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "") or "").strip().lower()
+    return value in {"1", "true", "yes", "y", "on"}
 
 
 def _is_windows() -> bool:

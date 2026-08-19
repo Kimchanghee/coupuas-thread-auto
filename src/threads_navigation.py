@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
 
 DEFAULT_THREADS_BASE_URLS: tuple[str, ...] = (

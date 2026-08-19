@@ -1,4 +1,3 @@
-import json
 import queue
 import threading
 from types import SimpleNamespace

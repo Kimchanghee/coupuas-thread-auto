@@ -1,5 +1,18 @@
 from src.services.aggro_generator import AggroGenerator
 from src.services.managed_ai_client import ManagedGeneration, ManagedVariant
+from src.services.post_concepts import (
+    CONCEPT_BUYING_GUIDE,
+    CONCEPT_PROBLEM_SOLUTION,
+    CONCEPT_TODAY_ISSUE,
+    DEFAULT_POST_CONCEPT_ID,
+    get_post_concept,
+    normalize_concept_id,
+)
+from src.services.thread_payload import (
+    PRODUCT_COMMENT,
+    ROOT_POST,
+    build_product_thread_payload,
+)
 
 
 class _ManagedClientStub:
@@ -59,19 +72,6 @@ def test_managed_provider_generates_four_variants_with_one_server_call():
     assert variants[0]["managed_ai_quota_mode"] == "legacy"
     assert variants[0]["first_post"]["media_path"] is None
     assert variants[0]["second_post"]["media_path"] == "media/product.jpg"
-from src.services.post_concepts import (
-    CONCEPT_BUYING_GUIDE,
-    CONCEPT_PROBLEM_SOLUTION,
-    CONCEPT_TODAY_ISSUE,
-    DEFAULT_POST_CONCEPT_ID,
-    get_post_concept,
-    normalize_concept_id,
-)
-from src.services.thread_payload import (
-    PRODUCT_COMMENT,
-    ROOT_POST,
-    build_product_thread_payload,
-)
 
 
 def test_first_post_fallback_is_product_specific_and_link_free():

@@ -12,7 +12,7 @@ import time
 import html as html_lib
 from html.parser import HTMLParser
 from typing import Callable, Optional, Dict
-from urllib.parse import urlparse, parse_qs, urljoin
+from urllib.parse import urlparse, urljoin
 
 from src.gemini_keys import (
     generate_content_with_model_fallback,
@@ -198,13 +198,13 @@ class CoupangParser:
                 result['affiliate_disclosure'] = marketplace.disclosure
 
                 if result.get('image_url'):
-                    print(f"  [Parse] Successfully extracted image URL")
+                    print("  [Parse] Successfully extracted image URL")
                 elif result.get('product_id'):
-                    print(f"  [Parse] Only product_id available, will use 1688 search")
+                    print("  [Parse] Only product_id available, will use 1688 search")
 
                 return result
 
-            print(f"  [!] Could not parse link")
+            print("  [!] Could not parse link")
             return None
 
         except Exception as e:
@@ -472,7 +472,7 @@ class CoupangParser:
                         info['search_keywords'] = gemini_result['keywords']
                     if gemini_result.get('image_url'):
                         info['image_url'] = gemini_result['image_url']
-                        print(f"  [Parse] Image URL found")
+                        print("  [Parse] Image URL found")
 
             # 제목이 없으면 빈 값으로
             if not info.get('title'):
@@ -498,8 +498,6 @@ class CoupangParser:
         if not self.google_api_key:
             return None
 
-        last_error = None
-
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 check_cancelled(cancel_check)
@@ -507,7 +505,7 @@ class CoupangParser:
                 from google.genai.types import GenerateContentConfig
 
                 if attempt == 1:
-                    print(f"  [Parse] Using Gemini URL Context...")
+                    print("  [Parse] Using Gemini URL Context...")
                 else:
                     print(f"  [Parse] Gemini 재시도 {attempt}/{MAX_RETRIES}...")
 
@@ -559,7 +557,7 @@ JSON만 출력하세요."""
                 return None
 
             except ImportError:
-                print(f"  [!] google-genai not installed, trying REST API...")
+                print("  [!] google-genai not installed, trying REST API...")
                 return self._fetch_with_gemini_rest_api(
                     url,
                     cancel_check=cancel_check,
@@ -568,7 +566,6 @@ JSON만 출력하세요."""
             except Exception as e:
                 if is_cancelled_exception(e):
                     raise
-                last_error = e
                 error_str = str(e).lower()
 
                 if is_retryable_gemini_model_error(e):
@@ -617,7 +614,7 @@ JSON만 출력하세요."""
 
         try:
             check_cancelled(cancel_check)
-            print(f"  [Parse] Using Gemini REST API with URL Context...")
+            print("  [Parse] Using Gemini REST API with URL Context...")
 
             marketplace = marketplace_for_url(url)
             marketplace_label = marketplace.label if marketplace else marketplace_id
@@ -878,7 +875,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1:
         api_key = sys.argv[1]
-        print(f"API Key: 명령줄에서 제공됨")
+        print("API Key: 명령줄에서 제공됨")
     if len(sys.argv) > 2:
         test_url = sys.argv[2]
 
@@ -886,7 +883,7 @@ if __name__ == "__main__":
     if not api_key:
         api_key = os.environ.get('GOOGLE_API_KEY') or os.environ.get('GEMINI_API_KEY')
         if api_key:
-            print(f"API Key: 환경변수에서 로드됨")
+            print("API Key: 환경변수에서 로드됨")
 
     # config에서 시도
     if not api_key:
@@ -894,7 +891,7 @@ if __name__ == "__main__":
             from src.config import config
             api_key = config.gemini_api_key
             if api_key:
-                print(f"API Key: config에서 로드됨")
+                print("API Key: config에서 로드됨")
         except Exception:
             pass
 
@@ -915,16 +912,16 @@ if __name__ == "__main__":
         info = parser.parse_link(test_url)
 
         if info:
-            print(f"\n결과:")
+            print("\n결과:")
             print(f"  Product ID: {info.get('product_id', 'N/A')}")
             print(f"  Title: {info.get('title') or '(추출 불가)'}")
             print(f"  Keywords: {info.get('search_keywords') or '(추출 불가)'}")
             print(f"  Image URL: {info.get('image_url') or '(추출 불가)'}")
 
             if info.get('title'):
-                print(f"\n✅ Gemini URL Context로 상품 정보 추출 성공!")
+                print("\n✅ Gemini URL Context로 상품 정보 추출 성공!")
             else:
-                print(f"\n⚠️ 상품 정보 추출 실패")
+                print("\n⚠️ 상품 정보 추출 실패")
                 print("   → UI에서 'URL | 키워드' 형식으로 직접 입력 필요")
         else:
             print("파싱 실패")

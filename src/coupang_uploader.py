@@ -137,7 +137,7 @@ class CoupangThreadsUploader:
             success = helper.create_thread_direct(posts_data)
 
             if success:
-                print(f"  업로드 성공")
+                print("  업로드 성공")
                 return True
             else:
                 print("  직접 작성 실패: AI fallback 기능이 제거되어 재시도하지 않습니다.")
@@ -600,7 +600,7 @@ class CoupangPartnersPipeline:
                 print("  공개 상품 정보가 없어 사용자 키워드로 계속 진행")
 
         if not product_info:
-            print(f"  링크 분석 실패")
+            print("  링크 분석 실패")
             return None
 
         product_info.setdefault("original_url", str(product_url or "").strip())
@@ -614,7 +614,7 @@ class CoupangPartnersPipeline:
         elif product_info.get('title'):
             print(f"  상품명: {product_info.get('title', '')[:40]}...")
         else:
-            print(f"  상품명 없음 (상품 번호만 추출됨)")
+            print("  상품명 없음 (상품 번호만 추출됨)")
             marketplace_label = str(product_info.get("marketplace_label") or "쇼핑몰")
             product_id = str(product_info.get("product_id") or "").strip()
             product_info['title'] = (
@@ -640,9 +640,9 @@ class CoupangPartnersPipeline:
                 product_info['image_path_2'] = images[1]
                 print(f"  1688 이미지 {len(images)}개 확보")
             else:
-                print(f"  1688 이미지 1개 확보")
+                print("  1688 이미지 1개 확보")
         else:
-            print(f"  1688 이미지 검색 실패 (이미지 없이 진행)")
+            print("  1688 이미지 검색 실패 (이미지 없이 진행)")
             product_info['image_path'] = None
         product_info['video_path'] = None
 

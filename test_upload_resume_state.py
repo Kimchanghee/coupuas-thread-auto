@@ -3,7 +3,6 @@ import threading
 from types import SimpleNamespace
 
 from src.main_window import MainWindow
-from src.main_window import QMessageBox
 
 
 def _make_resume_fake(tmp_path):
@@ -23,6 +22,7 @@ def _make_resume_fake(tmp_path):
         "_resume_pending_link_data",
         "_load_resume_state_file",
         "_archive_legacy_resume_state",
+        "_ask_ambiguous_post_result",
         "_reconcile_ambiguous_post_items",
     ):
         setattr(fake, name, getattr(MainWindow, name).__get__(fake, type(fake)))
@@ -122,11 +122,7 @@ def test_confirmed_not_posted_releases_and_rotates_idempotency_key(tmp_path, mon
         ],
     }
     fake._resume_items = [dict(state["items"][0])]
-    monkeypatch.setattr(
-        QMessageBox,
-        "question",
-        lambda *_args, **_kwargs: QMessageBox.StandardButton.No,
-    )
+    fake._ask_ambiguous_post_result = lambda _title: "not_posted"
     released = []
     monkeypatch.setattr(
         auth_client,

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import hashlib
-import os
+import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
 from src.services.multi_account_coordinator import AccountRunResult
 from src.services.thread_payload import build_product_thread_payload
+from src.runtime_security import development_quota_bypass_enabled
+from src.services.retry_policy import (
+    MAX_TRANSIENT_RETRIES,
+    is_transient_error,
+    retry_delay_seconds,
+)
 
 
 class AccountBlockedError(RuntimeError):
@@ -34,7 +40,7 @@ class AuthQuotaAdapter:
         if not isinstance(result, dict):
             return False
         if result.get("unsupported"):
-            return True
+            return False
         if "available" in result:
             return bool(result.get("available"))
         if "allowed" in result:
@@ -47,10 +53,7 @@ class AuthQuotaAdapter:
 
     @staticmethod
     def _bypass_enabled() -> bool:
-        value = str(
-            os.getenv("THREAD_AUTO_DEV_BYPASS_WORK_QUOTA", "") or ""
-        ).strip().lower()
-        return value in {"1", "true", "yes", "y", "on"}
+        return development_quota_bypass_enabled()
 
     def reserve(self, idempotency_key: str | None = None) -> QuotaReservation:
         if self._bypass_enabled():
@@ -190,6 +193,46 @@ class MultiAccountUploadRunner:
             bypass=bypass,
         )
 
+    @staticmethod
+    def _persist_reservation(queue_store, reservation, product_name: str) -> None:
+        """Durably record a reservation before any further external work."""
+        queue_store.update_current(
+            stage="reserved",
+            reservation_id=str(getattr(reservation, "reservation_id", "") or ""),
+            reservation_legacy=bool(getattr(reservation, "legacy", False)),
+            reservation_bypass=bool(getattr(reservation, "bypass", False)),
+            product_name=product_name,
+        )
+
+    def _release_reservation(self, queue_store, reservation) -> bool:
+        """Release a reservation or leave enough state for safe recovery."""
+        if reservation is None:
+            return True
+        try:
+            released = self._quota.release(reservation) is True
+        except Exception:
+            released = False
+        if released:
+            return True
+        self._persist_reservation(
+            queue_store,
+            reservation,
+            str((queue_store.snapshot().get("current_item") or {}).get("product_name") or ""),
+        )
+        queue_store.update_current(stage="reservation_release_pending")
+        queue_store.set_phase(
+            "blocked",
+            last_error="reservation_release_pending",
+        )
+        return False
+
+    def _release_pending_result(self, queue_store) -> AccountRunResult:
+        return AccountRunResult(
+            processed=False,
+            pending_count=self._pending_count(queue_store),
+            block_reason="reservation_release_pending",
+        )
+
     def _recover_interrupted_current(
         self,
         queue_store,
@@ -199,17 +242,8 @@ class MultiAccountUploadRunner:
         stage = str(item.get("stage") or "")
         reservation = self._reservation_from_item(item)
         if stage in {"reserved", "reservation_release_pending"}:
-            if self._quota.release(reservation) is not True:
-                queue_store.update_current(stage="reservation_release_pending")
-                queue_store.set_phase(
-                    "blocked",
-                    last_error="reservation_release_pending",
-                )
-                return AccountRunResult(
-                    processed=False,
-                    pending_count=self._pending_count(queue_store),
-                    block_reason="reservation_release_pending",
-                )
+            if not self._release_reservation(queue_store, reservation):
+                return self._release_pending_result(queue_store)
             queue_store.requeue_current()
             return None
         if stage == "posted_commit_pending":
@@ -304,8 +338,29 @@ class MultiAccountUploadRunner:
                     processed=False,
                     pending_count=self._pending_count(queue_store),
                 )
+            retry_count = int(item.get("retry_count", 0) or 0) + 1
+            if is_transient_error(exc) and retry_count <= MAX_TRANSIENT_RETRIES:
+                delay = retry_delay_seconds(retry_count)
+                queue_store.update_current(
+                    retry_count=retry_count,
+                    last_retry_error=str(exc)[:300],
+                )
+                queue_store.requeue_current()
+                self._log(
+                    account_id,
+                    f"일시적인 연결 문제로 {delay}초 후 다시 시도합니다. "
+                    f"({retry_count}/{MAX_TRANSIENT_RETRIES})",
+                )
+                return AccountRunResult(
+                    processed=False,
+                    pending_count=self._pending_count(queue_store),
+                    next_allowed_at=time.time() + delay,
+                )
             queue_store.complete_current("failed", str(exc)[:300])
-            self._log(account_id, f"상품 처리 실패: {exc}")
+            self._log(
+                account_id,
+                "상품 정보를 처리하지 못했습니다. 잠시 후 다시 시도해주세요.",
+            )
             return AccountRunResult(
                 processed=True,
                 pending_count=self._pending_count(queue_store),
@@ -331,9 +386,11 @@ class MultiAccountUploadRunner:
             if managed_reservation_id
             else None
         )
+        if reservation is not None:
+            self._persist_reservation(queue_store, reservation, product_name)
         if self._stop_requested(queue_store):
-            if reservation is not None:
-                self._quota.release(reservation)
+            if not self._release_reservation(queue_store, reservation):
+                return self._release_pending_result(queue_store)
             queue_store.requeue_current()
             return AccountRunResult(
                 processed=False,
@@ -358,6 +415,8 @@ class MultiAccountUploadRunner:
                 )
 
             if self._stop_requested(queue_store):
+                if not self._release_reservation(queue_store, reservation):
+                    return self._release_pending_result(queue_store)
                 queue_store.requeue_current()
                 return AccountRunResult(
                     processed=False,
@@ -375,27 +434,10 @@ class MultiAccountUploadRunner:
                     reservation = self._quota.reserve(idempotency_key)
                 else:
                     reservation = self._quota.reserve()
-            queue_store.update_current(
-                stage="reserved",
-                reservation_id=str(getattr(reservation, "reservation_id", "") or ""),
-                reservation_legacy=bool(getattr(reservation, "legacy", False)),
-                reservation_bypass=bool(getattr(reservation, "bypass", False)),
-                product_name=product_name,
-            )
+            self._persist_reservation(queue_store, reservation, product_name)
             if self._stop_requested(queue_store):
-                if self._quota.release(reservation) is not True:
-                    queue_store.update_current(
-                        stage="reservation_release_pending"
-                    )
-                    queue_store.set_phase(
-                        "blocked",
-                        last_error="reservation_release_pending",
-                    )
-                    return AccountRunResult(
-                        processed=False,
-                        pending_count=self._pending_count(queue_store),
-                        block_reason="reservation_release_pending",
-                    )
+                if not self._release_reservation(queue_store, reservation):
+                    return self._release_pending_result(queue_store)
                 reservation = None
                 queue_store.requeue_current()
                 return AccountRunResult(
@@ -445,20 +487,14 @@ class MultiAccountUploadRunner:
                 success=True,
             )
         except AccountBlockedError as exc:
-            if reservation is not None and self._quota.release(reservation) is not True:
-                queue_store.update_current(stage="reservation_release_pending")
-                queue_store.set_phase(
-                    "blocked",
-                    last_error="reservation_release_pending",
-                )
-                return AccountRunResult(
-                    processed=False,
-                    pending_count=self._pending_count(queue_store),
-                    block_reason="reservation_release_pending",
-                )
+            if not self._release_reservation(queue_store, reservation):
+                return self._release_pending_result(queue_store)
             queue_store.requeue_current()
             queue_store.set_phase("blocked", last_error=str(exc))
-            self._log(account_id, str(exc))
+            self._log(
+                account_id,
+                "이 계정의 작업을 계속하려면 설정을 확인해주세요.",
+            )
             return AccountRunResult(
                 processed=False,
                 pending_count=self._pending_count(queue_store),
@@ -469,26 +505,23 @@ class MultiAccountUploadRunner:
             stage = str(current.get("stage") or "")
             if stage in {"posting", "posting_unknown", "posted_commit_pending"}:
                 queue_store.set_phase("blocked", last_error=str(exc)[:300])
-                self._log(account_id, f"업로드 오류: {exc}")
+                self._log(
+                    account_id,
+                    "게시 결과를 확인하지 못했습니다. Threads에서 게시 여부를 확인해주세요.",
+                )
                 return AccountRunResult(
                     processed=False,
                     pending_count=self._pending_count(queue_store),
                     block_reason="uncertain_external_post",
                 )
-            if reservation is not None and self._quota.release(reservation) is not True:
-                queue_store.update_current(stage="reservation_release_pending")
-                queue_store.set_phase(
-                    "blocked",
-                    last_error="reservation_release_pending",
-                )
-                return AccountRunResult(
-                    processed=False,
-                    pending_count=self._pending_count(queue_store),
-                    block_reason="reservation_release_pending",
-                )
+            if not self._release_reservation(queue_store, reservation):
+                return self._release_pending_result(queue_store)
             queue_store.complete_current("failed", str(exc)[:300])
             history.add_link(url, product_name, success=False)
-            self._log(account_id, f"업로드 오류: {exc}")
+            self._log(
+                account_id,
+                "게시글 업로드에 실패했습니다. 로그인 상태와 네트워크를 확인해주세요.",
+            )
             return AccountRunResult(
                 processed=True,
                 pending_count=self._pending_count(queue_store),

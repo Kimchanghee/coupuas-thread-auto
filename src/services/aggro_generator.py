@@ -340,7 +340,7 @@ class AggroGenerator:
             support = "예쁜지보다 실제로 자주 쓰게 될지가 먼저 보입니다"
             return f"{cls._trim_line(hook, cls.MAX_HOOK_LENGTH)}\n{cls._trim_line(support, cls.MAX_SUPPORT_LENGTH)}"
         hook_templates = [
-            f"🚗 에어컨을 켜도 차 안이 묘하게 답답할 때 있죠?",
+            "🚗 에어컨을 켜도 차 안이 묘하게 답답할 때 있죠?",
             f"🌀 {token} 찾다 보면 색깔 때문에 망설여질 때도 있죠",
             f"👀 차 안 분위기 해치지 않는 {token}, 은근 찾기 어렵습니다",
             f"🤔 {token}, 필요할 땐 확실히 떠오르는데 고르기는 애매하죠",
