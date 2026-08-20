@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>스레드 쇼핑 자동화 · UI 시안 5종</title>
+  <link rel="stylesheet" href="concepts.css">
+</head>
+<body data-concept="1">
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="icon-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13H11l-1 9 8.5-11H12l1-9Z"/></symbol>
+    <symbol id="icon-link" viewBox="0 0 24 24"><path d="M9 17H7a5 5 0 0 1 0-10h2M15 7h2a5 5 0 1 1 0 10h-2M8 12h8"/></symbol>
+    <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.95 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.58 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.95a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.58 1.7 1.7 0 0 0 10 3h4a1.7 1.7 0 0 0 1.05 1.58 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.82 7l-.06.06a1.7 1.7 0 0 0-.34 1.88A1.7 1.7 0 0 0 21 10v4a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="icon-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+    <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="icon-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="icon-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="icon-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.7 2c-.95.58-1.5 1.08-1.5 2M12 17h.01"/></symbol>
+  </svg>
+
+  <div class="concept-switcher" aria-label="디자인 시안 선택">
+    <div class="switcher-copy">
+      <strong>UI 디자인 시안</strong>
+      <span id="concept-description">기존 다크 테마를 정돈한 운영 콘솔</span>
+    </div>
+    <div class="switcher-buttons" role="tablist" aria-label="시안 목록">
+      <button type="button" data-select="1" aria-selected="true">01 Midnight</button>
+      <button type="button" data-select="2" aria-selected="false">02 Fluent</button>
+      <button type="button" data-select="3" aria-selected="false">03 Signal</button>
+      <button type="button" data-select="4" aria-selected="false">04 Coral</button>
+      <button type="button" data-select="5" aria-selected="false">05 Nordic</button>
+    </div>
+  </div>
+
+  <div class="app-window">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark"><svg><use href="#icon-bolt"/></svg></span>
+        <span class="brand-copy">
+          <strong>스레드 쇼핑 자동화</strong>
+          <small>THREAD SHOPPING AUTOMATION</small>
+        </span>
+      </div>
+      <nav class="top-nav" aria-label="주요 메뉴">
+        <button type="button" class="active"><svg><use href="#icon-link"/></svg><span>자동화</span></button>
+        <button type="button"><svg><use href="#icon-settings"/></svg><span>설정</span></button>
+      </nav>
+      <div class="account-cluster">
+        <span class="usage-badge"><b>0</b> / 0회</span>
+        <span class="connection"><i></i> 연결됨</span>
+        <button type="button" class="account-button"><svg><use href="#icon-user"/></svg><span>daily.living_note</span></button>
+        <button type="button" class="ghost-button">도움말</button>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <nav class="side-nav" aria-label="작업 메뉴">
+        <button type="button" class="active"><svg><use href="#icon-link"/></svg><span>자동화</span><b>01</b></button>
+        <button type="button"><svg><use href="#icon-settings"/></svg><span>통합 설정</span><b>02</b></button>
+      </nav>
+
+      <section class="progress-section">
+        <div class="eyebrow">현재 진행 상황</div>
+        <strong class="progress-total">전체 <b>0 / 0</b></strong>
+        <ol class="progress-steps">
+          <li><i></i><span>링크 분석</span></li>
+          <li><i></i><span>콘텐츠 생성</span></li>
+          <li><i></i><span>Threads 업로드</span></li>
+          <li><i></i><span>완료 처리</span></li>
+        </ol>
+      </section>
+
+      <section class="side-stats">
+        <div><i class="success"></i><span>성공</span><b>0</b></div>
+        <div><i class="danger"></i><span>실패</span><b>0</b></div>
+        <div><i class="info"></i><span>전체</span><b>0</b></div>
+      </section>
+
+      <section class="log-card">
+        <div class="section-minihead"><span>작업 로그</span><button type="button">전체 보기</button></div>
+        <div class="log-empty"><svg><use href="#icon-list"/></svg><p>실행하면 작업 기록이<br>시간순으로 표시됩니다.</p></div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="workspace-heading">
+        <div>
+          <div class="breadcrumb">AUTOMATION <span>/</span> LINK QUEUE</div>
+          <h1>링크 자동화</h1>
+          <p>상품 링크를 추가하고, 콘텐츠 생성부터 업로드까지 한 번에 실행하세요.</p>
+        </div>
+        <div class="heading-actions">
+          <span class="queue-chip"><i></i> 대기열 0개</span>
+          <button type="button" class="icon-button" aria-label="화면 도움말"><svg><use href="#icon-help"/></svg></button>
+        </div>
+      </section>
+
+      <div class="account-tabs" role="tablist" aria-label="업로드 계정">
+        <button type="button" aria-selected="true"><span class="avatar">D</span><span><b>daily.living_note</b><small>Threads 계정</small></span><i></i></button>
+        <button type="button" class="add-account">＋ 계정 연결</button>
+      </div>
+
+      <div class="content-grid">
+        <section class="link-panel card">
+          <div class="card-heading">
+            <div>
+              <span class="step-number">01</span>
+              <div><h2>상품 링크 입력</h2><p>한 줄에 링크 하나씩 붙여넣으세요.</p></div>
+            </div>
+            <span class="supported">8개 쇼핑몰 지원</span>
+          </div>
+          <div class="textarea-wrap">
+            <div class="textarea-gutter">1<br>2<br>3</div>
+            <textarea aria-label="상품 링크 입력" spellcheck="false">https://link.coupang.com/a/xxx
+https://smartstore.naver.com/.../products/...
+https://www.aliexpress.com/item/...html</textarea>
+            <span class="paste-hint">Ctrl + V</span>
+          </div>
+          <div class="input-meta"><span><i></i> 중복 링크는 자동으로 제외됩니다.</span><b>사용 가능 3개</b></div>
+          <div class="primary-actions">
+            <button type="button" class="primary-button"><svg><use href="#icon-play"/></svg><span>자동화 시작</span><small>현재 계정</small></button>
+            <button type="button" class="secondary-button">링크 추가</button>
+            <button type="button" class="danger-button"><svg><use href="#icon-pause"/></svg><span>중지</span></button>
+          </div>
+        </section>
+
+        <aside class="run-panel card">
+          <div class="card-heading compact">
+            <div><span class="step-number">02</span><div><h2>실행 요약</h2><p>현재 계정 기준</p></div></div>
+            <span class="live-indicator"><i></i> READY</span>
+          </div>
+          <div class="run-hero">
+            <div class="ring"><span>0</span><small>%</small></div>
+            <div><span>현재 상태</span><strong>시작할 준비가 됐어요</strong><small>링크 3개를 확인했습니다.</small></div>
+          </div>
+          <div class="metric-grid">
+            <div><span>예상 작업</span><b>약 3분</b></div>
+            <div><span>다음 실행</span><b>대기</b></div>
+            <div><span>업로드</span><b>영상 우선</b></div>
+            <div><span>글쓰기</span><b>생활문제</b></div>
+          </div>
+          <button type="button" class="all-run-button">모든 계정에서 시작 <span>→</span></button>
+        </aside>
+
+        <section class="queue-panel card">
+          <div class="queue-heading">
+            <div><span class="step-number">03</span><div><h2>작업 대기열</h2><p>링크 분석 결과를 실행 전에 확인할 수 있습니다.</p></div></div>
+            <div class="table-filters"><button type="button" class="active">전체 3</button><button type="button">사용 가능 3</button><button type="button">제외 0</button></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th><span class="checkbox"></span></th><th>채널</th><th>상품 링크</th><th>상태</th><th>예상 처리</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><span class="checkbox checked"><svg><use href="#icon-check"/></svg></span></td><td><span class="channel coupang">쿠팡</span></td><td><b>link.coupang.com/a/xxx</b><small>상품 정보를 불러올 준비가 됐습니다.</small></td><td><span class="status-ready"><i></i> 사용 가능</span></td><td>약 1분</td><td>•••</td></tr>
+                <tr><td><span class="checkbox checked"><svg><use href="#icon-check"/></svg></span></td><td><span class="channel naver">네이버</span></td><td><b>smartstore.naver.com/.../products/...</b><small>스마트스토어 상품 링크</small></td><td><span class="status-ready"><i></i> 사용 가능</span></td><td>약 1분</td><td>•••</td></tr>
+                <tr><td><span class="checkbox checked"><svg><use href="#icon-check"/></svg></span></td><td><span class="channel ali">Ali</span></td><td><b>aliexpress.com/item/...html</b><small>AliExpress 상품 링크</small></td><td><span class="status-ready"><i></i> 사용 가능</span></td><td>약 1분</td><td>•••</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="statusbar">
+      <span><i class="online"></i> 서버 연결 정상</span>
+      <span><svg><use href="#icon-clock"/></svg> 마지막 확인 방금 전</span>
+      <strong>v3.0.62</strong>
+    </footer>
+  </div>
+
+  <script src="concepts.js"></script>
+</body>
+</html>
