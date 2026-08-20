@@ -35,7 +35,7 @@ class _ChecklistItem(QFrame):
     def _build_ui(self) -> None:
         self.setObjectName("loginLoadingChecklistItem")
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setFixedHeight(44)
+        self.setFixedHeight(52)
         self.setStyleSheet(
             f"""
             QFrame#loginLoadingChecklistItem {{
@@ -61,18 +61,18 @@ class _ChecklistItem(QFrame):
         text_col.setSpacing(1)
 
         self.title_label = QLabel(self._title)
-        self.title_label.setFont(QFont(Typography.FAMILY, 9, QFont.Weight.DemiBold))
+        self.title_label.setFont(QFont(Typography.FAMILY, 10, QFont.Weight.DemiBold))
         text_col.addWidget(self.title_label)
 
         self.desc_label = QLabel(self._description)
-        self.desc_label.setFont(QFont(Typography.FAMILY, 8))
+        self.desc_label.setFont(QFont(Typography.FAMILY, 9))
         text_col.addWidget(self.desc_label)
 
         layout.addLayout(text_col, 1)
 
         self.state_label = QLabel("대기")
         self.state_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.state_label.setFont(QFont(Typography.FAMILY, 8, QFont.Weight.DemiBold))
+        self.state_label.setFont(QFont(Typography.FAMILY, 9, QFont.Weight.DemiBold))
         self.state_label.setFixedWidth(56)
         layout.addWidget(self.state_label)
 
@@ -173,12 +173,12 @@ class LoginLoadingDialog(QDialog):
         header_layout.setSpacing(4)
 
         title = QLabel("로그인 완료")
-        title.setFont(QFont(Typography.FAMILY, 12, QFont.Weight.Bold))
+        title.setFont(QFont(Typography.FAMILY, 14, QFont.Weight.Bold))
         title.setStyleSheet("color: #FFFFFF; background: transparent;")
         header_layout.addWidget(title)
 
         self.status_label = QLabel("메인 화면을 준비하고 있습니다...")
-        self.status_label.setFont(QFont(Typography.FAMILY, 9))
+        self.status_label.setFont(QFont(Typography.FAMILY, 10))
         self.status_label.setStyleSheet("color: rgba(255,255,255,0.92); background: transparent;")
         header_layout.addWidget(self.status_label)
 
@@ -226,7 +226,7 @@ class LoginLoadingDialog(QDialog):
         self.percent_label = QLabel("0%")
         self.percent_label.setFixedWidth(42)
         self.percent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.percent_label.setFont(QFont(Typography.FAMILY, 9, QFont.Weight.DemiBold))
+        self.percent_label.setFont(QFont(Typography.FAMILY, 10, QFont.Weight.DemiBold))
         self.percent_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
         progress_row.addWidget(self.percent_label)
 

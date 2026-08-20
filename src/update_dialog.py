@@ -98,18 +98,18 @@ class UpdateDialog(QDialog):
             """
         )
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 26, 28, 24)
-        root.setSpacing(18)
+        root.setContentsMargins(28, 18, 28, 18)
+        root.setSpacing(12)
 
         top = QHBoxLayout()
         top.setSpacing(12)
         title_box = QVBoxLayout()
         title_box.setSpacing(4)
         title = QLabel("새로운 업데이트")
-        title.setFont(self._ui_font(19, QFont.Weight.Bold))
+        title.setFont(self._ui_font(18, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
         subtitle = QLabel("안전하게 내려받고, 설치 후 하던 작업을 이어갈 수 있어요.")
-        subtitle.setFont(self._ui_font(10))
+        subtitle.setFont(self._ui_font(10.5))
         subtitle.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         subtitle.setWordWrap(True)
         title_box.addWidget(title)
@@ -117,11 +117,11 @@ class UpdateDialog(QDialog):
         top.addLayout(title_box, 1)
         badge = QLabel("업데이트")
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setFixedSize(76, 28)
+        badge.setMinimumSize(84, 30)
         badge.setStyleSheet(
             f"background: {Colors.ACCENT_SUBTLE}; color: {Colors.ACCENT_LIGHT};"
             f"border: 1px solid {Colors.ACCENT_DARK}; border-radius: 14px;"
-            "font-size: 9pt; font-weight: 800; letter-spacing: 1px;"
+            "font-size: 9.5pt; font-weight: 800; letter-spacing: 0.3px;"
         )
         top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(top)
@@ -129,8 +129,8 @@ class UpdateDialog(QDialog):
         hero = QFrame()
         hero.setObjectName("updateHero")
         hero_layout = QVBoxLayout(hero)
-        hero_layout.setContentsMargins(20, 18, 20, 18)
-        hero_layout.setSpacing(12)
+        hero_layout.setContentsMargins(20, 14, 20, 14)
+        hero_layout.setSpacing(8)
 
         version_row = QHBoxLayout()
         version_row.setSpacing(12)
@@ -150,7 +150,7 @@ class UpdateDialog(QDialog):
         hero_layout.addWidget(self.status_label)
 
         self.status_detail = QLabel("잠시만 기다려 주세요.")
-        self.status_detail.setFont(self._ui_font(9))
+        self.status_detail.setFont(self._ui_font(9.5))
         self.status_detail.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
         self.status_detail.setWordWrap(True)
         hero_layout.addWidget(self.status_detail)
@@ -158,20 +158,20 @@ class UpdateDialog(QDialog):
 
         changelog_header = QHBoxLayout()
         changelog_title = QLabel("이번 버전에서 달라진 점")
-        changelog_title.setFont(self._ui_font(10, QFont.Weight.Bold))
+        changelog_title.setFont(self._ui_font(10.5, QFont.Weight.Bold))
         changelog_title.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         changelog_header.addWidget(changelog_title)
         changelog_header.addStretch()
         self.size_label = QLabel("")
-        self.size_label.setFont(self._ui_font(9))
+        self.size_label.setFont(self._ui_font(9.5))
         self.size_label.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
         changelog_header.addWidget(self.size_label)
         root.addLayout(changelog_header)
 
         self.changelog_text = QTextEdit()
         self.changelog_text.setReadOnly(True)
-        self.changelog_text.setMinimumHeight(120)
-        self.changelog_text.setFont(self._ui_font(10))
+        self.changelog_text.setMinimumHeight(100)
+        self.changelog_text.setFont(self._ui_font(10.5))
         self.changelog_text.setPlaceholderText("업데이트 내용을 불러오는 중입니다.")
         self.changelog_text.setStyleSheet(
             f"QTextEdit {{ background-color: {Colors.BG_INPUT}; color: {Colors.TEXT_PRIMARY};"
@@ -201,41 +201,47 @@ class UpdateDialog(QDialog):
         buttons.setSpacing(12)
         buttons.addStretch()
         self.manual_download_btn = QPushButton("설치 파일 받기")
-        self.manual_download_btn.setMinimumSize(140, 46)
+        self.manual_download_btn.setMinimumSize(140, 48)
         self.manual_download_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.manual_download_btn.setVisible(False)
         self.manual_download_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Colors.ACCENT_LIGHT};"
             f"border: 1px solid {Colors.ACCENT_DARK}; border-radius: {Radius.MD};"
-            "padding: 0 18px; font-size: 10pt; font-weight: 700; }"
+            "padding: 0 18px; min-height: 48px; max-height: 48px;"
+            "font-size: 10.5pt; font-weight: 700; }"
             f"QPushButton:hover {{ background: {Colors.ACCENT_SUBTLE}; }}"
         )
+        self.manual_download_btn.setFixedHeight(48)
         self.manual_download_btn.clicked.connect(self._open_manual_download)
         buttons.addWidget(self.manual_download_btn)
 
         self.close_btn = QPushButton("나중에")
-        self.close_btn.setMinimumSize(120, 46)
+        self.close_btn.setMinimumSize(120, 48)
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setStyleSheet(
             f"QPushButton {{ background: transparent; color: {Colors.TEXT_SECONDARY};"
             f"border: 1px solid {Colors.BORDER_LIGHT}; border-radius: {Radius.MD};"
-            "padding: 0 22px; font-size: 10pt; font-weight: 700; }"
+            "padding: 0 22px; min-height: 48px; max-height: 48px;"
+            "font-size: 10.5pt; font-weight: 700; }"
             f"QPushButton:hover {{ background: {Colors.BG_HOVER}; color: {Colors.TEXT_PRIMARY}; }}"
         )
+        self.close_btn.setFixedHeight(48)
         self.close_btn.clicked.connect(self.close)
         buttons.addWidget(self.close_btn)
 
         self.install_btn = QPushButton("지금 업데이트")
-        self.install_btn.setMinimumSize(176, 46)
+        self.install_btn.setMinimumSize(176, 48)
         self.install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.install_btn.setEnabled(False)
         self.install_btn.setStyleSheet(
             f"QPushButton {{ background: {Gradients.ACCENT_BTN}; color: #FFFFFF; border: none;"
-            f"border-radius: {Radius.MD}; padding: 0 26px; font-size: 10pt; font-weight: 800; }}"
+            f"border-radius: {Radius.MD}; padding: 0 26px; min-height: 48px; max-height: 48px;"
+            "font-size: 10.5pt; font-weight: 800; }"
             f"QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}"
             f"QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}"
             f"QPushButton:disabled {{ background: {Colors.BG_ELEVATED}; color: {Colors.TEXT_MUTED}; }}"
         )
+        self.install_btn.setFixedHeight(48)
         self.install_btn.clicked.connect(self._request_install)
         buttons.addWidget(self.install_btn)
         root.addLayout(buttons)
@@ -246,26 +252,30 @@ class UpdateDialog(QDialog):
     def _ui_font(self, point_size, weight=None):
         """Return the same family used by the rest of the application."""
         font = QFont(self.font())
-        font.setPointSize(int(point_size))
+        font.setPointSizeF(float(point_size))
         if weight is not None:
             font.setWeight(weight)
         return font
 
     def _version_box(self, caption, value, color, value_label=None):
         frame = QFrame()
+        frame.setObjectName("updateVersionBox")
         frame.setStyleSheet(
-            f"QFrame {{ background-color: {Colors.BG_INPUT}; border: 1px solid {Colors.BORDER_SUBTLE};"
+            f"QFrame#updateVersionBox {{ background-color: {Colors.BG_INPUT}; border: 1px solid {Colors.BORDER_SUBTLE};"
             f"border-radius: {Radius.MD}; }}"
         )
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(3)
         caption_label = QLabel(caption)
-        caption_label.setFont(self._ui_font(8))
+        caption_label.setFont(self._ui_font(9))
         caption_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; border: none;")
         layout.addWidget(caption_label)
         label = value_label or QLabel(value)
         label.setText(value or label.text())
+        label.setWordWrap(True)
+        label.setMinimumHeight(34)
+        label.setToolTip(label.text())
         label.setFont(self._ui_font(12, QFont.Weight.Bold))
         label.setStyleSheet(f"color: {color}; border: none;")
         layout.addWidget(label)

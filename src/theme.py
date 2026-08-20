@@ -1,83 +1,83 @@
 """Thread Auto desktop design system.
 
-The palette deliberately uses neutral midnight surfaces and a restrained
-teal accent.  Keeping every widget on the same token set avoids the old
-mixture of coral, bright red and saturated blue controls.
+Nordic Bento uses a cool paper canvas, white cards and a deep teal action
+color.  Every screen consumes the same semantic tokens so dialogs, settings,
+tables and the automation workspace remain visually consistent.
 """
 
 
 class Colors:
-    """Midnight Workshop palette with WCAG-friendly text contrast."""
+    """Nordic Bento light palette with WCAG-friendly text contrast."""
 
-    BG_DARK = "#0A0F1C"
-    BG_CARD = "#141D2D"
-    BG_INPUT = "#0F1726"
-    BG_ELEVATED = "#1B273A"
-    BG_HOVER = "#24334B"
-    BG_TERMINAL = "#070B13"
-    BG_SURFACE = "#111827"
-    BG_SIDEBAR = "#0C1424"
-    BG_HEADER = "#0F1829"
+    BG_DARK = "#EDF1F3"
+    BG_CARD = "#FFFFFF"
+    BG_INPUT = "#F6F9FA"
+    BG_ELEVATED = "#E8EEF1"
+    BG_HOVER = "#DEE7EB"
+    BG_TERMINAL = "#F1F5F6"
+    BG_SURFACE = "#F8FAFB"
+    BG_SIDEBAR = "#F7F9FA"
+    BG_HEADER = "#F9FBFC"
 
-    ACCENT = "#2DD4BF"
-    ACCENT_LIGHT = "#5EEAD4"
-    ACCENT_DARK = "#14B8A6"
-    ACCENT_GLOW = "rgba(45, 212, 191, 0.18)"
-    ACCENT_SHADOW = "rgba(45, 212, 191, 0.32)"
-    ACCENT_SUBTLE = "rgba(45, 212, 191, 0.10)"
+    ACCENT = "#176B87"
+    ACCENT_LIGHT = "#0F607B"
+    ACCENT_DARK = "#0D536B"
+    ACCENT_GLOW = "rgba(23, 107, 135, 0.14)"
+    ACCENT_SHADOW = "rgba(23, 107, 135, 0.24)"
+    ACCENT_SUBTLE = "rgba(23, 107, 135, 0.10)"
 
-    SUCCESS = "#3DDC97"
-    SUCCESS_BG = "rgba(61, 220, 151, 0.10)"
-    SUCCESS_BORDER = "rgba(61, 220, 151, 0.30)"
-    WARNING = "#F6C65B"
-    WARNING_BG = "rgba(246, 198, 91, 0.10)"
-    WARNING_BORDER = "rgba(246, 198, 91, 0.30)"
-    ERROR = "#FF6B7A"
-    ERROR_BG = "rgba(255, 107, 122, 0.10)"
-    ERROR_BORDER = "rgba(255, 107, 122, 0.30)"
-    INFO = "#55B6FF"
-    INFO_BG = "rgba(85, 182, 255, 0.10)"
-    INFO_BORDER = "rgba(85, 182, 255, 0.30)"
+    SUCCESS = "#237A58"
+    SUCCESS_BG = "rgba(35, 122, 88, 0.10)"
+    SUCCESS_BORDER = "rgba(35, 122, 88, 0.28)"
+    WARNING = "#A86400"
+    WARNING_BG = "rgba(168, 100, 0, 0.10)"
+    WARNING_BORDER = "rgba(168, 100, 0, 0.28)"
+    ERROR = "#C23F49"
+    ERROR_BG = "rgba(194, 63, 73, 0.10)"
+    ERROR_BORDER = "rgba(194, 63, 73, 0.28)"
+    INFO = "#176B87"
+    INFO_BG = "rgba(23, 107, 135, 0.10)"
+    INFO_BORDER = "rgba(23, 107, 135, 0.28)"
 
-    TEXT_PRIMARY = "#F8FAFC"
-    TEXT_SECONDARY = "#CDD6E5"
-    TEXT_MUTED = "#8C9AAF"
-    TEXT_PLACEHOLDER = "#5E6B80"
-    TEXT_ACCENT = "#7DEBDD"
+    TEXT_PRIMARY = "#17272F"
+    TEXT_SECONDARY = "#344B55"
+    TEXT_MUTED = "#5E7078"
+    TEXT_PLACEHOLDER = "#5D6F78"
+    TEXT_ACCENT = "#0F607B"
     TEXT_BRIGHT = "#FFFFFF"
 
-    BORDER = "#25344C"
-    BORDER_LIGHT = "#3A4B68"
-    BORDER_ACTIVE = "#2DD4BF"
-    BORDER_SUBTLE = "#1B283C"
+    BORDER = "#CBD5DA"
+    BORDER_LIGHT = "#A9B8C0"
+    BORDER_ACTIVE = "#176B87"
+    BORDER_SUBTLE = "#DDE4E7"
 
-    SCROLLBAR = "#2B3A53"
-    SCROLLBAR_HOVER = "#465A7A"
-    SHADOW = "rgba(0, 0, 0, 0.55)"
-    OVERLAY = "rgba(10, 15, 28, 0.92)"
+    SCROLLBAR = "#B8C5CB"
+    SCROLLBAR_HOVER = "#8799A2"
+    SHADOW = "rgba(56, 73, 81, 0.18)"
+    OVERLAY = "rgba(23, 39, 47, 0.72)"
 
 
 class Typography:
-    """Font definitions — resolved at runtime by resolve_fonts()."""
+    """Korean desktop type scale, resolved at runtime by ``resolve_fonts``."""
     FAMILY = "Segoe UI"
     FAMILY_MONO = "Consolas"
 
     TITLE_XL = f"font-family: {FAMILY}; font-size: 22pt; font-weight: 700; letter-spacing: -0.5px;"
-    TITLE_LG = f"font-family: {FAMILY}; font-size: 17pt; font-weight: 700; letter-spacing: -0.35px;"
-    TITLE_MD = f"font-family: {FAMILY}; font-size: 13pt; font-weight: 650; letter-spacing: -0.2px;"
-    TITLE_SM = f"font-family: {FAMILY}; font-size: 11pt; font-weight: 650;"
-    BODY = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 400;"
-    BODY_SM = f"font-family: {FAMILY}; font-size: 9.5pt; font-weight: 400;"
-    CAPTION = f"font-family: {FAMILY}; font-size: 9pt; font-weight: 500; letter-spacing: 0.2px;"
-    MONO = f"font-family: {FAMILY_MONO}; font-size: 9pt;"
+    TITLE_LG = f"font-family: {FAMILY}; font-size: 18pt; font-weight: 700; letter-spacing: -0.35px;"
+    TITLE_MD = f"font-family: {FAMILY}; font-size: 16pt; font-weight: 700; letter-spacing: -0.2px;"
+    TITLE_SM = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 700;"
+    BODY = f"font-family: {FAMILY}; font-size: 10.5pt; font-weight: 400;"
+    BODY_SM = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 400;"
+    CAPTION = f"font-family: {FAMILY}; font-size: 9.5pt; font-weight: 500;"
+    MONO = f"font-family: {FAMILY_MONO}; font-size: 9.5pt;"
 
 
 class Radius:
     SM = "6px"
-    MD = "8px"
-    LG = "12px"
-    XL = "16px"
-    XXL = "20px"
+    MD = "9px"
+    LG = "14px"
+    XL = "18px"
+    XXL = "22px"
     PILL = "100px"
 
 
@@ -94,40 +94,40 @@ class Spacing:
 
 class Shadows:
     """Box shadow presets (CSS-like, for custom painting)."""
-    CARD = (0, 2, 10, "rgba(0, 0, 0, 0.30)")
-    ELEVATED = (0, 6, 20, "rgba(0, 0, 0, 0.40)")
-    DROPDOWN = (0, 10, 28, "rgba(0, 0, 0, 0.50)")
-    GLOW_ACCENT = (0, 0, 14, "rgba(217, 119, 87, 0.28)")
-    GLOW_SUCCESS = (0, 0, 12, "rgba(122, 184, 122, 0.22)")
-    GLOW_ERROR = (0, 0, 12, "rgba(216, 106, 101, 0.22)")
+    CARD = (0, 2, 10, "rgba(56, 73, 81, 0.10)")
+    ELEVATED = (0, 6, 20, "rgba(56, 73, 81, 0.14)")
+    DROPDOWN = (0, 10, 28, "rgba(56, 73, 81, 0.18)")
+    GLOW_ACCENT = (0, 0, 14, "rgba(23, 107, 135, 0.20)")
+    GLOW_SUCCESS = (0, 0, 12, "rgba(35, 122, 88, 0.18)")
+    GLOW_ERROR = (0, 0, 12, "rgba(194, 63, 73, 0.18)")
 
 
 class Gradients:
     """Low-contrast gradients used only for hierarchy, never decoration."""
 
-    # Buttons — flat coral with subtle warm shift
+    # Buttons — restrained Nordic teal
     ACCENT_BTN = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 #38DDC8, stop:1 {Colors.ACCENT})"
+        f"stop:0 #1C7897, stop:1 {Colors.ACCENT})"
     )
     ACCENT_BTN_HOVER = (
         "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        "stop:0 #64EBD7, stop:1 #38DDC8)"
+        "stop:0 #2387A8, stop:1 #1C7897)"
     )
     ACCENT_BTN_PRESSED = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 {Colors.ACCENT_DARK}, stop:1 #0F9F90)"
+        f"stop:0 {Colors.ACCENT_DARK}, stop:1 #0A465B)"
     )
 
-    # Header — warm charcoal, near-flat
+    # Header — paper white, near-flat
     HEADER = (
         f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
         f"stop:0 {Colors.BG_HEADER}, stop:1 {Colors.BG_DARK})"
     )
     HEADER_ACCENT = (
         f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 rgba(45, 212, 191, 0), stop:0.3 {Colors.ACCENT}, "
-        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(94, 234, 212, 0))"
+        f"stop:0 rgba(23, 107, 135, 0), stop:0.3 {Colors.ACCENT}, "
+        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(23, 107, 135, 0))"
     )
 
     # Progress
@@ -142,10 +142,10 @@ class Gradients:
         f"stop:0 {Colors.BG_CARD}, stop:1 {Colors.BG_SURFACE})"
     )
 
-    # Login splash — warm coral wash
+    # Login splash — cool Nordic teal wash
     LOGIN_SPLASH = (
         "qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-        "stop:0 #090E1A, stop:0.48 #102332, stop:0.82 #155E61, stop:1 #0F766E)"
+        "stop:0 #142A34, stop:0.48 #17526A, stop:0.82 #176B87, stop:1 #0D536B)"
     )
 
 
@@ -206,16 +206,16 @@ def stat_card_style(color):
 
 
 def ghost_btn_style():
-    """Ghost (transparent) button — 한국어 12pt 텍스트가 잘리지 않도록 좌우 padding 축소."""
+    """Ghost button using the shared desktop control scale."""
     return f"""
         QPushButton {{
             background-color: transparent;
             color: {Colors.TEXT_SECONDARY};
             border: 1px solid {Colors.BORDER_LIGHT};
             border-radius: {Radius.MD};
-            padding: 9px 14px;
+            padding: 9px 16px;
             font-weight: 600;
-            font-size: 12pt;
+            font-size: 10.5pt;
         }}
         QPushButton:hover {{
             background-color: {Colors.BG_ELEVATED};
@@ -239,7 +239,7 @@ def accent_btn_style(use_gradient=True):
                 border-radius: {Radius.MD};
                 padding: 11px 28px;
                 font-weight: 600;
-                font-size: 12pt;
+                font-size: 11pt;
             }}
             QPushButton:hover {{
                 background: {Gradients.ACCENT_BTN_HOVER};
@@ -260,7 +260,7 @@ def accent_btn_style(use_gradient=True):
             border-radius: {Radius.MD};
             padding: 11px 28px;
             font-weight: 600;
-            font-size: 12pt;
+            font-size: 11pt;
         }}
         QPushButton:hover {{
             background-color: {Colors.ACCENT_LIGHT};
@@ -285,7 +285,7 @@ def outline_btn_style(color):
             border-radius: {Radius.MD};
             padding: 10px 20px;
             font-weight: 600;
-            font-size: 12pt;
+            font-size: 10.5pt;
         }}
         QPushButton:hover {{
             background-color: {color};
@@ -308,14 +308,14 @@ def input_style():
     return f"""
         QLineEdit {{
             background-color: {Colors.BG_INPUT};
-            border: 1px solid {Colors.BORDER};
+            border: 2px solid {Colors.BORDER};
             border-radius: {Radius.MD};
-            padding: 11px 14px;
+            padding: 0;
             color: {Colors.TEXT_PRIMARY};
-            font-size: 12pt;
+            font-size: 11pt;
         }}
         QLineEdit:focus {{
-            border: 1.5px solid {Colors.ACCENT};
+            border: 2px solid {Colors.ACCENT};
             background-color: {Colors.BG_CARD};
         }}
         QLineEdit:disabled {{
@@ -330,7 +330,7 @@ def input_style():
 
 def section_title_style():
     return (
-        f"color: {Colors.TEXT_PRIMARY}; font-size: 13pt; font-weight: 700; "
+        f"color: {Colors.TEXT_PRIMARY}; font-size: 12pt; font-weight: 700; "
         f"background: transparent; border: none; padding: 0;"
     )
 
@@ -349,12 +349,12 @@ def header_title_style(size="14pt"):
     )
 
 
-def muted_text_style(size="9pt"):
+def muted_text_style(size="9.5pt"):
     return f"color: {Colors.TEXT_MUTED}; font-size: {size}; background: transparent;"
 
 
 def hint_text_style():
-    return f"color: {Colors.TEXT_MUTED}; font-size: 9pt; background: transparent;"
+    return f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; background: transparent;"
 
 
 def close_btn_style():
@@ -364,6 +364,8 @@ def close_btn_style():
             color: {Colors.TEXT_MUTED};
             border: none;
             border-radius: 8px;
+            padding: 0;
+            min-height: 0;
             font-size: 11pt;
             font-weight: 600;
         }}
@@ -411,7 +413,7 @@ def terminal_text_style():
             padding: 14px;
             color: {Colors.TEXT_SECONDARY};
             font-family: {Typography.FAMILY_MONO};
-            font-size: 9pt;
+            font-size: 9.5pt;
             selection-background-color: {Colors.ACCENT};
             selection-color: {Colors.TEXT_BRIGHT};
         }}
@@ -427,7 +429,7 @@ def progress_bar_style():
             height: 24px;
             text-align: center;
             color: {Colors.TEXT_SECONDARY};
-            font-size: 9pt;
+            font-size: 9.5pt;
             font-weight: 600;
         }}
         QProgressBar::chunk {{
@@ -460,7 +462,7 @@ def window_control_btn_style(is_close=False):
     return f"""
         QPushButton {{
             background: {Colors.BG_ELEVATED}; border: none; border-radius: 6px;
-            color: {Colors.TEXT_SECONDARY}; font-size: 9pt;
+            color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; padding: 0; min-height: 0;
         }}
         QPushButton:hover {{ background: {hover_bg}; color: {hover_color}; }}
     """
@@ -470,7 +472,7 @@ def window_control_btn_style(is_close=False):
 
 
 def global_stylesheet():
-    """Application-wide base stylesheet — Midnight Workshop."""
+    """Application-wide base stylesheet — Nordic Bento."""
     c = Colors
     r = Radius
     t = Typography
@@ -482,7 +484,7 @@ def global_stylesheet():
         }}
         QWidget {{
             font-family: {t.FAMILY};
-            font-size: 10pt;
+            font-size: 11pt;
             color: {c.TEXT_PRIMARY};
         }}
         QLabel {{
@@ -537,7 +539,7 @@ def global_stylesheet():
             selection-background-color: {c.ACCENT};
             selection-color: {c.TEXT_BRIGHT};
             font-family: {t.FAMILY_MONO};
-            font-size: 9pt;
+            font-size: 10.5pt;
         }}
         QTextEdit:focus, QPlainTextEdit:focus {{
             border-color: {c.ACCENT};
@@ -545,15 +547,15 @@ def global_stylesheet():
         }}
         QLineEdit {{
             background-color: {c.BG_INPUT};
-            border: 1px solid {c.BORDER};
+            border: 2px solid {c.BORDER};
             border-radius: {r.MD};
-            padding: 10px 14px;
+            padding: 8px 14px;
             color: {c.TEXT_PRIMARY};
-            font-size: 10pt;
+            font-size: 11pt;
         }}
         QLineEdit:focus {{
             border-color: {c.ACCENT};
-            border-width: 1.5px;
+            border-width: 2px;
             background-color: {c.BG_CARD};
         }}
         QLineEdit:disabled {{
@@ -571,9 +573,9 @@ def global_stylesheet():
             border: none;
             border-radius: {r.MD};
             padding: 9px 18px;
-            min-height: 22px;
+            min-height: 24px;
             font-weight: 650;
-            font-size: 10pt;
+            font-size: 10.5pt;
         }}
         QPushButton:hover {{
             background: {g.ACCENT_BTN_HOVER};
@@ -639,14 +641,14 @@ def global_stylesheet():
             background-color: {c.BG_ELEVATED};
         }}
 
-        /* ===== SpinBox — 텍스트 우측 정렬, up/down은 우측 끝 한 덩어리 ===== */
+        /* ===== SpinBox ===== */
         QSpinBox {{
             background-color: {c.BG_INPUT};
             border: 1px solid {c.BORDER};
             border-radius: {r.MD};
             padding: 6px 30px 6px 12px;   /* 우측 패딩으로 버튼 자리 확보 */
             color: {c.TEXT_PRIMARY};
-            font-size: 12pt;
+            font-size: 10.5pt;
             font-weight: 600;
             qproperty-alignment: 'AlignVCenter | AlignLeft';
         }}
@@ -693,8 +695,8 @@ def global_stylesheet():
         /* ===== Checkbox ===== */
         QCheckBox {{
             color: {c.TEXT_PRIMARY};
-            font-size: 12pt;
-            spacing: 10px;
+            font-size: 10.5pt;
+            spacing: 8px;
         }}
         QCheckBox::indicator {{
             width: 20px;
@@ -714,8 +716,8 @@ def global_stylesheet():
         /* ===== RadioButton ===== */
         QRadioButton {{
             color: {c.TEXT_PRIMARY};
-            font-size: 12pt;
-            spacing: 10px;
+            font-size: 10.5pt;
+            spacing: 8px;
         }}
         QRadioButton::indicator {{
             width: 20px;
@@ -737,9 +739,9 @@ def global_stylesheet():
             background-color: {c.BG_INPUT};
             border: 1px solid {c.BORDER};
             border-radius: {r.MD};
-            padding: 8px 12px;
+            padding: 7px 12px;
             color: {c.TEXT_PRIMARY};
-            font-size: 12pt;
+            font-size: 10.5pt;
         }}
         QComboBox:focus {{
             border-color: {c.ACCENT};
@@ -766,7 +768,7 @@ def global_stylesheet():
             height: 24px;
             text-align: center;
             color: {c.TEXT_SECONDARY};
-            font-size: 9pt;
+            font-size: 9.5pt;
             font-weight: 600;
         }}
         QProgressBar::chunk {{
@@ -806,7 +808,7 @@ def global_stylesheet():
             color: {c.TEXT_SECONDARY};
             border-top: 1px solid {c.BORDER};
             padding: 4px 16px;
-            font-size: 11pt;
+            font-size: 9.5pt;
         }}
 
         /* ===== MessageBox ===== */
@@ -815,7 +817,7 @@ def global_stylesheet():
         }}
         QMessageBox QLabel {{
             color: {c.TEXT_PRIMARY};
-            font-size: 12pt;
+            font-size: 10.5pt;
             min-width: 280px;
         }}
         QMessageBox QPushButton {{
@@ -838,7 +840,7 @@ def global_stylesheet():
             border: 1px solid {c.BORDER_LIGHT};
             border-radius: {r.SM};
             padding: 8px 12px;
-            font-size: 11pt;
+            font-size: 10pt;
         }}
     """
 
@@ -848,7 +850,8 @@ def resolve_fonts():
     from PyQt6.QtGui import QFontDatabase
     available = set(QFontDatabase.families())
 
-    ui_candidates = ["Pretendard", "SUIT", "Noto Sans KR", "맑은 고딕",
+    ui_candidates = ["LINE Seed Sans KR", "LINE Seed Sans KR OTF",
+                     "Pretendard", "SUIT", "Noto Sans KR", "맑은 고딕",
                      "Malgun Gothic", "Apple SD Gothic Neo", "Inter",
                      "Segoe UI Variable", "Segoe UI"]
     for name in ui_candidates:
@@ -865,10 +868,10 @@ def resolve_fonts():
     f = Typography.FAMILY
     fm = Typography.FAMILY_MONO
     Typography.TITLE_XL = f"font-family: {f}; font-size: 22pt; font-weight: 700; letter-spacing: -0.5px;"
-    Typography.TITLE_LG = f"font-family: {f}; font-size: 17pt; font-weight: 700; letter-spacing: -0.35px;"
-    Typography.TITLE_MD = f"font-family: {f}; font-size: 13pt; font-weight: 650; letter-spacing: -0.2px;"
-    Typography.TITLE_SM = f"font-family: {f}; font-size: 11pt; font-weight: 650;"
-    Typography.BODY = f"font-family: {f}; font-size: 10pt; font-weight: 400;"
-    Typography.BODY_SM = f"font-family: {f}; font-size: 9.5pt; font-weight: 400;"
-    Typography.CAPTION = f"font-family: {f}; font-size: 9pt; font-weight: 500; letter-spacing: 0.2px;"
-    Typography.MONO = f"font-family: {fm}; font-size: 9pt;"
+    Typography.TITLE_LG = f"font-family: {f}; font-size: 18pt; font-weight: 700; letter-spacing: -0.35px;"
+    Typography.TITLE_MD = f"font-family: {f}; font-size: 16pt; font-weight: 700; letter-spacing: -0.2px;"
+    Typography.TITLE_SM = f"font-family: {f}; font-size: 12pt; font-weight: 700;"
+    Typography.BODY = f"font-family: {f}; font-size: 10.5pt; font-weight: 400;"
+    Typography.BODY_SM = f"font-family: {f}; font-size: 10pt; font-weight: 400;"
+    Typography.CAPTION = f"font-family: {f}; font-size: 9.5pt; font-weight: 500;"
+    Typography.MONO = f"font-family: {fm}; font-size: 9.5pt;"

@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 설정 다이얼로그 (PyQt6)
-Stitch Blue 디자인 - 좌표 기반 배치
+Nordic Bento 디자인 - 반응형 외곽과 레이아웃 기반 카드
 """
 import re
 import threading
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QFrame, QSpinBox, QComboBox,
-    QScrollArea, QWidget
+    QScrollArea, QWidget, QApplication
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
@@ -87,20 +87,18 @@ class FormField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        top = QHBoxLayout()
         label = QLabel(label_text)
         label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; letter-spacing: 0.5px;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 600;"
         )
-        top.addWidget(label)
+        layout.addWidget(label)
 
         if hint:
             hint_label = QLabel(hint)
             hint_label.setStyleSheet(hint_text_style())
-            top.addStretch()
-            top.addWidget(hint_label)
+            hint_label.setWordWrap(True)
+            layout.addWidget(hint_label)
 
-        layout.addLayout(top)
         layout.addWidget(input_widget)
 
 
@@ -110,7 +108,7 @@ class DialogHeader(QFrame):
     """다이얼로그 상단 바 (그라디언트 배경)"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(54)
+        self.setFixedHeight(60)
 
     def paintEvent(self, _event):
         painter = QPainter(self)
@@ -126,17 +124,26 @@ class DialogHeader(QFrame):
 # ─── Settings Dialog ────────────────────────────────────────
 
 class SettingsDialog(QDialog):
-    """자동화 설정 다이얼로그 - 좌표 기반 배치"""
+    """자동화 설정 다이얼로그 with a monitor-aware outer shell."""
 
     DLG_W = 540
     DLG_H = 740
-    HEADER_H = 54
-    FOOTER_H = 62
+    HEADER_H = 60
+    FOOTER_H = 68
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("설정")
-        self.setFixedSize(self.DLG_W, self.DLG_H)
+        self.setMinimumSize(460, 560)
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.resize(
+                min(600, max(460, available.width() - 32)),
+                min(800, max(560, available.height() - 48)),
+            )
+        else:
+            self.resize(self.DLG_W, self.DLG_H)
         self.setModal(True)
         apply_window_icon(self)
 
@@ -158,19 +165,24 @@ class SettingsDialog(QDialog):
         # ── 헤더 ──
         header = DialogHeader(self)
         header.setGeometry(0, 0, self.DLG_W, self.HEADER_H)
+        self._dialog_header = header
 
-        close_btn = QPushButton("\u2715", header)
-        close_btn.setGeometry(12, 11, 32, 32)
+        close_btn = QPushButton("닫기", header)
+        close_btn.setGeometry(12, 11, 56, 32)
+        close_btn.setAccessibleName("설정 창 닫기")
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(close_btn_style())
         close_btn.clicked.connect(self.reject)
+        self.close_btn = close_btn
 
         title = QLabel("자동화 설정", header)
-        title.setGeometry(52, 10, 350, 34)
+        title.setGeometry(80, 10, 350, 34)
+        self._dialog_title = title
         title.setStyleSheet(header_title_style("14pt"))
 
         accent_icon = QLabel("*", header)
         accent_icon.setGeometry(self.DLG_W - 42, 14, 22, 26)
+        self._dialog_accent_icon = accent_icon
         accent_icon.setStyleSheet(
             f"color: {Colors.ACCENT}; font-size: 16pt; font-weight: 700; background: transparent;"
         )
@@ -182,6 +194,7 @@ class SettingsDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(scroll_area_style())
+        self._dialog_scroll = scroll
 
         scroll_content = QWidget()
         self.content_layout = QVBoxLayout(scroll_content)
@@ -199,26 +212,49 @@ class SettingsDialog(QDialog):
         # ── 푸터 ──
         footer_y = self.DLG_H - self.FOOTER_H
         footer = QFrame(self)
+        footer.setObjectName("settingsDialogFooter")
         footer.setGeometry(0, footer_y, self.DLG_W, self.FOOTER_H)
         footer.setStyleSheet(f"""
-            QFrame {{
+            QFrame#settingsDialogFooter {{
                 background-color: {Colors.BG_CARD};
                 border-top: 1px solid {Colors.BORDER};
             }}
         """)
+        self._dialog_footer = footer
 
         # 저장 버튼 (오른쪽)
         self.save_btn = QPushButton("저장", footer)
-        self.save_btn.setGeometry(self.DLG_W - 20 - 100, 12, 100, 38)
+        self.save_btn.setGeometry(self.DLG_W - 20 - 100, 12, 100, 44)
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.clicked.connect(self._save_settings)
 
         # 취소 버튼
         self.cancel_btn = QPushButton("취소", footer)
-        self.cancel_btn.setGeometry(self.DLG_W - 20 - 100 - 10 - 90, 12, 90, 38)
+        self.cancel_btn.setGeometry(self.DLG_W - 20 - 100 - 10 - 90, 12, 90, 44)
         self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_btn.setProperty("class", "ghost")
         self.cancel_btn.clicked.connect(self.reject)
+        self._relayout_shell()
+
+    def _relayout_shell(self):
+        """Keep the header, scrolling cards and footer inside the dialog."""
+        if not hasattr(self, "_dialog_header"):
+            return
+        width = max(1, self.width())
+        height = max(1, self.height())
+        self._dialog_header.setGeometry(0, 0, width, self.HEADER_H)
+        self._dialog_accent_icon.move(max(12, width - 42), 14)
+        self._dialog_title.setGeometry(80, 10, max(120, width - 134), 40)
+        scroll_h = max(120, height - self.HEADER_H - self.FOOTER_H)
+        self._dialog_scroll.setGeometry(0, self.HEADER_H, width, scroll_h)
+        footer_y = height - self.FOOTER_H
+        self._dialog_footer.setGeometry(0, footer_y, width, self.FOOTER_H)
+        self.save_btn.move(max(20, width - 120), 12)
+        self.cancel_btn.move(max(20, width - 220), 12)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout_shell()
 
     # ── Sections ──
 
@@ -227,6 +263,7 @@ class SettingsDialog(QDialog):
         layout = section.content_layout()
 
         self.gemini_key_edit = QLineEdit()
+        self.gemini_key_edit.setMinimumHeight(48)
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.gemini_key_edit.setPlaceholderText("Gemini API 키를 입력하세요")
         layout.addWidget(FormField("마스터 API 키", self.gemini_key_edit, "Google AI Studio에서 발급"))
@@ -245,30 +282,35 @@ class SettingsDialog(QDialog):
 
         self.hour_spin = QSpinBox()
         self.hour_spin.setRange(0, 23)
-        self.hour_spin.setFixedWidth(80)
+        self.hour_spin.setMinimumWidth(78)
+        self.hour_spin.setMinimumHeight(44)
         self.hour_spin.setSuffix(" 시간")
-        interval_row.addWidget(self.hour_spin)
+        interval_row.addWidget(self.hour_spin, 1)
 
         self.min_spin = QSpinBox()
         self.min_spin.setRange(0, 59)
-        self.min_spin.setFixedWidth(72)
+        self.min_spin.setMinimumWidth(78)
+        self.min_spin.setMinimumHeight(44)
         self.min_spin.setSuffix(" 분")
-        interval_row.addWidget(self.min_spin)
+        interval_row.addWidget(self.min_spin, 1)
 
         self.sec_spin = QSpinBox()
         self.sec_spin.setRange(0, 59)
-        self.sec_spin.setFixedWidth(72)
+        self.sec_spin.setMinimumWidth(78)
+        self.sec_spin.setMinimumHeight(44)
         self.sec_spin.setSuffix(" 초")
-        interval_row.addWidget(self.sec_spin)
+        interval_row.addWidget(self.sec_spin, 1)
 
         interval_row.addStretch()
 
         layout.addWidget(FormField("업로드 간격", interval_widget, "최소 30초"))
 
         self.video_check = QCheckBox("이미지보다 영상 업로드 우선")
+        self.video_check.setMinimumHeight(32)
         layout.addWidget(self.video_check)
 
         self.post_concept_combo = QComboBox()
+        self.post_concept_combo.setMinimumHeight(44)
         self.post_concept_combo.setObjectName("settingsDialogPostConceptCombo")
         for concept in POST_CONCEPTS:
             self.post_concept_combo.addItem(concept.display_label, concept.id)
@@ -290,6 +332,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.auto_start_check)
 
         hint = QLabel("컴퓨터가 꺼졌다 켜져도 로그인 후 프로그램을 다시 실행합니다.")
+        hint.setWordWrap(True)
         hint.setStyleSheet(hint_text_style())
         layout.addWidget(hint)
 
@@ -300,6 +343,7 @@ class SettingsDialog(QDialog):
         layout = section.content_layout()
 
         self.username_edit = QLineEdit()
+        self.username_edit.setMinimumHeight(48)
         self.username_edit.setPlaceholderText("예: myaccount")
         layout.addWidget(FormField("계정 이름", self.username_edit, "프로필 식별용"))
 
@@ -317,8 +361,10 @@ class SettingsDialog(QDialog):
         status_row.addWidget(status_dot)
 
         self.login_status_label = QLabel("연결 안됨")
+        self.login_status_label.setWordWrap(True)
+        self.login_status_label.setMinimumHeight(30)
         self.login_status_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 600;"
         )
         status_row.addWidget(self.login_status_label)
         status_row.addStretch()
@@ -329,13 +375,13 @@ class SettingsDialog(QDialog):
         btn_row.setSpacing(10)
 
         self.threads_login_btn = QPushButton("Threads 로그인")
-        self.threads_login_btn.setFixedHeight(40)
+        self.threads_login_btn.setFixedHeight(44)
         self.threads_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.threads_login_btn.clicked.connect(self._open_threads_login)
         btn_row.addWidget(self.threads_login_btn)
 
         self.check_login_btn = QPushButton("상태 확인")
-        self.check_login_btn.setFixedHeight(40)
+        self.check_login_btn.setFixedHeight(44)
         self.check_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.check_login_btn.setProperty("class", "ghost")
         self.check_login_btn.clicked.connect(self._check_login_status)
@@ -345,6 +391,7 @@ class SettingsDialog(QDialog):
 
         # 안내 문구
         hint1 = QLabel("로그인 후 브라우저를 닫으면 세션이 자동 저장됩니다.")
+        hint1.setWordWrap(True)
         hint1.setStyleSheet(hint_text_style())
         layout.addWidget(hint1)
 
@@ -561,7 +608,7 @@ class SettingsDialog(QDialog):
         color = color_map.get(state, Colors.TEXT_MUTED)
         self._status_dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
         self.login_status_label.setText(text)
-        self.login_status_label.setStyleSheet(f"color: {color}; font-size: 9pt; font-weight: 600;")
+        self.login_status_label.setStyleSheet(f"color: {color}; font-size: 9.5pt; font-weight: 600;")
 
     def event(self, event):
         if event.type() == LoginStatusEvent.EventType:

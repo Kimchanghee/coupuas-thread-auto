@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 로그인/회원가입 윈도우 (PyQt6)
-스레드 쇼핑 자동화 전용 - Midnight Workshop 테마
+스레드 쇼핑 자동화 전용 - Nordic Bento 테마
 """
 import atexit
 import logging
@@ -58,6 +58,7 @@ WINDOW_WIDTH = 720
 WINDOW_HEIGHT = 760
 LEFT_PANEL_WIDTH = 300
 RIGHT_PANEL_WIDTH = WINDOW_WIDTH - LEFT_PANEL_WIDTH
+REGISTER_PAGE_HEIGHT = 980
 WEBSITE_BASE_URL = "https://coupuas-thread-auto-ten.vercel.app"
 
 
@@ -156,7 +157,9 @@ class LoginWindow(QMainWindow):
         self._build_login_page()
         self._build_register_page()
 
+        self.stack.currentChanged.connect(self._on_auth_page_changed)
         self.stack.setCurrentIndex(0)
+        self._on_auth_page_changed(0)
 
         # ─── Window controls ────────────────────────────────
         self.btn_minimize = QPushButton("─", central)
@@ -194,6 +197,10 @@ class LoginWindow(QMainWindow):
         if hasattr(self, "_form_scroll"):
             self._relayout_window()
 
+    def _on_auth_page_changed(self, index: int) -> None:
+        """Give dense registration fields room and let the outer area scroll."""
+        self.stack.setFixedHeight(WINDOW_HEIGHT if int(index) == 0 else REGISTER_PAGE_HEIGHT)
+
     # ─── Left Panel Paint ───────────────────────────────────
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -207,28 +214,28 @@ class LoginWindow(QMainWindow):
         if panel_w <= 0:
             return
 
-        # Midnight navy with a restrained teal edge.
+        # Deep Nordic brand panel; the form surface remains bright and quiet.
         grad = QLinearGradient(0, 0, panel_w, panel_h)
-        grad.setColorAt(0, QColor(Colors.BG_SIDEBAR))
-        grad.setColorAt(0.55, QColor(Colors.BG_ELEVATED))
-        grad.setColorAt(1, QColor(Colors.ACCENT_DARK))
+        grad.setColorAt(0, QColor("#142A34"))
+        grad.setColorAt(0.55, QColor("#17526A"))
+        grad.setColorAt(1, QColor("#0D536B"))
         painter.fillRect(0, 0, panel_w, panel_h, grad)
 
         # Top accent line
         top_grad = QLinearGradient(0, 0, panel_w, 0)
-        top_grad.setColorAt(0, QColor(45, 212, 191, 0))
-        top_grad.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
-        top_grad.setColorAt(1, QColor(45, 212, 191, 0))
+        top_grad.setColorAt(0, QColor(167, 221, 231, 0))
+        top_grad.setColorAt(0.5, QColor("#A7DDE7"))
+        top_grad.setColorAt(1, QColor(167, 221, 231, 0))
         painter.fillRect(0, 0, panel_w, 2, top_grad)
 
         # Brand icon
         painter.setPen(Qt.PenStyle.NoPen)
         cx, cy = panel_w // 2, 180
         # Glow
-        painter.setBrush(QColor(45, 212, 191, 38))
+        painter.setBrush(QColor(167, 221, 231, 38))
         painter.drawEllipse(cx - 50, cy - 50, 100, 100)
         # Ring
-        painter.setPen(QPen(QColor(Colors.ACCENT_LIGHT), 3))
+        painter.setPen(QPen(QColor("#A7DDE7"), 3))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawArc(cx - 30, cy - 30, 60, 60, 30 * 16, 300 * 16)
         # Letter
@@ -242,7 +249,7 @@ class LoginWindow(QMainWindow):
         painter.drawText(0, 260, panel_w, 30, Qt.AlignmentFlag.AlignCenter, "스레드 쇼핑 자동화")
 
         # Subtitle
-        painter.setPen(QColor(Colors.ACCENT_LIGHT))
+        painter.setPen(QColor("#A7DDE7"))
         painter.setFont(QFont(fn, 11))
         painter.drawText(0, 298, panel_w, 22, Qt.AlignmentFlag.AlignCenter, "멀티 쇼핑 자동화")
 
@@ -276,8 +283,9 @@ class LoginWindow(QMainWindow):
         title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
 
         subtitle = QLabel("스레드 쇼핑 자동화에 오신 것을 환영합니다", page)
-        subtitle.setGeometry(50, 108, 320, 22)
-        subtitle.setFont(QFont(fn, 10))
+        subtitle.setGeometry(40, 108, 340, 34)
+        subtitle.setWordWrap(True)
+        subtitle.setFont(QFont(fn, 11))
         subtitle.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
 
         # ID
@@ -287,28 +295,28 @@ class LoginWindow(QMainWindow):
         lbl_id.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
 
         self.login_id = QLineEdit(page)
-        self.login_id.setGeometry(50, 192, 320, 42)
+        self.login_id.setGeometry(50, 192, 320, 48)
         self.login_id.setPlaceholderText("아이디를 입력하세요")
         self._apply_input_style(self.login_id)
 
         # PW
         lbl_pw = QLabel("비밀번호", page)
-        lbl_pw.setGeometry(50, 248, 100, 20)
+        lbl_pw.setGeometry(50, 256, 100, 20)
         lbl_pw.setFont(QFont(fn, 10, QFont.Weight.Bold))
         lbl_pw.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
 
         self.login_pw = QLineEdit(page)
-        self.login_pw.setGeometry(50, 272, 320, 42)
+        self.login_pw.setGeometry(50, 280, 320, 48)
         self.login_pw.setPlaceholderText("비밀번호를 입력하세요")
         self.login_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.login_pw)
 
         # Remember
         self.remember_cb = QCheckBox("아이디/비밀번호 저장", page)
-        self.remember_cb.setGeometry(50, 328, 178, 22)
-        self.remember_cb.setFont(QFont(fn, 9))
+        self.remember_cb.setGeometry(50, 342, 178, 30)
+        self.remember_cb.setFont(QFont(fn, 10))
         self.remember_cb.setStyleSheet(f"""
-            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; }}
+            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 10pt; spacing: 8px; }}
             QCheckBox::indicator {{
                 width: 16px; height: 16px;
                 border: 2px solid {Colors.BORDER_LIGHT};
@@ -322,16 +330,16 @@ class LoginWindow(QMainWindow):
         self.remember_cb.toggled.connect(self._on_remember_toggled)
 
         self.auto_login_cb = QCheckBox("자동 로그인", page)
-        self.auto_login_cb.setGeometry(240, 328, 130, 22)
-        self.auto_login_cb.setFont(QFont(fn, 9))
+        self.auto_login_cb.setGeometry(240, 342, 130, 30)
+        self.auto_login_cb.setFont(QFont(fn, 10))
         self.auto_login_cb.setStyleSheet(self.remember_cb.styleSheet())
         self.auto_login_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         self.auto_login_cb.toggled.connect(self._on_auto_login_toggled)
 
         # Login button
         self.btn_login = QPushButton("로그인", page)
-        self.btn_login.setGeometry(50, 370, 320, 46)
-        self.btn_login.setFont(QFont(fn, 12, QFont.Weight.Bold))
+        self.btn_login.setGeometry(50, 390, 320, 48)
+        self.btn_login.setFont(QFont(fn, 11, QFont.Weight.Bold))
         self.btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_login.setStyleSheet(f"""
             QPushButton {{
@@ -345,12 +353,12 @@ class LoginWindow(QMainWindow):
 
         # Register button
         self.btn_go_register = QPushButton("회원가입", page)
-        self.btn_go_register.setGeometry(50, 430, 320, 42)
+        self.btn_go_register.setGeometry(50, 452, 320, 46)
         self.btn_go_register.setFont(QFont(fn, 11, QFont.Weight.Bold))
         self.btn_go_register.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_go_register.setStyleSheet(f"""
             QPushButton {{
-                color: #FFFFFF; background: transparent;
+                color: {Colors.ACCENT_LIGHT}; background: transparent;
                 border: 2px solid {Colors.ACCENT_LIGHT}; border-radius: 8px;
             }}
             QPushButton:hover {{ background: {Colors.ACCENT_SUBTLE}; }}
@@ -359,8 +367,9 @@ class LoginWindow(QMainWindow):
 
         # Status
         self.login_status = QLabel("", page)
-        self.login_status.setGeometry(50, 480, 320, 20)
-        self.login_status.setFont(QFont(fn, 9))
+        self.login_status.setGeometry(50, 510, 320, 44)
+        self.login_status.setWordWrap(True)
+        self.login_status.setFont(QFont(fn, 10))
         self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
         self.login_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -413,13 +422,13 @@ class LoginWindow(QMainWindow):
 
         # Back button
         btn_back = QPushButton("← 돌아가기", page)
-        btn_back.setGeometry(15, 12, 100, 30)
-        btn_back.setFont(QFont(fn, 9))
+        btn_back.setGeometry(15, 10, 120, 40)
+        btn_back.setFont(QFont(fn, 10))
         btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_back.setStyleSheet(f"""
             QPushButton {{
                 background: transparent; color: {Colors.TEXT_SECONDARY};
-                border: none;
+                border: none; padding: 0 12px; min-height: 0;
             }}
             QPushButton:hover {{ color: {Colors.TEXT_PRIMARY}; }}
         """)
@@ -432,11 +441,11 @@ class LoginWindow(QMainWindow):
 
         sub = QLabel("가입 정보를 입력해주세요. (체험판 제공)", page)
         sub.setGeometry(30, 82, 360, 18)
-        sub.setFont(QFont(fn, 9))
+        sub.setFont(QFont(fn, 10))
         sub.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
 
         form_card = QFrame(page)
-        form_card.setGeometry(20, 112, RIGHT_PANEL_WIDTH - 40, WINDOW_HEIGHT - 124)
+        form_card.setGeometry(20, 112, RIGHT_PANEL_WIDTH - 40, REGISTER_PAGE_HEIGHT - 124)
         form_card.setObjectName("registerFormCard")
         form_card.setStyleSheet(f"""
             #registerFormCard {{
@@ -452,7 +461,7 @@ class LoginWindow(QMainWindow):
 
         def _field_label(text: str) -> QLabel:
             lbl = QLabel(text)
-            lbl.setFont(QFont(fn, 9, QFont.Weight.Bold))
+            lbl.setFont(QFont(fn, 10, QFont.Weight.Bold))
             lbl.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
             return lbl
 
@@ -471,11 +480,12 @@ class LoginWindow(QMainWindow):
         form_layout.addWidget(self.reg_email)
 
         # Consent
-        self.reg_news_opt_in = QCheckBox("와이엠 프로그램 소식/정보 이메일 수신에 동의합니다 (선택)")
-        self.reg_news_opt_in.setFont(QFont(fn, 9))
+        self.reg_news_opt_in = QCheckBox("와이엠 프로그램 소식/정보 이메일 수신에\n동의합니다 (선택)")
+        self.reg_news_opt_in.setFont(QFont(fn, 10))
         self.reg_news_opt_in.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reg_news_opt_in.setMinimumHeight(44)
         self.reg_news_opt_in.setStyleSheet(f"""
-            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; }}
+            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 10pt; spacing: 8px; }}
             QCheckBox::indicator {{
                 width: 15px; height: 15px;
                 border: 1px solid {Colors.BORDER_LIGHT};
@@ -487,9 +497,10 @@ class LoginWindow(QMainWindow):
         """)
         form_layout.addWidget(self.reg_news_opt_in)
 
-        self.reg_legal_consent = QCheckBox("이용약관 및 개인정보처리방침에 동의합니다 (필수)")
-        self.reg_legal_consent.setFont(QFont(fn, 9, QFont.Weight.DemiBold))
+        self.reg_legal_consent = QCheckBox("이용약관 및 개인정보처리방침에 동의합니다\n(필수)")
+        self.reg_legal_consent.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
         self.reg_legal_consent.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reg_legal_consent.setMinimumHeight(44)
         self.reg_legal_consent.setStyleSheet(self.reg_news_opt_in.styleSheet())
         form_layout.addWidget(self.reg_legal_consent)
 
@@ -498,10 +509,11 @@ class LoginWindow(QMainWindow):
             f' &nbsp;·&nbsp; '
             f'<a href="{WEBSITE_BASE_URL}/privacy" style="color:{Colors.ACCENT_LIGHT};">개인정보처리방침 보기</a>'
         )
-        self.reg_legal_links.setFont(QFont(fn, 9))
+        self.reg_legal_links.setFont(QFont(fn, 10))
         self.reg_legal_links.setOpenExternalLinks(True)
         self.reg_legal_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
         self.reg_legal_links.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
+        self.reg_legal_links.setWordWrap(True)
         self.reg_legal_links.setToolTip("웹사이트에서 최신 약관과 개인정보처리방침을 확인합니다.")
         form_layout.addWidget(self.reg_legal_links)
 
@@ -516,8 +528,8 @@ class LoginWindow(QMainWindow):
         username_row.addWidget(self.reg_username, 1)
 
         self.btn_check_user = QPushButton("중복확인")
-        self.btn_check_user.setFixedSize(82, 36)
-        self.btn_check_user.setFont(QFont(fn, 9))
+        self.btn_check_user.setFixedSize(96, 46)
+        self.btn_check_user.setFont(QFont(fn, 10))
         self.btn_check_user.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_check_user.setStyleSheet(f"""
             QPushButton {{
@@ -531,8 +543,10 @@ class LoginWindow(QMainWindow):
         form_layout.addLayout(username_row)
 
         self.reg_user_status = QLabel("")
-        self.reg_user_status.setFont(QFont(fn, 9))
+        self.reg_user_status.setFont(QFont(fn, 10))
         self.reg_user_status.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
+        self.reg_user_status.setWordWrap(True)
+        self.reg_user_status.setMinimumHeight(30)
         form_layout.addWidget(self.reg_user_status)
 
         # Password
@@ -554,10 +568,12 @@ class LoginWindow(QMainWindow):
         form_layout.addWidget(self.reg_pw_confirm)
 
         self.reg_pw_match_status = QLabel("")
-        self.reg_pw_match_status.setFont(QFont(fn, 9))
+        self.reg_pw_match_status.setFont(QFont(fn, 10))
         self.reg_pw_match_status.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; background: transparent;"
         )
+        self.reg_pw_match_status.setWordWrap(True)
+        self.reg_pw_match_status.setMinimumHeight(30)
         form_layout.addWidget(self.reg_pw_match_status)
 
         # Contact
@@ -587,8 +603,10 @@ class LoginWindow(QMainWindow):
 
     # ─── Style helpers ──────────────────────────────────────
     def _apply_input_style(self, widget):
-        widget.setFont(QFont(_get_font(), 10))
+        widget.setFont(QFont(_get_font(), 11))
         widget.setStyleSheet(input_style())
+        widget.setTextMargins(14, 0, 14, 0)
+        widget.setMinimumHeight(48)
 
     # ─── Login logic ────────────────────────────────────────
     def _do_login(self):

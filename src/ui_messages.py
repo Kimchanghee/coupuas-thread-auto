@@ -179,8 +179,8 @@ class ThemedAlertDialog(QDialog):
                 border: none;
                 border-radius: {Radius.MD};
                 min-width: 124px;
-                min-height: 40px;
-                font-size: 10pt;
+                min-height: 44px;
+                font-size: 10.5pt;
                 font-weight: 700;
             }}
             QPushButton#primaryBtn:hover {{
@@ -195,8 +195,8 @@ class ThemedAlertDialog(QDialog):
                 border: 1px solid {Colors.BORDER_LIGHT};
                 border-radius: {Radius.MD};
                 min-width: 124px;
-                min-height: 40px;
-                font-size: 10pt;
+                min-height: 44px;
+                font-size: 10.5pt;
                 font-weight: 700;
             }}
             QPushButton#secondaryBtn:hover {{
@@ -232,7 +232,7 @@ class ThemedAlertDialog(QDialog):
         header_layout.addWidget(icon_badge)
 
         title_label = QLabel(self.windowTitle(), header)
-        title_label.setFont(QFont(Typography.FAMILY, 11, QFont.Weight.Bold))
+        title_label.setFont(QFont(Typography.FAMILY, 12, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #FFFFFF; background: transparent;")
         header_layout.addWidget(title_label, 1)
 
@@ -243,7 +243,7 @@ class ThemedAlertDialog(QDialog):
             tag_label.setStyleSheet(
                 f"background-color: {self._meta['accent']}22; color: {self._meta['accent']};"
                 f"border: 1px solid {self._meta['accent']}55; border-radius: 13px;"
-                "padding: 0 10px; font-size: 9pt; font-weight: 700;"
+                "padding: 0 10px; font-size: 9.5pt; font-weight: 700;"
             )
             header_layout.addWidget(tag_label)
 
@@ -261,7 +261,7 @@ class ThemedAlertDialog(QDialog):
         )
         message_label.setStyleSheet(
             f"color: {Colors.TEXT_PRIMARY}; background: transparent;"
-            "font-size: 10pt; line-height: 1.5;"
+            "font-size: 10.5pt; line-height: 1.5;"
         )
         body_layout.addWidget(message_label)
 
@@ -283,7 +283,7 @@ class ThemedAlertDialog(QDialog):
 
             status_text = QLabel(self._meta["status"], status_strip)
             status_text.setStyleSheet(
-                f"color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 9pt;"
+                f"color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 9.5pt;"
             )
             status_layout.addWidget(status_text, 1)
 

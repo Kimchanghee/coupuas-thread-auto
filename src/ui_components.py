@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import QFrame, QLabel, QPushButton
+from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
 from src.theme import Colors, Radius
 
@@ -28,7 +28,7 @@ class HelpButton(QPushButton):
             " font-weight: 700; padding: 0; min-height: 0; }"
             f"QPushButton:hover, QPushButton:focus {{ color: {Colors.TEXT_PRIMARY};"
             f" border: 2px solid {Colors.ACCENT}; background-color: {Colors.ACCENT_SUBTLE}; }}"
-            f"QPushButton:checked {{ color: {Colors.BG_DARK}; background-color: {Colors.ACCENT};"
+            f"QPushButton:checked {{ color: {Colors.TEXT_BRIGHT}; background-color: {Colors.ACCENT};"
             f" border-color: {Colors.ACCENT}; }}"
         )
         self.toggled.connect(self.helpToggled.emit)
@@ -46,15 +46,20 @@ class InlineHelpPanel(QFrame):
         )
         self.title_label = QLabel(title, self)
         self.title_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 10pt; font-weight: 700;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 10.5pt; font-weight: 700;"
             " background: transparent; border: none;"
         )
         self.body_label = QLabel(body, self)
         self.body_label.setWordWrap(True)
         self.body_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 500;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 500;"
             " background: transparent; border: none;"
         )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(4)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.body_label, 1)
         self.setAccessibleName(title)
         self.setAccessibleDescription(body)
 
@@ -63,9 +68,3 @@ class InlineHelpPanel(QFrame):
         self.body_label.setText(body)
         self.setAccessibleName(title)
         self.setAccessibleDescription(body)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        width = max(0, self.width() - 32)
-        self.title_label.setGeometry(16, 10, width, 18)
-        self.body_label.setGeometry(16, 31, width, max(20, self.height() - 39))

@@ -81,6 +81,7 @@ from src.theme import (
     muted_text_style,
     hint_text_style,
     section_title_style,
+    scroll_area_style,
 )
 from src.ui_messages import (
     ask_yes_no,
@@ -109,8 +110,8 @@ WIN_H = 800
 HEADER_H = 68
 SIDEBAR_W = 280
 CONTENT_W = 1000  # WIN_W - SIDEBAR_W
-CONTENT_H = 700   # WIN_H - HEADER_H - STATUSBAR_H
-STATUSBAR_H = 32
+CONTENT_H = 692   # WIN_H - HEADER_H - STATUSBAR_H
+STATUSBAR_H = 40
 UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 
 LINK_TABLE_NUMBER_COLUMN = 0
@@ -120,14 +121,14 @@ LINK_TABLE_STATUS_COLUMN = 3
 LINK_TABLE_PRODUCT_COLUMN = 4
 
 MARKETPLACE_CHANNEL_STYLES = {
-    "coupang": ("쿠팡", "#FF9A8F"),
-    "naver": ("네이버", "#6EE7A8"),
-    "toss": ("토스", "#7CC4FF"),
-    "ohouse": ("오늘집", "#67E8F9"),
-    "musinsa": ("무신사", "#F1F5F9"),
-    "kurly": ("컬리", "#C4B5FD"),
-    "oliveyoung": ("올영", "#D9F99D"),
-    "aliexpress": ("Ali", "#FDBA74"),
+    "coupang": ("쿠팡", "#B93845"),
+    "naver": ("네이버", "#16734D"),
+    "toss": ("토스", "#16669B"),
+    "ohouse": ("오늘집", "#0E7490"),
+    "musinsa": ("무신사", "#26333A"),
+    "kurly": ("컬리", "#6D4AA7"),
+    "oliveyoung": ("올영", "#4D7C0F"),
+    "aliexpress": ("Ali", "#A84B0A"),
 }
 
 
@@ -177,7 +178,7 @@ class Badge(QLabel):
     def __init__(self, text="", color=Colors.ACCENT, parent=None):
         super().__init__(text, parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFixedHeight(24)
+        self.setFixedHeight(28)
         self.setMinimumWidth(52)
         self._apply(color)
 
@@ -193,7 +194,7 @@ class Badge(QLabel):
 # ─── HeaderBar ──────────────────────────────────────────────
 
 class HeaderBar(QFrame):
-    """Quiet midnight header with a single restrained accent line."""
+    """Nordic paper header with a single restrained accent line."""
     ACCENT_LINE_H = 2
 
     def __init__(self, parent=None):
@@ -205,7 +206,7 @@ class HeaderBar(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
-        # Low-contrast surface gradient keeps the title readable without glare.
+        # Low-contrast paper gradient separates the shell without visual glare.
         grad = QLinearGradient(0, 0, w, 0)
         grad.setColorAt(0, QColor(Colors.BG_HEADER))
         grad.setColorAt(0.55, QColor(Colors.BG_ELEVATED))
@@ -214,11 +215,13 @@ class HeaderBar(QFrame):
 
         # 상단 accent 라인
         accent = QLinearGradient(0, 0, w, 0)
-        accent.setColorAt(0, QColor(45, 212, 191, 0))
+        transparent_accent = QColor(Colors.ACCENT)
+        transparent_accent.setAlpha(0)
+        accent.setColorAt(0, transparent_accent)
         accent.setColorAt(0.2, QColor(Colors.ACCENT))
         accent.setColorAt(0.5, QColor(Colors.ACCENT_LIGHT))
         accent.setColorAt(0.8, QColor(Colors.ACCENT))
-        accent.setColorAt(1, QColor(45, 212, 191, 0))
+        accent.setColorAt(1, transparent_accent)
         painter.fillRect(0, 0, w, self.ACCENT_LINE_H, accent)
 
         # 하단 border
@@ -229,7 +232,7 @@ class HeaderBar(QFrame):
 # ─── SidebarPanel ──────────────────────────────────────────
 
 class SidebarPanel(QFrame):
-    """Midnight sidebar panel with a quiet separator."""
+    """Nordic sidebar panel with a quiet separator."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -263,7 +266,7 @@ class SectionFrame(QFrame):
         rect = self.rect().adjusted(0, 0, -1, -1)
         painter.setPen(QPen(QColor(Colors.BORDER), 1))
         painter.setBrush(QColor(Colors.BG_CARD))
-        painter.drawRoundedRect(rect, 12, 12)
+        painter.drawRoundedRect(rect, 14, 14)
 
 
 # ─── MainWindow ─────────────────────────────────────────────
@@ -367,6 +370,7 @@ class MainWindow(QMainWindow):
         self._relayout_main_window()
         self._switch_page(0)
         self._app_version = self._resolve_app_version()
+        self._version_label.setText(f"현재 버전: {self._app_version}")
 
         # Heartbeat timer
         from PyQt6.QtCore import QTimer
@@ -584,7 +588,7 @@ class MainWindow(QMainWindow):
         brand_glow.setStyleSheet(
             f"QLabel {{ background-color: {Colors.ACCENT_SUBTLE};"
             f" border: 1px solid {Colors.ACCENT};"
-            " border-radius: 20px; }"
+            " border-radius: 12px; }"
         )
 
         # Brand icon
@@ -593,13 +597,13 @@ class MainWindow(QMainWindow):
         brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_icon.setStyleSheet(
             f"QLabel {{ background: {Gradients.ACCENT_BTN};"
-            f" color: #FFFFFF; border-radius: 18px;"
+            f" color: #FFFFFF; border-radius: 10px;"
             f" font-size: 15pt; font-weight: 800; }}"
         )
 
         # Title
         title_label = QLabel("스레드 쇼핑 자동화", header)
-        title_label.setGeometry(62, 10, 220, 30)
+        title_label.setGeometry(62, 8, 220, 28)
         title_label.setStyleSheet(
             f"color: {Colors.TEXT_PRIMARY}; font-size: 14pt; font-weight: 700;"
             " letter-spacing: -0.5px; background: transparent;"
@@ -609,7 +613,7 @@ class MainWindow(QMainWindow):
         sub_label = QLabel("멀티 쇼핑 자동화", header)
         sub_label.setGeometry(62, 38, 260, 20)
         sub_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 600;"
             " letter-spacing: 1.4px; background: transparent;"
         )
 
@@ -618,11 +622,11 @@ class MainWindow(QMainWindow):
             f"QPushButton {{ background: {Colors.BG_ELEVATED};"
             f" color: {Colors.TEXT_SECONDARY};"
             f" border: 1px solid {Colors.BORDER};"
-            f" border-radius: 8px; font-size: 9pt; font-weight: 700;"
+            f" border-radius: 8px; font-size: 9.5pt; font-weight: 700;"
             f" padding: 6px 12px; min-height: 20px; }}"
             f" QPushButton:hover, QPushButton:focus {{ background: {Colors.ACCENT_SUBTLE};"
             f" color: {Colors.TEXT_PRIMARY}; border: 2px solid {Colors.ACCENT}; }}"
-            f" QPushButton:checked {{ background: {Colors.ACCENT}; color: {Colors.BG_DARK}; }}"
+            f" QPushButton:checked {{ background: {Colors.ACCENT}; color: {Colors.TEXT_BRIGHT}; }}"
         )
 
         # Logout button (far right)
@@ -633,7 +637,7 @@ class MainWindow(QMainWindow):
             f"QPushButton {{ background: {Colors.BG_ELEVATED};"
             f" color: {Colors.TEXT_MUTED};"
             f" border: 1px solid {Colors.BORDER};"
-            f" border-radius: 8px; font-size: 9pt; font-weight: 600;"
+            f" border-radius: 8px; font-size: 9.5pt; font-weight: 600;"
             f" padding: 6px 12px; min-height: 20px; }}"
             f" QPushButton:hover, QPushButton:focus {{ background: {Colors.ERROR_BG};"
             f" color: {Colors.ERROR}; border: 2px solid {Colors.ERROR}; }}"
@@ -653,23 +657,24 @@ class MainWindow(QMainWindow):
         self.update_btn = QPushButton("업데이트", header)
         self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_btn.setStyleSheet(
-            "QPushButton { background-color: #F6C945; color: #111827; border: none;"
-            " border-radius: 8px; padding: 4px 12px; font-size: 9pt; font-weight: 800; }"
-            "QPushButton:hover { background-color: #FFD968; }"
-            "QPushButton:disabled { background-color: #5A6170; color: #D1D5DB; }"
+            f"QPushButton {{ background-color: {Colors.WARNING_BG}; color: {Colors.WARNING};"
+            f" border: 1px solid {Colors.WARNING_BORDER};"
+            " border-radius: 8px; padding: 4px 12px; font-size: 9.5pt; font-weight: 800; }"
+            f"QPushButton:hover {{ background-color: {Colors.BG_HOVER}; }}"
+            f"QPushButton:disabled {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_MUTED}; }}"
         )
         self.update_btn.clicked.connect(self._activate_pending_update)
         self.update_btn.setVisible(False)
 
         # Re-place header pills by sizeHint to avoid text clipping across fonts
-        nav_y = 20
-        nav_h = 28
+        nav_y = 15
+        nav_h = 38
         nav_gap = 10
         nav_right = WIN_W - 16
         for btn in (self.logout_btn, self.tutorial_btn, self.update_btn):
             btn.ensurePolished()
             btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-            btn.setFixedHeight(32)
+            btn.setFixedHeight(nav_h)
             # Keep both buttons visually consistent with reference topbar proportions.
             w = 82
             nav_right -= w
@@ -683,11 +688,11 @@ class MainWindow(QMainWindow):
         self._work_label.setStyleSheet(
             "QPushButton {"
             f" background-color: {Colors.ACCENT};"
-            f" color: {Colors.BG_DARK};"
+            f" color: {Colors.TEXT_BRIGHT};"
             " border: none;"
             " border-radius: 8px;"
             " padding: 8px 16px;"
-            " font-size: 9pt;"
+            " font-size: 9.5pt;"
             " font-weight: 700;"
             "}"
             f"QPushButton:hover {{ background-color: {Colors.ACCENT_LIGHT}; }}"
@@ -699,7 +704,7 @@ class MainWindow(QMainWindow):
         self._header_username_full_text = "사용자"
         self._header_username_label.setToolTip(self._header_username_full_text)
         self._header_username_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600; background: transparent;"
         )
 
         self._online_dot = QLabel("", header)
@@ -709,14 +714,14 @@ class MainWindow(QMainWindow):
 
         self._connection_label = QLabel("접속 확인 중", header)
         self._connection_label.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; background: transparent;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600; background: transparent;"
         )
 
         self.status_badge = Badge("대기중", Colors.SUCCESS, header)
         self.status_badge.setStyleSheet(
             f"QLabel {{ background-color: {Colors.ACCENT_SUBTLE};"
             f" color: {Colors.ACCENT_LIGHT}; border: 1px solid {Colors.ACCENT};"
-            f" border-radius: 6px; font-size: 8pt; font-weight: 700; padding: 0 10px; }}"
+            f" border-radius: 6px; font-size: 9pt; font-weight: 700; padding: 0 10px; }}"
         )
         self.status_badge.setVisible(False)
 
@@ -724,12 +729,12 @@ class MainWindow(QMainWindow):
         self._plan_badge.setCursor(Qt.CursorShape.PointingHandCursor)
         self._plan_badge.setStyleSheet(
             f"QPushButton {{"
-            f" background-color: rgba(255, 255, 255, 0.05);"
+            f" background-color: {Colors.BG_CARD};"
             f" color: {Colors.TEXT_SECONDARY};"
             f" border: 1px solid {Colors.BORDER};"
             f" border-radius: 6px;"
             f" padding: 6px 12px;"
-            f" font-size: 8pt;"
+            f" font-size: 9pt;"
             f" font-weight: 700;"
             f"}}"
             f"QPushButton:hover {{"
@@ -754,18 +759,20 @@ class MainWindow(QMainWindow):
         for btn in nav_buttons:
             if btn is self.update_btn and not btn.isVisible():
                 continue
-            button_w = 88
+            btn.ensurePolished()
+            button_w = max(88, btn.sizeHint().width() + 4)
             if btn is self.update_btn:
-                btn.ensurePolished()
-                button_w = max(96, btn.sizeHint().width())
-            btn.setGeometry(right - button_w, 18, button_w, 32)
+                button_w = max(96, btn.sizeHint().width() + 8)
+            btn.setGeometry(right - button_w, 15, button_w, 38)
             right = btn.x() - 8
 
         nav_left = right + 8
         right = nav_left - 12
-        top = 19
-        control_h = 30
-        min_left = 306
+        top = 15
+        control_h = 38
+        # Brand title ends at x=282.  Starting account pills at 284 keeps the
+        # compact header collision-free even when the update action is visible.
+        min_left = 284
         self.status_badge.setVisible(False)
 
         plan_text = self._plan_badge.text() or "무료계정"
@@ -787,13 +794,13 @@ class MainWindow(QMainWindow):
         right = self._plan_badge.x() - 8
 
         if show_account_detail:
-            self._connection_label.setGeometry(max(min_left, right - conn_w), top + 5, conn_w, 20)
+            self._connection_label.setGeometry(max(min_left, right - conn_w), top + 9, conn_w, 20)
             right = self._connection_label.x() - 7
 
-            self._online_dot.setGeometry(max(min_left, right - 8), top + 11, 8, 8)
+            self._online_dot.setGeometry(max(min_left, right - 8), top + 15, 8, 8)
             right = self._online_dot.x() - 8
 
-            self._header_username_label.setGeometry(max(min_left, right - user_w), top + 4, user_w, 20)
+            self._header_username_label.setGeometry(max(min_left, right - user_w), top + 8, user_w, 22)
             self._header_username_label.setText(
                 user_metrics.elidedText(user_text, Qt.TextElideMode.ElideRight, user_w)
             )
@@ -847,7 +854,7 @@ class MainWindow(QMainWindow):
         prog_title = QLabel("현재 진행 상황", sidebar)
         prog_title.setGeometry(24, prog_y, 200, 20)
         prog_title.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 700;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 700;"
             " letter-spacing: 1.5px; background: transparent;"
         )
         self._sidebar_progress_title = prog_title
@@ -857,7 +864,7 @@ class MainWindow(QMainWindow):
         self._progress_queue_label = QLabel("전체: 0 / 0", sidebar)
         self._progress_queue_label.setGeometry(24, prog_y, 240, 20)
         self._progress_queue_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 10pt; font-weight: 700;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 10.5pt; font-weight: 700;"
             " background: transparent;"
         )
         prog_y += 28
@@ -875,7 +882,7 @@ class MainWindow(QMainWindow):
             label = QLabel(step_name, sidebar)
             label.setGeometry(48, prog_y, 200, 20)
             label.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 9pt; background: transparent;"
+                f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; background: transparent;"
             )
             self._step_dots.append(dot)
             self._step_labels.append(label)
@@ -894,10 +901,11 @@ class MainWindow(QMainWindow):
         self._sidebar_status_label = QLabel("대기중", sidebar)
         self._sidebar_status_label.setGeometry(24, prog_y, 240, 20)
         self._sidebar_status_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent;"
         )
         prog_y += 26
+        self._sidebar_counts_y = prog_y
 
         # Success / Failed / Total (compact horizontal)
         self._sidebar_success_dot = QLabel("", sidebar)
@@ -908,7 +916,7 @@ class MainWindow(QMainWindow):
         self._sidebar_success_label = QLabel("성공: 0", sidebar)
         self._sidebar_success_label.setGeometry(40, prog_y, 70, 20)
         self._sidebar_success_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
         )
 
         self._sidebar_failed_dot = QLabel("", sidebar)
@@ -919,7 +927,7 @@ class MainWindow(QMainWindow):
         self._sidebar_failed_label = QLabel("실패: 0", sidebar)
         self._sidebar_failed_label.setGeometry(136, prog_y, 70, 20)
         self._sidebar_failed_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
         )
 
         self._sidebar_total_dot = QLabel("", sidebar)
@@ -930,7 +938,7 @@ class MainWindow(QMainWindow):
         self._sidebar_total_label = QLabel("전체: 0", sidebar)
         self._sidebar_total_label.setGeometry(232, prog_y, 70, 20)
         self._sidebar_total_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
         )
         prog_y += 30
 
@@ -938,15 +946,17 @@ class MainWindow(QMainWindow):
         log_title = QLabel("작업 로그", sidebar)
         log_title.setGeometry(24, prog_y, 200, 20)
         log_title.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 700;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 700;"
             " letter-spacing: 1.5px; background: transparent;"
         )
         self._sidebar_log_title = log_title
+        self._sidebar_log_title_y = prog_y
         prog_y += 22
 
         log_h = max(WIN_H - HEADER_H - prog_y - STATUSBAR_H - 8, 80)
         self.log_text = QTextEdit(sidebar)
         self.log_text.setGeometry(12, prog_y, SIDEBAR_W - 24, log_h)
+        self._sidebar_log_text_y = prog_y
         self.log_text.setReadOnly(True)
         self.log_text.setTabChangesFocus(True)
         self.log_text.document().setMaximumBlockCount(self.MAX_LOG_LINES)
@@ -958,7 +968,7 @@ class MainWindow(QMainWindow):
             f"  padding: 6px;"
             f"  color: {Colors.TEXT_SECONDARY};"
             f"  font-family: {Typography.FAMILY_MONO};"
-            f"  font-size: 8pt;"
+            f"  font-size: 10pt;"
             f"}}"
         )
 
@@ -1014,20 +1024,20 @@ class MainWindow(QMainWindow):
         icon_bg.setStyleSheet(
             f"QLabel {{ background-color: {Colors.ACCENT_SUBTLE};"
             f" border: 1px solid {Colors.ACCENT};"
-            " border-radius: 18px; }"
+            " border-radius: 10px; }"
         )
         # Icon text
         icon_label = QLabel(icon_char, page)
         icon_label.setGeometry(28, 20, 36, 36)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 14pt; background: transparent;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 13pt; font-weight: 800; background: transparent;"
         )
         # Title
         title = QLabel(title_text, page)
         title.setGeometry(76, 20, 400, 36)
         title.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 15pt; font-weight: 800;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 16pt; font-weight: 800;"
             " letter-spacing: -0.3px; background: transparent;"
         )
         # Separator
@@ -1053,7 +1063,7 @@ class MainWindow(QMainWindow):
             "QTabBar { background: transparent; border: none; }"
             f"QTabBar::tab {{ background-color: {Colors.BG_CARD}; color: {Colors.TEXT_MUTED};"
             f" border: 1px solid {Colors.BORDER}; border-radius: 7px; padding: 6px 14px;"
-            " margin-right: 6px; min-height: 18px; font-size: 9pt; font-weight: 650; }"
+            " margin-right: 6px; min-height: 18px; font-size: 9.5pt; font-weight: 650; }"
             f"QTabBar::tab:hover {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY}; }}"
             f"QTabBar::tab:selected {{ background-color: {Colors.ACCENT_SUBTLE}; color: {Colors.ACCENT_LIGHT};"
             f" border: 1px solid {Colors.ACCENT}; }}"
@@ -1076,6 +1086,18 @@ class MainWindow(QMainWindow):
         self._inline_help_panels[0] = self._link_help_panel
 
         cy += 38
+
+        # Decorative Nordic Bento surface.  Existing controls stay direct
+        # children of the page so every signal, attribute and test contract is
+        # preserved; this frame only supplies the 8-column input-card surface.
+        self._link_input_card = SectionFrame(page)
+        self._link_input_card.setObjectName("linkInputCard")
+        self._link_input_card.setGeometry(28, cy, 944, 252)
+        self._link_input_card.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self._link_input_card.lower()
 
         # Supported marketplaces summary (top right)
         self._coupang_link = QLabel(
@@ -1103,7 +1125,8 @@ class MainWindow(QMainWindow):
             page,
         )
         hint.setGeometry(28, cy, 700, 20)
-        hint.setStyleSheet(muted_text_style("9pt"))
+        hint.setWordWrap(True)
+        hint.setStyleSheet(muted_text_style("9.5pt"))
         hint.setTextFormat(Qt.TextFormat.RichText)
         hint.setAccessibleName("입력 링크 채널 분류")
         hint.setAccessibleDescription(
@@ -1204,30 +1227,33 @@ class MainWindow(QMainWindow):
         self._run_state_title = QLabel("자동화 대기", self._run_state_frame)
         self._run_state_title.setGeometry(18, 12, 160, 20)
         self._run_state_title.setStyleSheet(
-            f"color: {Colors.INFO}; font-size: 9pt; font-weight: 800;"
+            f"color: {Colors.INFO}; font-size: 9.5pt; font-weight: 800;"
             " background: transparent; border: none;"
         )
 
         self._run_state_main = QLabel("아직 실행 중인 대기열이 없습니다.", self._run_state_frame)
         self._run_state_main.setGeometry(18, 36, 420, 24)
+        self._run_state_main.setWordWrap(True)
         self._run_state_main.setStyleSheet(
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 12pt; font-weight: 800;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 12.5pt; font-weight: 800;"
             " background: transparent; border: none;"
         )
 
         self._run_state_detail = QLabel("링크를 넣고 자동화 시작을 누르면 현재 상태가 여기에 표시됩니다.", self._run_state_frame)
         self._run_state_detail.setGeometry(456, 14, 456, 20)
+        self._run_state_detail.setWordWrap(True)
         self._run_state_detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._run_state_detail.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent; border: none;"
         )
 
         self._run_state_next = QLabel("다음 작업: --", self._run_state_frame)
         self._run_state_next.setGeometry(456, 42, 456, 20)
+        self._run_state_next.setWordWrap(True)
         self._run_state_next.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._run_state_next.setStyleSheet(
-            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent; border: none;"
         )
 
@@ -1235,7 +1261,7 @@ class MainWindow(QMainWindow):
         table_label = QLabel("작업 현황", page)
         table_label.setGeometry(28, state_y + 88, 200, 20)
         table_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600;"
             " letter-spacing: 1px; background: transparent;"
         )
         self._link_table_label = table_label
@@ -1254,6 +1280,8 @@ class MainWindow(QMainWindow):
         self.link_table.verticalHeader().setVisible(False)
 
         header = self.link_table.horizontalHeader()
+        header.setMinimumHeight(38)
+        self.link_table.verticalHeader().setDefaultSectionSize(34)
         header.setSectionResizeMode(LINK_TABLE_NUMBER_COLUMN, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(LINK_TABLE_CHANNEL_COLUMN, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(LINK_TABLE_URL_COLUMN, QHeaderView.ResizeMode.Stretch)
@@ -1265,11 +1293,11 @@ class MainWindow(QMainWindow):
 
         self.link_table.setStyleSheet(
             f"QTableWidget {{"
-            f"  background-color: {Colors.BG_INPUT};"
+            f"  background-color: {Colors.BG_CARD};"
             f"  border: 1px solid {Colors.BORDER};"
             f"  border-radius: {Radius.LG};"
             f"  gridline-color: {Colors.BORDER};"
-            f"  font-size: 9pt;"
+            f"  font-size: 10.5pt;"
             f"}}"
             f"QTableWidget::item {{"
             f"  padding: 6px 8px;"
@@ -1281,11 +1309,41 @@ class MainWindow(QMainWindow):
             f"  border-bottom: 1px solid {Colors.BORDER};"
             f"  border-right: 1px solid {Colors.BORDER};"
             f"  padding: 8px 6px;"
-            f"  font-size: 9pt;"
+            f"  font-size: 10.5pt;"
             f"  font-weight: 700;"
             f"}}"
         )
         self.link_table.cellClicked.connect(self._on_link_table_cell_clicked)
+
+        # The working surface scrolls independently on short laptop screens.
+        # Header actions and account tabs remain fixed, while no workflow
+        # component has to be hidden or geometrically compressed.
+        self._link_scroll = QScrollArea(page)
+        self._link_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._link_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._link_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._link_scroll.setStyleSheet(scroll_area_style())
+        self._link_scroll_content = QWidget()
+        self._link_scroll_content.setStyleSheet("background: transparent;")
+        self._link_scroll.setWidget(self._link_scroll_content)
+        for widget in (
+            self._link_help_panel,
+            self._link_input_card,
+            self._links_hint,
+            self.links_text,
+            self.start_btn,
+            self.add_btn,
+            self.stop_btn,
+            self.start_all_btn,
+            self.stop_all_btn,
+            self._run_state_frame,
+            self._link_table_label,
+            self.link_table,
+        ):
+            widget.setParent(self._link_scroll_content)
+            if widget is not self._link_help_panel:
+                widget.show()
+        self._link_input_card.lower()
 
     # ── Page 1: 업로드 설정 ─────────────────────────────────
 
@@ -1293,7 +1351,7 @@ class MainWindow(QMainWindow):
         cy = self._make_page_header(page, "⬆", "업로드 설정")
 
         _field_lbl_style = (
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 600;"
             " background: transparent;"
         )
 
@@ -1351,7 +1409,7 @@ class MainWindow(QMainWindow):
             f"  border: 1px solid {Colors.BORDER};"
             f"  border-radius: {Radius.MD};"
             f"  padding: 7px 10px;"
-            f"  font-size: 10pt;"
+            f"  font-size: 10.5pt;"
             f"}}"
             f"QComboBox:focus {{ border-color: {Colors.ACCENT}; }}"
         )
@@ -1375,32 +1433,32 @@ class MainWindow(QMainWindow):
         cy = self._make_page_header(page, "⚙", "설정")
 
         _section_style = (
-            f"QFrame {{ background-color: {Colors.BG_CARD};"
+            f"QFrame#settingsSectionCard {{ background-color: {Colors.BG_CARD};"
             f" border: 1px solid {Colors.BORDER}; border-radius: 12px;"
             " outline: none;"
             "}"
         )
-        _control_h = 40
+        _control_h = 44
         _action_btn_w = 196
         _section_title_style = (
-            f"color: {Colors.TEXT_PRIMARY}; font-size: 10pt; font-weight: 700; background: transparent; border: none;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 12pt; font-weight: 700; background: transparent; border: none;"
         )
         _field_lbl_style = (
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; background: transparent; border: none;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 600; background: transparent; border: none;"
         )
         _hint_lbl_style = (
-            f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 400; background: transparent; border: none;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 400; background: transparent; border: none;"
         )
         _input_style = (
             f"QLineEdit {{ background-color: {Colors.BG_INPUT}; color: {Colors.TEXT_PRIMARY};"
-            f" border: 1px solid {Colors.BORDER}; border-radius: 8px; padding: 9px 12px;"
-            " font-size: 9pt; font-weight: 500; }"
+            f" border: 2px solid {Colors.BORDER}; border-radius: 8px; padding: 0;"
+            " font-size: 10.5pt; font-weight: 500; }"
             f"QLineEdit:focus {{ border: 2px solid {Colors.ACCENT}; }}"
         )
         _combo_style = (
             f"QComboBox {{ background-color: {Colors.BG_INPUT}; color: {Colors.TEXT_PRIMARY};"
-            f" border: 1px solid {Colors.BORDER}; border-radius: 8px; padding: 8px 12px;"
-            " font-size: 9pt; font-weight: 600; }"
+            f" border: 2px solid {Colors.BORDER}; border-radius: 8px; padding: 7px 12px;"
+            " font-size: 10.5pt; font-weight: 600; }"
             f"QComboBox:focus {{ border: 2px solid {Colors.ACCENT}; }}"
             "QComboBox::drop-down { border: none; width: 28px; }"
             f"QComboBox QAbstractItemView {{ background-color: {Colors.BG_ELEVATED};"
@@ -1408,8 +1466,8 @@ class MainWindow(QMainWindow):
             f" selection-background-color: {Colors.ACCENT_DARK}; }}"
         )
         _primary_btn_style = (
-            f"QPushButton {{ background-color: {Colors.ACCENT}; color: {Colors.BG_DARK};"
-            " border: none; border-radius: 8px; padding: 8px 16px; font-size: 9pt; font-weight: 800; }"
+            f"QPushButton {{ background-color: {Colors.ACCENT}; color: {Colors.TEXT_BRIGHT};"
+            " border: none; border-radius: 8px; padding: 8px 16px; font-size: 10.5pt; font-weight: 800; }"
             f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT_LIGHT};"
             f" border: 2px solid {Colors.TEXT_PRIMARY}; }}"
             f"QPushButton:pressed {{ background-color: {Colors.ACCENT_DARK}; }}"
@@ -1418,7 +1476,7 @@ class MainWindow(QMainWindow):
         _ghost_btn_style = (
             f"QPushButton {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY};"
             f" border: 1px solid {Colors.BORDER}; border-radius: 8px; padding: 8px 14px;"
-            " font-size: 9pt; font-weight: 650; }"
+            " font-size: 10pt; font-weight: 650; }"
             f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT_SUBTLE};"
             f" border: 2px solid {Colors.ACCENT}; }}"
             f"QPushButton:disabled {{ background-color: {Colors.BG_CARD}; color: {Colors.TEXT_MUTED}; }}"
@@ -1426,7 +1484,7 @@ class MainWindow(QMainWindow):
         _contact_btn_style = (
             f"QPushButton {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_PRIMARY};"
             f" border: 1px solid {Colors.BORDER}; border-radius: 8px; padding: 8px 16px;"
-            " font-size: 9pt; font-weight: 700; }"
+            " font-size: 10pt; font-weight: 700; }"
             f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT_SUBTLE};"
             f" border: 2px solid {Colors.ACCENT}; }}"
         )
@@ -1453,7 +1511,7 @@ class MainWindow(QMainWindow):
             " padding: 10px 16px;"
             " margin-right: 6px;"
             " min-height: 20px;"
-            " font-size: 9pt;"
+            " font-size: 10pt;"
             " font-weight: 700;"
             "}"
             "QTabBar::tab:first {"
@@ -1501,12 +1559,12 @@ class MainWindow(QMainWindow):
             " margin: 2px 0 2px 0;"
             "}"
             "QScrollBar::handle:vertical {"
-            " background-color: rgba(255, 255, 255, 0.12);"
+            f" background-color: {Colors.SCROLLBAR};"
             " min-height: 28px;"
             " border-radius: 5px;"
             "}"
             "QScrollBar::handle:vertical:hover {"
-            " background-color: rgba(255, 255, 255, 0.2);"
+            f" background-color: {Colors.SCROLLBAR_HOVER};"
             "}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
             " height: 0px;"
@@ -1526,6 +1584,7 @@ class MainWindow(QMainWindow):
         acct = QFrame(content)
         acct.setGeometry(24, sy, 952, 104)
         acct.setFrameShape(QFrame.Shape.NoFrame)
+        acct.setObjectName("settingsSectionCard")
         acct.setStyleSheet(_section_style)
         self._settings_account_sec = acct
 
@@ -1535,9 +1594,9 @@ class MainWindow(QMainWindow):
         acct_icon.setStyleSheet(
             "QLabel {"
             f" background: {Gradients.ACCENT_BTN};"
-            f" color: {Colors.BG_DARK};"
+            f" color: {Colors.TEXT_BRIGHT};"
             " border-radius: 20px;"
-            " font-size: 16px;"
+            " font-size: 12pt;"
             " font-weight: 700;"
             "}"
         )
@@ -1545,7 +1604,7 @@ class MainWindow(QMainWindow):
         self._acct_username_label = QLabel("사용자", acct)
         self._acct_username_label.setGeometry(74, 24, 320, 24)
         self._acct_username_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 14px; font-weight: 700; background: transparent; border: none;"
+            f"color: {Colors.TEXT_PRIMARY}; font-size: 10.5pt; font-weight: 700; background: transparent; border: none;"
         )
 
         self._acct_status_label = QLabel("활성 계정", acct)
@@ -1557,11 +1616,11 @@ class MainWindow(QMainWindow):
         self._acct_plan_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._acct_plan_badge.setStyleSheet(
             "QLabel {"
-            " background-color: rgba(255, 255, 255, 0.05);"
-            " color: #B8B8B8;"
-            " border: 1px solid rgba(255, 255, 255, 0.05);"
+            f" background-color: {Colors.ACCENT_SUBTLE};"
+            f" color: {Colors.ACCENT_LIGHT};"
+            f" border: 1px solid {Colors.INFO_BORDER};"
             " border-radius: 8px;"
-            " font-size: 11px;"
+            " font-size: 9.5pt;"
             " font-weight: 700;"
             "}"
         )
@@ -1570,7 +1629,7 @@ class MainWindow(QMainWindow):
         self._acct_work_label.setGeometry(768, 58, 160, 22)
         self._acct_work_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._acct_work_label.setStyleSheet(
-            "color: #9CA3AF; font-size: 11px; background: transparent; border: none;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; background: transparent; border: none;"
         )
 
         sy += 128
@@ -1579,6 +1638,7 @@ class MainWindow(QMainWindow):
         threads_sec = QFrame(content)
         threads_sec.setGeometry(24, sy, 952, 300)
         threads_sec.setFrameShape(QFrame.Shape.NoFrame)
+        threads_sec.setObjectName("settingsSectionCard")
         threads_sec.setStyleSheet(_section_style)
         self._settings_threads_sec = threads_sec
 
@@ -1609,16 +1669,20 @@ class MainWindow(QMainWindow):
         self.username_edit.setGeometry(24, 122, 904, _control_h)
         self.username_edit.setPlaceholderText("예: myaccount")
         self.username_edit.setStyleSheet(_input_style)
+        self.username_edit.setTextMargins(14, 0, 14, 0)
 
         self._threads_status_dot = QLabel("", threads_sec)
         self._threads_status_dot.setGeometry(24, 174, 10, 10)
-        self._threads_status_dot.setStyleSheet("background-color: #9CA3AF; border-radius: 5px;")
+        self._threads_status_dot.setStyleSheet(
+            f"background-color: {Colors.TEXT_MUTED}; border-radius: 5px;"
+        )
 
         self.login_status_label = QLabel("연결 안됨", threads_sec)
         self.login_status_label.setGeometry(42, 170, 320, 22)
         self.login_status_label.setStyleSheet(
-            "color: #9CA3AF; font-size: 11px; font-weight: 500; background: transparent; border: none;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 500; background: transparent; border: none;"
         )
+        self.login_status_label.setWordWrap(True)
 
         self.threads_login_btn = QPushButton("Threads 로그인", threads_sec)
         self.threads_login_btn.setGeometry(576, 198, 170, _control_h)
@@ -1646,6 +1710,7 @@ class MainWindow(QMainWindow):
         concept_sec = QFrame(content)
         concept_sec.setGeometry(24, sy, 952, 238)
         concept_sec.setFrameShape(QFrame.Shape.NoFrame)
+        concept_sec.setObjectName("settingsSectionCard")
         concept_sec.setStyleSheet(_section_style)
         self._settings_automation_sec = concept_sec
         self._settings_concept_sec = concept_sec
@@ -1715,6 +1780,7 @@ class MainWindow(QMainWindow):
 
         self._settings_api_sec = QFrame(content)
         self._settings_api_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_api_sec.setObjectName("settingsSectionCard")
         self._settings_api_sec.setStyleSheet(_section_style)
 
         self._settings_api_title = QLabel("AI 글 생성 설정", self._settings_api_sec)
@@ -1740,6 +1806,7 @@ class MainWindow(QMainWindow):
             self._settings_api_sec,
         )
         self._ai_provider_hint.setGeometry(368, 82, 540, 20)
+        self._ai_provider_hint.setWordWrap(True)
         self._ai_provider_hint.setStyleSheet(_hint_lbl_style)
 
         self._settings_api_guide = QLabel(
@@ -1750,7 +1817,7 @@ class MainWindow(QMainWindow):
         self._settings_api_guide.setGeometry(24, 124, 260, 20)
         self._settings_api_guide.setOpenExternalLinks(False)
         self._settings_api_guide.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
-        self._settings_api_guide.setStyleSheet("background: transparent; border: none; font-size: 11px;")
+        self._settings_api_guide.setStyleSheet("background: transparent; border: none; font-size: 9.5pt;")
         self._settings_api_guide.linkActivated.connect(
             lambda href: self._open_external_link(href, "settings_api_key_guide")
         )
@@ -1760,12 +1827,14 @@ class MainWindow(QMainWindow):
             self._settings_api_sec,
         )
         self._settings_api_hint.setGeometry(306, 124, 596, 18)
+        self._settings_api_hint.setWordWrap(True)
         self._settings_api_hint.setStyleSheet(_hint_lbl_style)
 
         self._grok_status_label = QLabel("Grok 상태를 확인해주세요.", self._settings_api_sec)
         self._grok_status_label.setGeometry(24, 124, 500, 22)
+        self._grok_status_label.setWordWrap(True)
         self._grok_status_label.setStyleSheet(
-            "color: #B8B8B8; font-size: 12px; background: transparent; border: none;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; background: transparent; border: none;"
         )
 
         self._grok_install_btn = QPushButton("설치 안내", self._settings_api_sec)
@@ -1789,11 +1858,11 @@ class MainWindow(QMainWindow):
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setStyleSheet(
                 "QLabel {"
-                " background-color: #1F2937;"
-                " color: #B8B8B8;"
-                " border: 1px solid rgba(255, 255, 255, 0.05);"
+                f" background-color: {Colors.BG_ELEVATED};"
+                f" color: {Colors.TEXT_SECONDARY};"
+                f" border: 1px solid {Colors.BORDER};"
                 " border-radius: 12px;"
-                " font-size: 11px;"
+                " font-size: 9pt;"
                 " font-weight: 700;"
                 "}"
             )
@@ -1803,6 +1872,7 @@ class MainWindow(QMainWindow):
             edit.setPlaceholderText("Gemini API 키를 입력하세요")
             edit.setAccessibleName(f"Gemini API 키 {index + 1}")
             edit.setStyleSheet(_input_style)
+            edit.setTextMargins(14, 0, 14, 0)
 
             toggle = QPushButton("보기", self._settings_api_sec)
             toggle.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1830,6 +1900,7 @@ class MainWindow(QMainWindow):
         # ── Section 4: 앱 정보 ─────────────────────────────
         self._settings_info_sec = QFrame(content)
         self._settings_info_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_info_sec.setObjectName("settingsSectionCard")
         self._settings_info_sec.setStyleSheet(_section_style)
 
         info_title = QLabel("앱 정보", self._settings_info_sec)
@@ -1838,7 +1909,9 @@ class MainWindow(QMainWindow):
 
         self._version_label = QLabel("", self._settings_info_sec)
         self._version_label.setGeometry(24, 44, 320, 20)
-        self._version_label.setStyleSheet("color: #B8B8B8; font-size: 12px; background: transparent; border: none;")
+        self._version_label.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; background: transparent; border: none;"
+        )
 
         dev_label = QLabel("개발: 와이엠", self._settings_info_sec)
         dev_label.setGeometry(24, 62, 420, 16)
@@ -1847,6 +1920,7 @@ class MainWindow(QMainWindow):
         # ── Section 5: 이용권 · 결제 ───────────────────────
         self._settings_payment_sec = QFrame(content)
         self._settings_payment_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_payment_sec.setObjectName("settingsSectionCard")
         self._settings_payment_sec.setStyleSheet(_section_style)
 
         payment_title = QLabel("이용권 선택", self._settings_payment_sec)
@@ -1858,7 +1932,10 @@ class MainWindow(QMainWindow):
             self._settings_payment_sec,
         )
         payment_desc.setGeometry(24, 40, 880, 20)
-        payment_desc.setStyleSheet("color: #B8B8B8; font-size: 12px; font-weight: 500; background: transparent; border: none;")
+        payment_desc.setWordWrap(True)
+        payment_desc.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 500; background: transparent; border: none;"
+        )
         self._payment_desc = payment_desc
 
         self._shopping_offer_label = QLabel(
@@ -1867,10 +1944,11 @@ class MainWindow(QMainWindow):
         )
         self._shopping_offer_label.setGeometry(24, 66, 880, 30)
         self._shopping_offer_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        self._shopping_offer_label.setWordWrap(True)
         self._shopping_offer_label.setStyleSheet(
             f"QLabel {{ background-color: {Colors.ACCENT_SUBTLE}; color: {Colors.ACCENT_LIGHT};"
             f" border: 1px solid {Colors.ACCENT_DARK}; border-radius: 7px;"
-            " padding: 0 12px; font-size: 11px; font-weight: 700; }"
+            " padding: 0 12px; font-size: 9.5pt; font-weight: 700; }"
         )
 
         phone_label = QLabel("결제 휴대폰 번호", self._settings_payment_sec)
@@ -1888,26 +1966,33 @@ class MainWindow(QMainWindow):
         )
         self._pay_phone_edit.setAccessibleName("결제 휴대폰 번호")
         self._pay_phone_edit.setAccessibleDescription("PayApp 결제창을 받을 본인 휴대폰 번호")
+        self._pay_phone_edit.setTextMargins(14, 0, 14, 0)
         phone_label.setBuddy(self._pay_phone_edit)
 
         basic_label = QLabel("쿠팡 기본", self._settings_payment_sec)
         basic_label.setGeometry(296, 106, 300, 18)
-        basic_label.setStyleSheet("color: #D1D5DB; font-size: 11px; font-weight: 800;")
+        basic_label.setStyleSheet(
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 800;"
+            " background: transparent; border: none;"
+        )
         self._payment_basic_label = basic_label
 
         pro_label = QLabel("쇼핑 프로 · 전체 쇼핑몰", self._settings_payment_sec)
         pro_label.setGeometry(296, 180, 320, 18)
-        pro_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT}; font-size: 11px; font-weight: 800;")
+        pro_label.setStyleSheet(
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 10pt; font-weight: 800;"
+            " background: transparent; border: none;"
+        )
         self._payment_pro_label = pro_label
 
-        self._pay_weekly_btn = QPushButton("7일 19,000원 · Threads 1개", self._settings_payment_sec)
+        self._pay_weekly_btn = QPushButton("7일 19,000원\nThreads 1개", self._settings_payment_sec)
         self._pay_weekly_btn.setGeometry(296, 128, 306, _control_h)
         self._pay_weekly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pay_weekly_btn.clicked.connect(
             lambda: self._request_payapp_checkout("stmaker_pro_week")
         )
 
-        self._pay_monthly_btn = QPushButton("월 49,000원 · Threads 10개", self._settings_payment_sec)
+        self._pay_monthly_btn = QPushButton("월 49,000원\nThreads 10개", self._settings_payment_sec)
         self._pay_monthly_btn.setGeometry(614, 128, 306, _control_h)
         self._pay_monthly_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._pay_monthly_btn.clicked.connect(
@@ -1915,7 +2000,7 @@ class MainWindow(QMainWindow):
         )
 
         self._pay_shopping_weekly_btn = QPushButton(
-            "7일 29,000원 · Threads 3개",
+            "7일 29,000원\nThreads 3개",
             self._settings_payment_sec,
         )
         self._pay_shopping_weekly_btn.setGeometry(296, 202, 306, _control_h)
@@ -1925,7 +2010,7 @@ class MainWindow(QMainWindow):
         )
 
         self._pay_shopping_monthly_btn = QPushButton(
-            "월 69,000원 · Threads 10개",
+            "월 69,000원\nThreads 10개",
             self._settings_payment_sec,
         )
         self._pay_shopping_monthly_btn.setGeometry(614, 202, 306, _control_h)
@@ -1947,12 +2032,14 @@ class MainWindow(QMainWindow):
             self._settings_payment_sec,
         )
         self._pay_hint_label.setGeometry(24, 258, 900, 20)
+        self._pay_hint_label.setWordWrap(True)
         self._pay_hint_label.setStyleSheet(_hint_lbl_style)
 
         self._pay_status_label = QLabel("이용권을 선택하면 PayApp 보안 결제창이 열립니다.", self._settings_payment_sec)
         self._pay_status_label.setGeometry(24, 284, 900, 24)
+        self._pay_status_label.setWordWrap(True)
         self._pay_status_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 11px; font-weight: 600; background: transparent; border: none;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 9.5pt; font-weight: 600; background: transparent; border: none;"
         )
         self._pay_status_label.setAccessibleName("결제 진행 상태")
 
@@ -1969,6 +2056,7 @@ class MainWindow(QMainWindow):
         # ── Section 6: 실행 설정 ────────────────────────────
         self._settings_startup_sec = QFrame(content)
         self._settings_startup_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_startup_sec.setObjectName("settingsSectionCard")
         self._settings_startup_sec.setStyleSheet(_section_style)
 
         startup_title = QLabel("실행 설정", self._settings_startup_sec)
@@ -1980,12 +2068,14 @@ class MainWindow(QMainWindow):
 
         startup_desc = QLabel("컴퓨터가 꺼졌다 켜져도 로그인 후 프로그램을 다시 실행합니다.", self._settings_startup_sec)
         startup_desc.setGeometry(304, 46, 560, 20)
+        startup_desc.setWordWrap(True)
         startup_desc.setStyleSheet(_hint_lbl_style)
         self._startup_desc = startup_desc
 
         # ── Section 7: contextual help ────────────────────
         self._settings_tutorial_sec = QFrame(content)
         self._settings_tutorial_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_tutorial_sec.setObjectName("settingsSectionCard")
         self._settings_tutorial_sec.setStyleSheet(_section_style)
 
         tutorial_title = QLabel("화면 도움말", self._settings_tutorial_sec)
@@ -2000,6 +2090,7 @@ class MainWindow(QMainWindow):
         # ── Section 8: 문의하기 ────────────────────────────
         self._settings_contact_sec = QFrame(content)
         self._settings_contact_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_contact_sec.setObjectName("settingsSectionCard")
         self._settings_contact_sec.setStyleSheet(_section_style)
 
         contact_title = QLabel("문의하기", self._settings_contact_sec)
@@ -2013,6 +2104,7 @@ class MainWindow(QMainWindow):
 
         contact_desc = QLabel("문의 버튼을 누르면 카카오톡 상담 채널이 열립니다.", self._settings_contact_sec)
         contact_desc.setGeometry(236, 50, 560, 20)
+        contact_desc.setWordWrap(True)
         contact_desc.setStyleSheet(_hint_lbl_style)
         self._contact_desc = contact_desc
 
@@ -2023,10 +2115,18 @@ class MainWindow(QMainWindow):
         self._settings_save_btn.clicked.connect(self._save_settings)
 
         self.threads_login_btn.setStyleSheet(_primary_btn_style)
-        self._pay_weekly_btn.setStyleSheet(_ghost_btn_style)
-        self._pay_monthly_btn.setStyleSheet(_ghost_btn_style)
-        self._pay_shopping_weekly_btn.setStyleSheet(_ghost_btn_style)
-        self._pay_shopping_monthly_btn.setStyleSheet(_primary_btn_style)
+        # Two-line price CTAs use the caption role so both columns remain
+        # readable on 900px laptop windows without eliding plan details.
+        _payment_ghost_btn_style = _ghost_btn_style.replace(
+            "font-size: 10pt;", "font-size: 9.5pt;"
+        )
+        _payment_primary_btn_style = _primary_btn_style.replace(
+            "font-size: 10.5pt;", "font-size: 9.5pt;"
+        )
+        self._pay_weekly_btn.setStyleSheet(_payment_ghost_btn_style)
+        self._pay_monthly_btn.setStyleSheet(_payment_ghost_btn_style)
+        self._pay_shopping_weekly_btn.setStyleSheet(_payment_ghost_btn_style)
+        self._pay_shopping_monthly_btn.setStyleSheet(_payment_primary_btn_style)
         self._pay_cancel_btn.setStyleSheet(_ghost_btn_style)
         self._pay_refresh_btn.setStyleSheet(_ghost_btn_style)
         self._settings_save_btn.setStyleSheet(_primary_btn_style)
@@ -2050,6 +2150,13 @@ class MainWindow(QMainWindow):
             self._settings_save_btn,
         ):
             btn.setFixedHeight(_control_h)
+        for btn in (
+            self._pay_weekly_btn,
+            self._pay_monthly_btn,
+            self._pay_shopping_weekly_btn,
+            self._pay_shopping_monthly_btn,
+        ):
+            btn.setFixedHeight(60)
 
         self._visible_gemini_key_rows = 1
         self._settings_scroll_positions = {}
@@ -2063,9 +2170,10 @@ class MainWindow(QMainWindow):
 
     def _build_statusbar(self, parent):
         bar = QFrame(parent)
+        bar.setObjectName("statusBarFrame")
         bar.setGeometry(0, WIN_H - STATUSBAR_H, WIN_W, STATUSBAR_H)
         bar.setStyleSheet(
-            f"QFrame {{"
+            f"QFrame#statusBarFrame {{"
             f"  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
             f"    stop:0 {Colors.BG_SIDEBAR}, stop:0.5 {Colors.BG_ELEVATED}, stop:1 {Colors.BG_SIDEBAR});"
             f"  border-top: 1px solid {Colors.BORDER};"
@@ -2075,35 +2183,35 @@ class MainWindow(QMainWindow):
 
         # Dot
         self._statusbar_dot = QLabel("", bar)
-        self._statusbar_dot.setGeometry(16, 11, 10, 10)
+        self._statusbar_dot.setGeometry(16, 15, 10, 10)
         self._statusbar_dot.setStyleSheet(
             f"background-color: {Colors.SUCCESS}; border-radius: 5px;"
-            f" border: 2px solid rgba(34, 197, 94, 0.3);"
+            f" border: 2px solid {Colors.SUCCESS_BORDER};"
         )
 
         # Status label
         self.status_label = QLabel("준비", bar)
-        self.status_label.setGeometry(34, 6, 600, 20)
+        self.status_label.setGeometry(34, 10, 600, 20)
         self.status_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent;"
         )
 
         # Server label (right side)
         self._server_label = QLabel("서버 연결: --", bar)
-        self._server_label.setGeometry(WIN_W - 400, 6, 200, 20)
+        self._server_label.setGeometry(WIN_W - 400, 10, 200, 20)
         self._server_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._server_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 9pt; font-weight: 600;"
+            f"color: {Colors.ACCENT_LIGHT}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent;"
         )
 
         # Progress label (far right)
         self.progress_label = QLabel("", bar)
-        self.progress_label.setGeometry(WIN_W - 190, 6, 180, 20)
+        self.progress_label.setGeometry(WIN_W - 190, 10, 180, 20)
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.progress_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
         )
 
     def _relayout_main_window(self):
@@ -2122,9 +2230,9 @@ class MainWindow(QMainWindow):
         for page in self._pages:
             page.setGeometry(sidebar_w, HEADER_H, page_w, page_h)
         self._status_bar_frame.setGeometry(0, height - STATUSBAR_H, width, STATUSBAR_H)
-        self._server_label.setGeometry(max(320, width - 410), 6, 200, 20)
-        self.progress_label.setGeometry(max(520, width - 200), 6, 184, 20)
-        self.status_label.setGeometry(34, 6, max(200, width - 460), 20)
+        self._server_label.setGeometry(max(320, width - 410), 10, 200, 20)
+        self.progress_label.setGeometry(max(520, width - 200), 10, 184, 20)
+        self.status_label.setGeometry(34, 10, max(200, width - 460), 20)
 
         self._relayout_header_account_card()
         self._relayout_sidebar(sidebar_w, page_h)
@@ -2139,91 +2247,201 @@ class MainWindow(QMainWindow):
         for label in (self._sidebar_progress_title, self._progress_queue_label,
                       self._sidebar_status_label, self._sidebar_log_title):
             label.setFixedWidth(max(80, width - label.x() - 12))
-        for label in self._step_labels:
-            label.setFixedWidth(max(80, width - label.x() - 12))
+        for dot, label in zip(self._step_dots, self._step_labels):
+            dot.setGeometry(24, dot.y(), 18, 20)
+            label.setGeometry(44, label.y(), max(80, width - 56), 20)
+            label.setToolTip(label.text())
 
         columns = (
             (self._sidebar_success_dot, self._sidebar_success_label),
             (self._sidebar_failed_dot, self._sidebar_failed_label),
             (self._sidebar_total_dot, self._sidebar_total_label),
         )
-        col_w = max(52, (width - 24) // 3)
-        for index, (dot, label) in enumerate(columns):
-            x = 12 + index * col_w
-            dot.move(x, dot.y())
-            label.setGeometry(x + 13, label.y(), max(38, col_w - 14), 20)
-        self.log_text.setGeometry(10, self.log_text.y(), max(80, width - 20),
-                                  max(52, height - self.log_text.y() - 8))
+        counts_y = int(getattr(self, "_sidebar_counts_y", columns[0][1].y()))
+        if width < 260:
+            # Preserve every counter at compact widths without squeezing Korean text.
+            col_w = max(82, (width - 24) // 2)
+            positions = ((12, counts_y, col_w), (12 + col_w, counts_y, col_w),
+                         (12, counts_y + 24, max(82, width - 24)))
+            log_title_y = counts_y + 52
+        else:
+            col_w = max(70, (width - 24) // 3)
+            positions = tuple((12 + index * col_w, counts_y, col_w) for index in range(3))
+            log_title_y = counts_y + 30
+        for (dot, label), (x, row_y, cell_w) in zip(columns, positions):
+            dot.setGeometry(x, row_y + 6, 8, 8)
+            label.setGeometry(x + 13, row_y, max(52, cell_w - 14), 22)
+            label.setToolTip(label.text())
+        self._sidebar_log_title.setGeometry(
+            24, log_title_y, max(80, width - 36), 20
+        )
+        log_y = log_title_y + 22
+        self.log_text.setGeometry(10, log_y, max(80, width - 20),
+                                  max(52, height - log_y - 8))
 
     def _relayout_link_page(self, width, height):
         page = self._pages[0]
         margin = 24 if width < 820 else 28
-        inner_w = max(280, width - margin * 2)
         icon_bg, icon_label, title, sep = page._page_header_widgets
-        sep.setGeometry(margin, 66, inner_w, 1)
+        page_inner_w = max(280, width - margin * 2)
+        sep.setGeometry(margin, 66, page_inner_w, 1)
         icon_bg.move(margin, 20)
         icon_label.move(margin, 20)
         title.move(margin + 48, 20)
         self._page_help_btn.move(max(margin, width - margin - 32), 22)
         self._coupang_link.setGeometry(max(margin, width - margin - 220), 28, 180, 24)
-        self.link_count_badge.setGeometry(max(margin, width - margin - 314), 28, 88, 24)
+        self.link_count_badge.setGeometry(max(margin, width - margin - 314), 26, 88, 28)
 
         y = 82
-        self._upload_account_tabs.setGeometry(margin, y, inner_w, 30)
-        y += 38
+        self._upload_account_tabs.setGeometry(margin, y, page_inner_w, 40)
+        scroll_top = 130
+        scroll_h = max(80, height - scroll_top)
+        self._link_scroll.setGeometry(0, scroll_top, width, scroll_h)
+        canvas_w = max(320, width - 12)
+        inner_w = max(280, canvas_w - margin * 2)
+        y = 0
         help_visible = bool(self._inline_help_enabled)
         self._link_help_panel.setVisible(help_visible)
         if help_visible:
-            self._link_help_panel.setGeometry(margin, y, inner_w, 68)
-            y += 78
-        self._links_hint.setGeometry(margin, y, inner_w, 20)
-        y += 24
+            self._link_help_panel.setGeometry(margin, y, inner_w, 88)
+            y += 98
+        content_y = y
+        gap = 16
+        wide_bento = inner_w >= 900 and height >= 640
 
-        compact_h = height < 610
-        links_h = 92 if compact_h else 138 if height < 730 else 160
-        self.links_text.setGeometry(margin, y, inner_w, links_h)
-        y += links_h + 12
+        if wide_bento:
+            # 12-column Nordic Bento: editor 8 columns, live state 4 columns.
+            left_w = max(560, int((inner_w - gap) * (8 / 12)))
+            right_w = max(280, inner_w - left_w - gap)
+            right_x = margin + left_w + gap
+            card_h = 300 if height >= 700 else 276
+            inner_x = margin + 20
+            inner_left_w = max(240, left_w - 40)
 
-        two_rows = inner_w < 790
-        gap = 10
-        if two_rows:
-            first_widths = (max(160, int(inner_w * .42)), max(100, int(inner_w * .25)))
-            stop_w = max(90, inner_w - first_widths[0] - first_widths[1] - gap * 2)
-            self.start_btn.setGeometry(margin, y, first_widths[0], 42)
-            self.add_btn.setGeometry(margin + first_widths[0] + gap, y, first_widths[1], 42)
-            self.stop_btn.setGeometry(margin + first_widths[0] + first_widths[1] + gap * 2, y, stop_w, 42)
-            row2_y = y + 50
-            all_w = (inner_w - gap) // 2
-            self.start_all_btn.setGeometry(margin, row2_y, all_w, 42)
-            self.stop_all_btn.setGeometry(margin + all_w + gap, row2_y, inner_w - all_w - gap, 42)
-            y = row2_y + 52
+            self._link_input_card.setGeometry(margin, content_y, left_w, card_h)
+            self._links_hint.setGeometry(inner_x, content_y + 14, inner_left_w, 34)
+            links_h = 148 if card_h >= 280 else 124
+            self.links_text.setGeometry(inner_x, content_y + 52, inner_left_w, links_h)
+
+            button_y = content_y + card_h - 58
+            action_gap = 8
+            start_w = max(200, int((inner_left_w - action_gap * 2) * .50))
+            add_w = max(118, int((inner_left_w - action_gap * 2) * .28))
+            stop_w = max(88, inner_left_w - start_w - add_w - action_gap * 2)
+            self.start_btn.setGeometry(inner_x, button_y, start_w, 44)
+            self.add_btn.setGeometry(inner_x + start_w + action_gap, button_y, add_w, 44)
+            self.stop_btn.setGeometry(
+                inner_x + start_w + add_w + action_gap * 2,
+                button_y,
+                stop_w,
+                44,
+            )
+
+            self._run_state_frame.setGeometry(right_x, content_y, right_w, card_h)
+            state_inner_w = max(120, right_w - 36)
+            self._run_state_title.setGeometry(18, 18, state_inner_w, 20)
+            self._run_state_main.setGeometry(18, 48, state_inner_w, 44)
+            self._run_state_detail.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+            )
+            self._run_state_detail.setGeometry(18, 100, state_inner_w, 46)
+            self._run_state_next.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+            )
+            self._run_state_next.setGeometry(18, 152, state_inner_w, 32)
+
+            all_gap = 8
+            all_w = max(110, (state_inner_w - all_gap) // 2)
+            self.start_all_btn.setGeometry(right_x + 18, button_y, all_w, 44)
+            self.stop_all_btn.setGeometry(
+                right_x + 18 + all_w + all_gap,
+                button_y,
+                state_inner_w - all_w - all_gap,
+                44,
+            )
+            y = content_y + card_h + 16
         else:
-            widths = (240, 150, 112, 160)
-            used = sum(widths) + gap * 4
-            final_w = max(150, inner_w - used)
-            x = margin
-            for button, button_w in zip(
-                (self.start_btn, self.add_btn, self.stop_btn, self.start_all_btn, self.stop_all_btn),
-                (*widths, final_w),
-            ):
-                button.setGeometry(x, y, button_w, 44)
-                x += button_w + gap
-            y += 56
+            # Compact layouts keep every control and stack the two Bento cards.
+            compact_h = height < 610
+            card_inner_x = margin + 20
+            card_inner_w = max(220, inner_w - 40)
+            self._links_hint.setGeometry(card_inner_x, content_y + 14, card_inner_w, 34)
+            links_h = 86 if compact_h else 126 if height < 730 else 148
+            self.links_text.setGeometry(card_inner_x, content_y + 52, card_inner_w, links_h)
+            button_y = content_y + 52 + links_h + 10
 
-        state_h = 66 if compact_h else 76
-        self._run_state_frame.setGeometry(margin, y, inner_w, state_h)
-        split = max(240, inner_w // 2)
-        self._run_state_main.setGeometry(18, 34, max(160, split - 28), 22)
-        self._run_state_detail.setGeometry(split, 10, max(120, inner_w - split - 18), 20)
-        self._run_state_next.setGeometry(split, 36, max(120, inner_w - split - 18), 20)
-        y += state_h + 10
+            start_w = max(150, int((card_inner_w - gap * 2) * .43))
+            add_w = max(100, int((card_inner_w - gap * 2) * .27))
+            stop_w = max(84, card_inner_w - start_w - add_w - gap * 2)
+            self.start_btn.setGeometry(card_inner_x, button_y, start_w, 44)
+            self.add_btn.setGeometry(card_inner_x + start_w + gap, button_y, add_w, 44)
+            self.stop_btn.setGeometry(
+                card_inner_x + start_w + add_w + gap * 2,
+                button_y,
+                stop_w,
+                44,
+            )
+            row2_y = button_y + 52
+            all_w = (card_inner_w - gap) // 2
+            self.start_all_btn.setGeometry(card_inner_x, row2_y, all_w, 44)
+            self.stop_all_btn.setGeometry(
+                card_inner_x + all_w + gap,
+                row2_y,
+                card_inner_w - all_w - gap,
+                44,
+            )
+            card_bottom = row2_y + 56
+            self._link_input_card.setGeometry(
+                margin,
+                content_y,
+                inner_w,
+                card_bottom - content_y,
+            )
+
+            state_y = card_bottom + 12
+            state_h = 116
+            self._run_state_frame.setGeometry(margin, state_y, inner_w, state_h)
+            split = max(230, inner_w // 2)
+            self._run_state_title.setGeometry(18, 10, max(140, split - 28), 22)
+            self._run_state_main.setGeometry(18, 36, max(140, split - 28), 62)
+            self._run_state_detail.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+            )
+            self._run_state_detail.setGeometry(
+                split,
+                10,
+                max(110, inner_w - split - 18),
+                48,
+            )
+            self._run_state_next.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            self._run_state_next.setGeometry(
+                split,
+                62,
+                max(110, inner_w - split - 18),
+                38,
+            )
+            y = state_y + state_h + 12
+
+        for button in (
+            self.start_btn,
+            self.add_btn,
+            self.stop_btn,
+            self.start_all_btn,
+            self.stop_all_btn,
+        ):
+            button.raise_()
+
         self._link_table_label.setGeometry(margin, y, 220, 20)
-        y += 24
-        self.link_table.setGeometry(margin, y, inner_w, max(42, height - y - 12))
+        y += 26
+        table_h = max(140, scroll_h - y - 12)
+        self.link_table.setGeometry(margin, y, inner_w, table_h)
+        self._link_scroll_content.setFixedSize(canvas_w, y + table_h + 12)
 
     def _relayout_settings_page(self, width, height):
         page = self._pages[1]
-        margin = 24
+        margin = 24 if width < 820 else 28
         inner_w = max(320, width - margin * 2)
         icon_bg, icon_label, title, sep = page._page_header_widgets
         sep.setGeometry(margin, 66, inner_w, 1)
@@ -2235,74 +2453,137 @@ class MainWindow(QMainWindow):
         help_visible = bool(self._inline_help_enabled)
         self._settings_help_panel.setVisible(help_visible)
         if help_visible:
-            self._settings_help_panel.setGeometry(margin, y, inner_w, 68)
-            y += 76
+            self._settings_help_panel.setGeometry(margin, y, inner_w, 88)
+            y += 98
         footer_h = 58
         self._settings_scroll.setGeometry(0, y, width, max(80, height - y - footer_h))
         self._settings_content.setFixedWidth(width)
         self._settings_section_w = inner_w
         self._settings_section_x = margin
-        self._settings_save_btn.setGeometry(max(margin, width - margin - 172), height - 50, 172, 40)
+        self._settings_save_btn.setGeometry(max(margin, width - margin - 172), height - 52, 172, 44)
         self._relayout_settings_sections()
         self._relayout_settings_section_contents(inner_w)
 
     def _relayout_settings_section_contents(self, width):
-        """Keep the settings controls within their cards on narrow screens."""
-        content_w = max(200, width - 48)
-        self.username_edit.setFixedWidth(content_w)
-        self._threads_hint_label.setFixedWidth(content_w)
-        combo_w = max(220, min(430, content_w - 304))
-        self.threads_account_combo.setFixedWidth(combo_w)
+        """Fit each control to its actual Bento card, not the page width."""
+        threads_w = max(320, self._settings_threads_sec.width())
+        threads_content_w = max(200, threads_w - 48)
+        self.username_edit.setGeometry(24, 122, threads_content_w, 44)
+        self._threads_hint_label.setGeometry(24, 248, threads_content_w, 54)
+        combo_w = max(220, min(430, threads_content_w - 304))
+        self.threads_account_combo.setGeometry(24, 70, combo_w, 44)
         self.threads_account_add_btn.move(24 + combo_w + 12, 70)
         self.threads_account_remove_btn.move(24 + combo_w + 164, 70)
-        right_btn_x = max(24, width - 376)
-        self.threads_login_btn.move(right_btn_x, 198)
-        self.check_login_btn.move(right_btn_x + 182, 198)
-        self._acct_plan_badge.move(max(24, width - 184), 24)
-        self._acct_work_label.move(max(24, width - 184), 58)
+        right_btn_x = max(24, threads_w - 400)
+        self.threads_login_btn.setGeometry(right_btn_x, 198, 188, 44)
+        self.check_login_btn.setGeometry(right_btn_x + 200, 198, 188, 44)
 
-        if width < 760:
-            self.video_check.setGeometry(24, 122, content_w, 24)
-            self.settings_post_concept_combo.setGeometry(24, 178, min(344, content_w), 40)
-            self._concept_desc.setGeometry(24, 224, content_w, 42)
+        account_w = max(280, self._settings_account_sec.width())
+        account_content_w = max(180, account_w - 94)
+        self._acct_username_label.setGeometry(74, 20, account_content_w, 24)
+        self._acct_status_label.setGeometry(74, 46, account_content_w, 20)
+        if account_w < 520:
+            self._acct_plan_badge.setGeometry(74, 78, account_content_w, 28)
+            self._acct_work_label.setGeometry(74, 110, account_content_w, 20)
         else:
-            self.video_check.setGeometry(404, 80, min(300, width - 428), 24)
-            self.settings_post_concept_combo.setGeometry(24, 162, 344, 40)
-            self._concept_desc.setGeometry(392, 166, max(180, width - 416), 42)
+            self._acct_plan_badge.setGeometry(account_w - 184, 24, 160, 28)
+            self._acct_work_label.setGeometry(account_w - 184, 58, 160, 22)
 
-        self._ai_provider_hint.setGeometry(368, 82, max(180, width - 392), 20)
-        self._settings_api_hint.setGeometry(306, 124, max(180, width - 330), 18)
-        self._pay_hint_label.setFixedWidth(content_w)
-        self._pay_status_label.setFixedWidth(content_w)
-        self._payment_desc.setFixedWidth(content_w)
-        self._shopping_offer_label.setFixedWidth(content_w)
-        self._startup_desc.setGeometry(304, 46, max(180, width - 328), 20)
-        self._contact_desc.setGeometry(236, 50, max(160, width - 260), 20)
-
-        if width < 760:
-            button_w = max(150, (content_w - 12) // 2)
-            self._pay_phone_edit.setGeometry(24, 128, min(250, content_w), 40)
-            self._payment_basic_label.setGeometry(24, 184, content_w, 18)
-            self._pay_weekly_btn.setGeometry(24, 206, button_w, 40)
-            self._pay_monthly_btn.setGeometry(36 + button_w, 206, content_w - button_w - 12, 40)
-            self._payment_pro_label.setGeometry(24, 260, content_w, 18)
-            self._pay_shopping_weekly_btn.setGeometry(24, 282, button_w, 40)
-            self._pay_shopping_monthly_btn.setGeometry(36 + button_w, 282, content_w - button_w - 12, 40)
-            self._pay_hint_label.setGeometry(24, 330, content_w, 20)
-            self._pay_status_label.setGeometry(24, 354, content_w, 24)
-            self._pay_cancel_btn.setGeometry(24, 386, min(190, button_w), 40)
-            self._pay_refresh_btn.setGeometry(226, 386, min(190, max(120, content_w - 202)), 40)
+        automation_w = max(320, self._settings_automation_sec.width())
+        automation_content_w = max(200, automation_w - 48)
+        if automation_w < 760:
+            self.video_check.setGeometry(24, 122, automation_content_w, 32)
+            self.settings_post_concept_combo.setGeometry(
+                24, 178, min(344, automation_content_w), 44
+            )
+            self._concept_desc.setGeometry(24, 230, automation_content_w, 54)
         else:
-            self._payment_basic_label.move(296, 106)
-            self._pay_weekly_btn.setGeometry(296, 128, 306, 40)
-            self._pay_monthly_btn.setGeometry(614, 128, 306, 40)
-            self._payment_pro_label.move(296, 180)
-            self._pay_shopping_weekly_btn.setGeometry(296, 202, 306, 40)
-            self._pay_shopping_monthly_btn.setGeometry(614, 202, 306, 40)
-            self._pay_hint_label.setGeometry(24, 258, content_w, 20)
-            self._pay_status_label.setGeometry(24, 284, content_w, 24)
-            self._pay_cancel_btn.setGeometry(24, 316, 190, 40)
-            self._pay_refresh_btn.setGeometry(226, 316, 190, 40)
+            self.video_check.setGeometry(404, 76, min(300, automation_w - 428), 32)
+            self.settings_post_concept_combo.setGeometry(24, 162, 344, 44)
+            self._concept_desc.setGeometry(392, 162, max(180, automation_w - 416), 54)
+
+        api_w = max(320, self._settings_api_sec.width())
+        self._ai_provider_hint.setGeometry(368, 72, max(120, api_w - 392), 40)
+        self._settings_api_hint.setGeometry(306, 120, max(120, api_w - 330), 40)
+        self._grok_status_label.setGeometry(24, 120, max(180, api_w - 48), 38)
+
+        payment_w = max(320, self._settings_payment_sec.width())
+        payment_content_w = max(200, payment_w - 48)
+        self._pay_hint_label.setFixedWidth(payment_content_w)
+        self._pay_status_label.setFixedWidth(payment_content_w)
+        self._payment_desc.setFixedWidth(payment_content_w)
+        self._shopping_offer_label.setFixedWidth(payment_content_w)
+
+        startup_w = max(280, self._settings_startup_sec.width())
+        startup_content_w = max(180, startup_w - 48)
+        if startup_w < 520:
+            self._auto_start_check.setGeometry(24, 40, startup_content_w, 32)
+            self._startup_desc.setGeometry(24, 76, startup_content_w, 34)
+        else:
+            self._auto_start_check.setGeometry(24, 44, 260, 32)
+            self._startup_desc.setGeometry(304, 46, max(180, startup_w - 328), 34)
+
+        tutorial_w = max(280, self._settings_tutorial_sec.width())
+        self._tutorial_settings_btn.setGeometry(24, 40, max(180, tutorial_w - 48), 44)
+
+        contact_w = max(280, self._settings_contact_sec.width())
+        contact_content_w = max(180, contact_w - 48)
+        if contact_w < 520:
+            self._contact_btn.setGeometry(24, 40, contact_content_w, 44)
+            self._contact_desc.setGeometry(24, 90, contact_content_w, 34)
+        else:
+            self._contact_btn.setGeometry(24, 40, 200, 44)
+            self._contact_desc.setGeometry(236, 45, max(160, contact_w - 260), 34)
+
+        info_w = max(280, self._settings_info_sec.width())
+        self._version_label.setGeometry(24, 44, max(180, info_w - 48), 20)
+
+        if payment_w < 760:
+            button_w = max(120, (payment_content_w - 12) // 2)
+            self._payment_desc.setGeometry(24, 40, payment_content_w, 40)
+            self._shopping_offer_label.setGeometry(24, 88, payment_content_w, 44)
+            self._payment_phone_label.setGeometry(24, 142, payment_content_w, 22)
+            self._pay_phone_edit.setGeometry(24, 166, min(250, payment_content_w), 44)
+            self._payment_basic_label.setGeometry(24, 224, payment_content_w, 22)
+            self._pay_weekly_btn.setGeometry(24, 248, button_w, 60)
+            self._pay_monthly_btn.setGeometry(
+                36 + button_w, 248, payment_content_w - button_w - 12, 60
+            )
+            self._payment_pro_label.setGeometry(24, 322, payment_content_w, 22)
+            self._pay_shopping_weekly_btn.setGeometry(24, 346, button_w, 60)
+            self._pay_shopping_monthly_btn.setGeometry(
+                36 + button_w, 346, payment_content_w - button_w - 12, 60
+            )
+            self._pay_hint_label.setGeometry(24, 420, payment_content_w, 40)
+            self._pay_status_label.setGeometry(24, 468, payment_content_w, 44)
+            footer_button_w = min(190, (payment_content_w - 12) // 2)
+            self._pay_cancel_btn.setGeometry(24, 522, footer_button_w, 44)
+            self._pay_refresh_btn.setGeometry(
+                36 + footer_button_w,
+                522,
+                payment_content_w - footer_button_w - 12,
+                44,
+            )
+        else:
+            plan_x = 296
+            plan_gap = 12
+            plan_w = max(220, (payment_w - plan_x - 24 - plan_gap) // 2)
+            self._payment_desc.setGeometry(24, 40, payment_content_w, 36)
+            self._shopping_offer_label.setGeometry(24, 82, payment_content_w, 46)
+            self._payment_phone_label.setGeometry(24, 142, 250, 22)
+            self._pay_phone_edit.setGeometry(24, 166, 250, 44)
+            self._payment_basic_label.setGeometry(plan_x, 142, plan_w * 2 + plan_gap, 22)
+            self._pay_weekly_btn.setGeometry(plan_x, 166, plan_w, 60)
+            self._pay_monthly_btn.setGeometry(plan_x + plan_w + plan_gap, 166, plan_w, 60)
+            self._payment_pro_label.setGeometry(plan_x, 240, plan_w * 2 + plan_gap, 22)
+            self._pay_shopping_weekly_btn.setGeometry(plan_x, 264, plan_w, 60)
+            self._pay_shopping_monthly_btn.setGeometry(
+                plan_x + plan_w + plan_gap, 264, plan_w, 60
+            )
+            self._pay_hint_label.setGeometry(24, 338, payment_content_w, 40)
+            self._pay_status_label.setGeometry(24, 386, payment_content_w, 44)
+            self._pay_cancel_btn.setGeometry(24, 436, 190, 44)
+            self._pay_refresh_btn.setGeometry(226, 436, 190, 44)
 
     def toggle_inline_help(self, checked=None):
         """Toggle contextual guidance inside the current page."""
@@ -2369,7 +2650,7 @@ class MainWindow(QMainWindow):
             f"{dot_style} font-size: 10pt; background: transparent;"
         )
         self._step_labels[index].setStyleSheet(
-            f"{label_style} font-size: 9pt; background: transparent;"
+            f"{label_style} font-size: 9.5pt; background: transparent;"
         )
         self._log_user_activity(
             "ui_process_step",
@@ -2762,7 +3043,7 @@ class MainWindow(QMainWindow):
         )
         self._run_state_title.setText(title)
         self._run_state_title.setStyleSheet(
-            f"color: {color}; font-size: 9pt; font-weight: 800;"
+            f"color: {color}; font-size: 9.5pt; font-weight: 800;"
             f" background: transparent; border: none;"
         )
         self._run_state_main.setText(main)
@@ -3608,7 +3889,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_grok_status_label"):
             self._grok_status_label.setText("Grok CLI 상태 확인 중...")
             self._grok_status_label.setStyleSheet(
-                "color: #F59E0B; font-size: 12px; background: transparent; border: none;"
+                "color: #F59E0B; font-size: 9.5pt; background: transparent; border: none;"
             )
 
         def worker():
@@ -3646,7 +3927,7 @@ class MainWindow(QMainWindow):
         self._set_grok_buttons_enabled(False)
         self._grok_status_label.setText("브라우저에서 Grok 로그인을 완료해주세요...")
         self._grok_status_label.setStyleSheet(
-            "color: #F59E0B; font-size: 12px; background: transparent; border: none;"
+            "color: #F59E0B; font-size: 9.5pt; background: transparent; border: none;"
         )
         self._log_user_activity("grok_login_started", "source=settings_page")
 
@@ -3696,7 +3977,7 @@ class MainWindow(QMainWindow):
             )
         )
         label.setStyleSheet(
-            f"color: {color}; font-size: 12px; background: transparent; border: none;"
+            f"color: {color}; font-size: 9.5pt; background: transparent; border: none;"
         )
         self._log_user_activity(
             "grok_status_updated",
@@ -3760,27 +4041,35 @@ class MainWindow(QMainWindow):
 
         x = getattr(self, "_settings_section_x", 24)
         w = getattr(self, "_settings_section_w", 952)
-        gap = getattr(self, "_settings_gap", 24)
+        gap = 16
         sy = 12
+        active_tab = int(getattr(self, "_settings_active_tab", 0) or 0)
+        wide_bento = w >= 900
+        primary_w = w
+        secondary_w = w
+        if wide_bento:
+            primary_w = max(560, int((w - gap) * (8 / 12)))
+            secondary_w = max(280, w - primary_w - gap)
 
         provider = self._selected_ai_provider()
         is_grok = provider == AI_PROVIDER_GROK_CLI
         is_gemini = provider == AI_PROVIDER_GEMINI
         is_managed = provider == AI_PROVIDER_MANAGED
         row_count = max(1, int(getattr(self, "_visible_gemini_key_rows", 1)))
-        row_start_y = 154
-        row_step = 50
-        row_height = 40
+        row_start_y = 168
+        row_step = 54
+        row_height = 44
         badge_x = 24
         badge_w = 30
         key_x = 62
         toggle_w = 108
-        key_w = w - key_x - 24 - toggle_w - 8
+        api_layout_w = primary_w if wide_bento and active_tab == 2 else w
+        key_w = max(180, api_layout_w - key_x - 24 - toggle_w - 8)
         toggle_x = key_x + key_w + 8
 
         for index, row in enumerate(getattr(self, "_gemini_key_rows", [])):
             row_y = row_start_y + (index * row_step)
-            row["badge"].setGeometry(badge_x, row_y + 7, badge_w, 24)
+            row["badge"].setGeometry(badge_x, row_y + 10, badge_w, 24)
             row["edit"].setGeometry(key_x, row_y, key_w, row_height)
             row["toggle"].setGeometry(toggle_x, row_y, toggle_w, row_height)
             visible = is_gemini and index < row_count
@@ -3805,40 +4094,43 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.setVisible(is_grok)
 
-        self._grok_install_btn.setGeometry(24, 158, 134, 40)
-        self._grok_login_btn.setGeometry(170, 158, 150, 40)
-        self._grok_check_btn.setGeometry(332, 158, 134, 40)
+        self._grok_install_btn.setGeometry(24, 166, 134, 44)
+        self._grok_login_btn.setGeometry(170, 166, 150, 44)
+        self._grok_check_btn.setGeometry(332, 166, 134, 44)
 
         add_btn_y = row_start_y + (row_count * row_step) + 4
-        self._add_gemini_key_btn.setGeometry(24, add_btn_y, 134, 40)
+        self._add_gemini_key_btn.setGeometry(24, add_btn_y, 134, 44)
         if is_managed:
-            api_h = 128
+            api_h = 144
         elif is_grok:
-            api_h = 220
+            api_h = 234
         else:
-            api_h = add_btn_y + 40 + 18
+            api_h = add_btn_y + 44 + 20
 
         narrow = w < 760
-        automation_h = 286 if narrow else 238
-        payment_h = 438 if narrow else 374
+        automation_h = 306 if narrow else 238
+        payment_layout_w = primary_w if wide_bento and active_tab == 3 else w
+        payment_h = 590 if payment_layout_w < 760 else 504
+        account_layout_w = secondary_w if wide_bento and active_tab == 1 else w
+        account_h = 142 if account_layout_w < 520 else 112
 
         section_specs = {
             0: (
                 (self._settings_automation_sec, automation_h),
             ),
             1: (
-                (self._settings_account_sec, 104),
-                (self._settings_threads_sec, 300),
+                (self._settings_account_sec, account_h),
+                (self._settings_threads_sec, 322),
             ),
             2: (
                 (self._settings_api_sec, api_h),
-                (self._settings_startup_sec, 96),
-                (self._settings_info_sec, 96),
+                (self._settings_startup_sec, 120),
+                (self._settings_info_sec, 104),
             ),
             3: (
                 (self._settings_payment_sec, payment_h),
-                (self._settings_tutorial_sec, 104),
-                (self._settings_contact_sec, 108),
+                (self._settings_tutorial_sec, 112),
+                (self._settings_contact_sec, 148),
             ),
         }
         all_sections = tuple(
@@ -3846,18 +4138,56 @@ class MainWindow(QMainWindow):
             for specs in section_specs.values()
             for section, _height in specs
         )
-        active_tab = int(getattr(self, "_settings_active_tab", 0) or 0)
         active_specs = section_specs.get(active_tab, section_specs[0])
 
         for section in all_sections:
             section.setVisible(False)
-        for section, section_height in active_specs:
-            section.setGeometry(x, sy, w, section_height)
-            section.setVisible(True)
-            sy += section_height + gap
+
+        if not wide_bento or active_tab == 0:
+            for section, section_height in active_specs:
+                section.setGeometry(x, sy, w, section_height)
+                section.setVisible(True)
+                sy += section_height + gap
+        elif active_tab == 1:
+            # Account summary 4 columns + Threads controls 8 columns.
+            account_x = x
+            threads_x = x + secondary_w + gap
+            self._settings_account_sec.setGeometry(account_x, sy, secondary_w, account_h)
+            self._settings_threads_sec.setGeometry(threads_x, sy, primary_w, 322)
+            self._settings_account_sec.setVisible(True)
+            self._settings_threads_sec.setVisible(True)
+            sy += 322 + gap
+        elif active_tab == 2:
+            # AI controls 8 columns + execution/app information 4 columns.
+            right_x = x + primary_w + gap
+            self._settings_api_sec.setGeometry(x, sy, primary_w, api_h)
+            self._settings_startup_sec.setGeometry(right_x, sy, secondary_w, 120)
+            self._settings_info_sec.setGeometry(right_x, sy + 120 + gap, secondary_w, 104)
+            for section in (
+                self._settings_api_sec,
+                self._settings_startup_sec,
+                self._settings_info_sec,
+            ):
+                section.setVisible(True)
+            sy += max(api_h, 240) + gap
+        else:
+            # Subscription 8 columns + help/contact 4 columns.
+            right_x = x + primary_w + gap
+            self._settings_payment_sec.setGeometry(x, sy, primary_w, payment_h)
+            self._settings_tutorial_sec.setGeometry(right_x, sy, secondary_w, 112)
+            self._settings_contact_sec.setGeometry(right_x, sy + 112 + gap, secondary_w, 148)
+            for section in (
+                self._settings_payment_sec,
+                self._settings_tutorial_sec,
+                self._settings_contact_sec,
+            ):
+                section.setVisible(True)
+            sy += max(payment_h, 276) + gap
 
         content_height = max(sy, 120)
         self._settings_content.setFixedHeight(content_height)
+        if hasattr(self, "threads_account_combo"):
+            self._relayout_settings_section_contents(w)
         self._update_settings_help_panel()
 
     def _on_settings_tab_changed(self, index):
@@ -4367,22 +4697,22 @@ class MainWindow(QMainWindow):
         # Keep top-right user status chips visually aligned with the reference app.
         def _apply_top_right_status_styles():
             self._work_label.setStyleSheet(
-                f"QPushButton {{ background-color: {Colors.ACCENT}; color: {Colors.BG_DARK};"
-                " border: none; border-radius: 8px; padding: 7px 14px; font-size: 9pt; font-weight: 800; }"
+                f"QPushButton {{ background-color: {Colors.ACCENT}; color: {Colors.TEXT_BRIGHT};"
+                " border: none; border-radius: 8px; padding: 7px 14px; font-size: 9.5pt; font-weight: 800; }"
                 f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT_LIGHT};"
                 f" border: 2px solid {Colors.TEXT_PRIMARY}; }}"
             )
             self._header_username_label.setStyleSheet(
-                f"color: {Colors.TEXT_SECONDARY}; font-size: 9pt; font-weight: 600; background: transparent;"
+            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600; background: transparent;"
             )
             self._online_dot.setStyleSheet(f"background-color: {Colors.TEXT_MUTED}; border-radius: 4px;")
             self._connection_label.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; background: transparent;"
+            f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600; background: transparent;"
             )
             self._plan_badge.setStyleSheet(
                 f"QPushButton {{ background-color: {Colors.BG_ELEVATED}; color: {Colors.TEXT_SECONDARY};"
                 f" border: 1px solid {Colors.BORDER}; border-radius: 8px; padding: 6px 12px;"
-                " font-size: 8pt; font-weight: 700; }"
+                " font-size: 9pt; font-weight: 700; }"
                 f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT_SUBTLE};"
                 f" border: 2px solid {Colors.ACCENT}; color: {Colors.TEXT_PRIMARY}; }}"
             )
@@ -4578,11 +4908,11 @@ class MainWindow(QMainWindow):
                 f" color: {Colors.ACCENT_LIGHT}; border: 1px solid {Colors.ACCENT_DARK};"
                 " border-radius: 6px;"
                 " padding: 6px 12px;"
-                " font-size: 8pt;"
+                " font-size: 9pt;"
                 " font-weight: 700;"
                 "}"
-                f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT_DARK};"
-                f" color: {Colors.TEXT_PRIMARY}; border: 2px solid {Colors.ACCENT_LIGHT}; }}"
+                f"QPushButton:hover, QPushButton:focus {{ background-color: {Colors.ACCENT};"
+                f" color: {Colors.TEXT_BRIGHT}; border: 2px solid {Colors.ACCENT_DARK}; }}"
             )
         else:
             self._plan_badge.setText("무료계정")
@@ -4593,7 +4923,7 @@ class MainWindow(QMainWindow):
                 f" border: 1px solid {Colors.BORDER};"
                 f" border-radius: 6px;"
                 f" padding: 6px 12px;"
-                f" font-size: 8pt;"
+            f" font-size: 9pt;"
                 f" font-weight: 700;"
                 f"}}"
                 f"QPushButton:hover, QPushButton:focus {{"
@@ -5307,7 +5637,7 @@ class MainWindow(QMainWindow):
         self._threads_status_dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
         self.login_status_label.setText(text)
         self.login_status_label.setStyleSheet(
-            f"color: {color}; font-size: 9pt; font-weight: 600; background: transparent;"
+            f"color: {color}; font-size: 9.5pt; font-weight: 600; background: transparent;"
         )
         self._log_user_activity(
             "threads_login_status_ui",
@@ -6646,7 +6976,7 @@ class MainWindow(QMainWindow):
             )
             self._connection_label.setText("로컬 실행")
             self._connection_label.setStyleSheet(
-                f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
+                f"color: {Colors.SUCCESS}; font-size: 9pt; font-weight: 700; background: transparent;"
             )
             self._server_label.setText("서버 연결: 로컬 모드")
             if not self.is_running:
@@ -6659,7 +6989,7 @@ class MainWindow(QMainWindow):
             )
             self._connection_label.setText("로그아웃")
             self._connection_label.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 8pt; font-weight: 600; background: transparent;"
+                f"color: {Colors.TEXT_MUTED}; font-size: 9pt; font-weight: 600; background: transparent;"
             )
             self.status_label.setText("로그아웃")
             self._server_label.setText("서버 연결: 로그아웃")
@@ -6682,7 +7012,7 @@ class MainWindow(QMainWindow):
             )
             self._connection_label.setText("서버 접속 중")
             self._connection_label.setStyleSheet(
-                f"color: {Colors.SUCCESS}; font-size: 8pt; font-weight: 700; background: transparent;"
+                f"color: {Colors.SUCCESS}; font-size: 9pt; font-weight: 700; background: transparent;"
             )
             self._server_label.setText("서버 연결: 정상")
             if not self.is_running:
@@ -6694,7 +7024,7 @@ class MainWindow(QMainWindow):
         )
         self._connection_label.setText("연결 오류")
         self._connection_label.setStyleSheet(
-            f"color: {Colors.ERROR}; font-size: 8pt; font-weight: 700; background: transparent;"
+            f"color: {Colors.ERROR}; font-size: 9pt; font-weight: 700; background: transparent;"
         )
         self._server_label.setText("서버 연결: 오류")
         self.status_label.setText("연결 오류")
