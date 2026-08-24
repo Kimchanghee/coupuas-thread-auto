@@ -1,13 +1,12 @@
-import xml.etree.ElementTree as ET
-from pathlib import Path
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 from PIL import Image
 
 from tools import build_store_msix
-
 
 FOUNDATION_NS = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
 UAP10_NS = "http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
@@ -183,7 +182,7 @@ def test_main_builds_with_explicit_makeappx_path(monkeypatch, tmp_path, capsys):
 
     assert result == 0
     assert captured["makeappx_path"] == makeappx.resolve()
-    assert captured["version"] == "3.1.0.0"
+    assert captured["version"] == "3.2.0.0"
     assert "package.msix" in capsys.readouterr().out
 
 

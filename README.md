@@ -2,7 +2,7 @@
 
 쓰레드(Threads) 플랫폼에 글을 자동으로 업로드하는 Windows용 Python 애플리케이션입니다.
 
-**현재 버전: v3.1.0** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
+**현재 버전: v3.2.0** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
 
 ## 이용권
 
@@ -266,20 +266,20 @@ python build_installer.py
 
 1. **변경사항 커밋**
    ```bash
-   git add .
+   git add <변경한 파일>
    git commit -m "Update app"
    git push origin master
    ```
 
 2. **자동 버전/릴리즈**
-   - `master`에 프로그램 변경사항이 푸시되면 GitHub Actions가 최신 태그 기준으로 다음 패치 버전을 계산합니다.
-   - 수동 실행 시 `version`을 비워두면 자동 패치 버전, `bump`으로 minor/major를 선택할 수 있습니다.
+   - `build-release.yml`을 수동 실행하거나 `vX.Y.Z` 태그를 푸시하면 GitHub Actions가 버전을 동기화하고 릴리즈를 만듭니다.
+   - 수동 실행 시 `version`을 지정하거나, 비워둔 뒤 `bump`으로 patch/minor/major를 선택할 수 있습니다.
    - 릴리즈에는 설치형 `CoupangThreadAutoSetup.exe`, 단독 실행형 `CoupangThreadAuto.exe`, SHA-256 체크섬, `latest.json`이 업로드됩니다.
    - 웹사이트 다운로드 버튼은 `releases/latest/download/CoupangThreadAutoSetup.exe`를 사용하므로 최신 릴리즈로 자동 연결됩니다.
 
 ### GitHub Actions 워크플로우
 
-- `.github/workflows/build-release.yml`: master 푸시, 태그 푸시, 수동 실행 시 자동 버전 산출/빌드/릴리즈
+- `.github/workflows/build-release.yml`: 버전 태그 푸시 또는 수동 실행 시 버전 산출/빌드/릴리즈
 - Windows 환경에서 PyInstaller EXE와 Inno Setup 설치 파일 빌드
 - Authenticode 서명, SHA-256 체크섬 생성 후 GitHub Releases에 업로드
 
