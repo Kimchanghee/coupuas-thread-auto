@@ -5,7 +5,7 @@ os.environ.setdefault("THREAD_AUTO_DISABLE_HEARTBEAT", "1")
 os.environ.setdefault("THREAD_AUTO_DISABLE_AUTO_UPDATE", "1")
 os.environ.setdefault("THREAD_AUTO_DISABLE_RESUME_PROMPT", "1")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QAbstractSpinBox, QApplication
 
 from src.ai_provider import AI_PROVIDER_MANAGED
 from src.config import config
@@ -20,8 +20,9 @@ def test_settings_page_uses_four_category_tabs(monkeypatch):
     window = MainWindow()
     tab_bar = window._settings_tab_bar
 
-    assert window._sidebar_buttons[0].shortcut().toString() == "Alt+1"
-    assert window._sidebar_buttons[1].shortcut().toString() == "Alt+2"
+    assert window._nav_button_by_page[2].shortcut().toString() == "Alt+1"
+    assert window._nav_button_by_page[0].shortcut().toString() == "Alt+2"
+    assert window._nav_button_by_page[1].shortcut().toString() == "Alt+5"
     assert window.tutorial_btn.shortcut().toString() == "F1"
     assert window.log_text.tabChangesFocus()
 
@@ -40,6 +41,10 @@ def test_settings_page_uses_four_category_tabs(monkeypatch):
     assert window._settings_api_sec.isHidden()
     assert not hasattr(window, "post_concept_combo")
     assert window.hour_spin.parent() is window._settings_automation_sec
+    assert all(
+        spin.buttonSymbols() == QAbstractSpinBox.ButtonSymbols.PlusMinus
+        for spin in (window.hour_spin, window.min_spin, window.sec_spin)
+    )
     assert window.video_check.parent() is window._settings_automation_sec
     assert window.settings_post_concept_combo.parent() is window._settings_automation_sec
 
@@ -73,15 +78,17 @@ def test_settings_page_uses_four_category_tabs(monkeypatch):
     assert window._pay_shopping_monthly_btn.accessibleName() == "월간 쇼핑 프로 이용권 결제"
     assert window._settings_payment_sec.height() >= 360
 
-    assert window._settings_save_btn.parent() is window._pages[1]
-    assert window._settings_scroll.geometry().bottom() < window._settings_save_btn.y()
+    assert window._settings_footer.parent() is window._pages[1]
+    assert window._settings_save_btn.parent() is window._settings_footer
+    assert window._settings_scroll.geometry().bottom() < window._settings_footer.y()
 
     window._switch_page(0)
     window.open_tutorial()
     app.processEvents()
-    assert window._inline_help_enabled is True
-    assert window._link_help_panel.isVisible() is window.isVisible()
-    assert window.tutorial_btn.text() == "도움말"
+    assert window._tutorial_overlay.isVisible() is window.isVisible()
+    assert window._tutorial_overlay.accessibleName() == "현재 화면 도움말"
+    assert window.tutorial_btn.text() in {"?", "도움말"}
+    window._tutorial_overlay._close_overlay()
 
     window.deleteLater()
     app.processEvents()

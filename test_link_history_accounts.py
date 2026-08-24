@@ -43,3 +43,18 @@ def test_default_constructor_and_explicit_legacy_file_keep_legacy_format(tmp_pat
 def test_account_id_cannot_escape_history_root(tmp_path):
     with pytest.raises(ValueError):
         LinkHistory(account_id="../outside", history_root=tmp_path)
+
+
+def test_history_records_are_read_only_copies_for_ui(tmp_path):
+    history = LinkHistory(account_id="creator", history_root=tmp_path)
+    history.add_link(
+        "https://example.test/product/1?affiliate=creator",
+        "테스트 상품",
+        success=False,
+    )
+
+    records = history.get_records()
+    assert records[0]["title"] == "테스트 상품"
+    records[0]["title"] = "변경 시도"
+
+    assert history.get_records()[0]["title"] == "테스트 상품"

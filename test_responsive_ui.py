@@ -1,14 +1,16 @@
 import os
+from itertools import pairwise
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("THREAD_AUTO_DISABLE_HEARTBEAT", "1")
 os.environ.setdefault("THREAD_AUTO_DISABLE_AUTO_UPDATE", "1")
 os.environ.setdefault("THREAD_AUTO_DISABLE_RESUME_PROMPT", "1")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from src.hidpi import configure_high_dpi, recommended_window_size
 from src import auth_client
+from src.hidpi import configure_high_dpi, recommended_window_size
 from src.login_window import LoginWindow
 from src.main_window import (
     LINK_TABLE_CHANNEL_COLUMN,
@@ -30,28 +32,51 @@ def test_main_window_reflows_at_compact_and_wide_sizes():
     window = MainWindow()
     window.show()
 
-    for width, height in ((900, 620), (1280, 800), (1360, 900)):
+    for width, height in ((760, 560), (900, 620), (1360, 900)):
         window.resize(width, height)
         app.processEvents()
 
         central = window.centralWidget()
         page = window._pages[0]
         settings_page = window._pages[1]
+        assert window._header.geometry().bottom() < window._page_stack.y()
+        assert window._sidebar.geometry().right() < window._page_stack.x()
+        assert window._page_stack.geometry().bottom() < window._status_bar_frame.y()
+        assert window._page_stack.geometry().right() < central.width()
+        assert window._status_bar_frame.geometry().right() < central.width()
         assert page.geometry().right() < central.width()
         assert settings_page.geometry().right() < central.width()
         assert window.links_text.geometry().right() < page.width()
         assert window.link_table.geometry().right() < page.width()
         assert window.link_table.height() >= 42
+        assert (
+            window._link_scroll.horizontalScrollBarPolicy()
+            == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        assert window._link_scroll.horizontalScrollBar().maximum() == 0
+        compact_table = window._page_stack.width() < 900
+        assert window.link_table.isColumnHidden(2) is compact_table
+        assert window.link_table.isColumnHidden(4) is compact_table
         assert window._settings_tab_bar.geometry().right() < settings_page.width()
         assert window._settings_scroll.geometry().right() < settings_page.width()
-        assert window._settings_save_btn.geometry().right() < settings_page.width()
-        assert window._settings_scroll.geometry().bottom() < window._settings_save_btn.y()
+        assert window._settings_footer.geometry().right() < settings_page.width()
+        assert window._settings_scroll.geometry().bottom() < window._settings_footer.y()
+        assert window._settings_save_btn.parentWidget() is window._settings_footer
+        assert window._settings_footer.rect().contains(
+            window._settings_save_btn.geometry()
+        )
 
         window._switch_page(1)
         window._settings_tab_bar.setCurrentIndex(0)
         app.processEvents()
-        assert window._settings_automation_sec.geometry().right() < window._settings_content.width()
-        assert window.settings_post_concept_combo.geometry().right() < window._settings_automation_sec.width()
+        assert (
+            window._settings_automation_sec.geometry().right()
+            < window._settings_content.width()
+        )
+        assert (
+            window.settings_post_concept_combo.geometry().right()
+            < window._settings_automation_sec.width()
+        )
 
     window.toggle_inline_help(True)
     app.processEvents()
@@ -86,7 +111,16 @@ def test_link_input_immediately_lists_channel_colors_and_exclusions():
         assert window.link_table.columnCount() == 5
         assert window.link_table.rowCount() == 11
         assert window._link_table_label.text() == "입력 링크 미리보기"
-        expected_channels = ["쿠팡", "네이버", "토스", "오늘집", "무신사", "컬리", "올영", "Ali"]
+        expected_channels = [
+            "쿠팡",
+            "네이버",
+            "토스",
+            "오늘집",
+            "무신사",
+            "컬리",
+            "올영",
+            "Ali",
+        ]
         channel_colors = set()
         for row, expected_channel in enumerate(expected_channels):
             channel_item = window.link_table.item(row, LINK_TABLE_CHANNEL_COLUMN)
@@ -154,7 +188,9 @@ def test_header_controls_never_overlap_when_update_is_available():
     window.show()
     window.update_btn.setText("업데이트 3.0.62")
     window.update_btn.setVisible(True)
-    window._header_username_full_text = "very_long_account_identifier_that_must_remain_readable"
+    window._header_username_full_text = (
+        "very_long_account_identifier_that_must_remain_readable"
+    )
 
     for width in (900, 1110, 1280, 1360):
         window.resize(width, 800)
@@ -170,8 +206,10 @@ def test_header_controls_never_overlap_when_update_is_available():
             window.tutorial_btn,
             window.logout_btn,
         ]
-        visible_controls = sorted((item for item in controls if item.isVisible()), key=lambda item: item.x())
-        for left, right in zip(visible_controls, visible_controls[1:]):
+        visible_controls = sorted(
+            (item for item in controls if item.isVisible()), key=lambda item: item.x()
+        )
+        for left, right in pairwise(visible_controls):
             assert left.geometry().right() < right.x(), (
                 width,
                 left.objectName() or left.text(),
@@ -183,9 +221,9 @@ def test_header_controls_never_overlap_when_update_is_available():
     app.processEvents()
 
 
-def test_login_window_collapses_brand_and_scrolls_on_small_work_area(monkeypatch):
+def test_login_window_collapses_brand_without_scrolling_on_small_work_area(monkeypatch):
     app = QApplication.instance() or QApplication([])
-    monkeypatch.setattr(auth_client, "get_saved_credentials", lambda: {})
+    monkeypatch.setattr(auth_client, "get_saved_credentials", dict)
     window = LoginWindow()
     assert window.windowTitle() == "스레드 쇼핑 자동화 - 로그인"
     window.show()
@@ -195,7 +233,7 @@ def test_login_window_collapses_brand_and_scrolls_on_small_work_area(monkeypatch
     assert not window.left_panel.isVisible()
     assert window.right_panel.width() == 420
     assert window.right_panel.x() == 90
-    assert window._form_scroll.verticalScrollBar().maximum() > 0
+    assert window._form_scroll.verticalScrollBar().maximum() == 0
 
     window.resize(720, 760)
     app.processEvents()
