@@ -7,36 +7,54 @@ contextual guidance expands inside the current page instead of opening a modal.
 """
 from __future__ import annotations
 
-import json
+import csv
 import hashlib
-import re
 import html
-import os
-import tempfile
-import time
+import json
 import logging
-import threading
+import os
 import queue
+import re
 import sys
+import tempfile
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QLabel,
-    QPushButton, QTextEdit, QPlainTextEdit, QFrame,
-    QLineEdit, QSpinBox, QCheckBox, QButtonGroup, QComboBox,
-    QApplication, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QTabBar, QMessageBox
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QUrl, QTimer
-from PyQt6.QtCore import QRegularExpression
+
+from PyQt6.QtCore import QObject, QRegularExpression, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
-    QPainter,
-    QLinearGradient,
-    QPen,
     QDesktopServices,
-    QRegularExpressionValidator,
     QKeySequence,
+    QLinearGradient,
+    QPainter,
+    QPen,
+    QRegularExpressionValidator,
+)
+from PyQt6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QStackedWidget,
+    QTabBar,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QWidget,
 )
 
 from src.ai_provider import (
@@ -45,44 +63,54 @@ from src.ai_provider import (
     AI_PROVIDER_MANAGED,
     normalize_ai_provider,
 )
+from src.autostart import sync_auto_start
 from src.config import config
 from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
+from src.events import LoginStatusEvent
 from src.gemini_keys import (
     MAX_GEMINI_API_KEYS,
     normalize_gemini_api_keys,
     select_working_gemini_api_key,
 )
-from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
+from src.hidpi import apply_window_size_policy
+from src.models.threads_account import normalize_threads_username
+from src.onboarding_dialog import OnboardingDialog
+from src.runtime_security import development_quota_bypass_enabled
+from src.services.account_queue import AccountQueueStore
 from src.services.marketplaces import (
     ProductLinkInputAnalysis,
     analyze_product_link_input,
     extract_supported_product_links,
     marketplace_for_url,
 )
-from src.services.thread_payload import build_product_thread_payload
-from src.services.account_queue import AccountQueueStore
 from src.services.multi_account_runtime import MultiAccountRuntime
+from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.services.retry_policy import (
     MAX_TRANSIENT_RETRIES,
     is_transient_error,
     retry_delay_seconds,
 )
-from src.models.threads_account import normalize_threads_username
-from src.runtime_security import development_quota_bypass_enabled
-from src.update_resume import UpdateResumeStore, active_account_ids, update_completed
-from src.update_dialog import UpdateDialog
+from src.services.thread_payload import build_product_thread_payload
 from src.theme import (
     Colors,
-    Typography,
-    Radius,
     Gradients,
-    global_stylesheet,
+    Radius,
+    Typography,
+    accent_btn_style,
     badge_style,
-    muted_text_style,
+    global_stylesheet,
     hint_text_style,
-    section_title_style,
+    muted_text_style,
     scroll_area_style,
+    section_title_style,
 )
+from src.threads_navigation import (
+    friendly_threads_navigation_error,
+    goto_threads_with_fallback,
+    is_browser_launch_error,
+)
+from src.tutorial import TutorialOverlay
+from src.ui_components import BrandMark, HelpButton, InlineHelpPanel, PipelineRail
 from src.ui_messages import (
     ask_yes_no,
     show_error,
@@ -90,15 +118,8 @@ from src.ui_messages import (
     show_warning,
     user_friendly_message,
 )
-from src.events import LoginStatusEvent
-from src.autostart import sync_auto_start
-from src.hidpi import apply_window_size_policy
-from src.ui_components import HelpButton, InlineHelpPanel
-from src.threads_navigation import (
-    goto_threads_with_fallback,
-    friendly_threads_navigation_error,
-    is_browser_launch_error,
-)
+from src.update_dialog import UpdateDialog
+from src.update_resume import UpdateResumeStore, active_account_ids, update_completed
 
 logger = logging.getLogger(__name__)
 
@@ -280,8 +301,26 @@ class MainWindow(QMainWindow):
     # Compatibility for tests/extensions that referenced the old constant.
     COUPANG_LINK_PATTERN = PRODUCT_LINK_PATTERN
 
-    # Sidebar menu items
-    _SIDEBAR_ITEMS = ["자동화", "설정"]
+    # Page indexes 0 and 1 intentionally remain automation/settings for
+    # compatibility with existing integrations.  The navigation order is a
+    # separate concern so the redesigned shell can follow the operating flow.
+    _PAGE_LABELS = {
+        0: "자동화",
+        1: "설정",
+        2: "운영 홈",
+        3: "작업 기록",
+        4: "Threads 계정",
+        5: "구독 · 지원",
+    }
+    _NAV_ITEMS = (
+        (2, "홈", "운영 홈", "Alt+1"),
+        (0, "A", "자동화", "Alt+2"),
+        (3, "록", "작업 기록", "Alt+3"),
+        (4, "T", "Threads 계정", "Alt+4"),
+        (1, "설", "설정", "Alt+5"),
+        (5, "구", "구독 · 지원", "Alt+6"),
+    )
+    _SIDEBAR_ITEMS = [item[2] for item in _NAV_ITEMS]
 
     # Process steps for progress panel
     _PROCESS_STEPS = [
@@ -358,17 +397,20 @@ class MainWindow(QMainWindow):
         self.signals.account_runtime_state.connect(self._on_account_runtime_state)
         self.signals.account_runtime_log.connect(self._on_account_runtime_log)
 
-        self._current_page = 0
+        self._current_page = 2
         self._inline_help_enabled = False
         self._inline_help_panels = {}
         self._heartbeat_in_flight = False
         self._update_check_in_flight = False
+        self._onboarding_dialog = None
+        self._onboarding_dismissed_for_session = False
+        self._onboarding_resume_active = False
         # Apply global stylesheet before building widgets so sizeHint/metrics are correct
         # for any fixed-geometry placement that depends on styled font/padding.
         self.setStyleSheet(global_stylesheet())
         self._build_ui()
         self._relayout_main_window()
-        self._switch_page(0)
+        self._switch_page(2, source="initial_home")
         self._app_version = self._resolve_app_version()
         self._version_label.setText(f"현재 버전: {self._app_version}")
 
@@ -388,6 +430,7 @@ class MainWindow(QMainWindow):
         # Load settings into widgets
         self._load_settings()
         self._init_multi_account_runtime()
+        self._refresh_auxiliary_pages()
         QTimer.singleShot(1200, self._resume_after_completed_update)
         QTimer.singleShot(1800, self._prompt_resume_queue_if_needed)
         self._bind_ui_activity_logging()
@@ -559,9 +602,7 @@ class MainWindow(QMainWindow):
         return bool(opened)
 
     def _page_label(self, index: int) -> str:
-        if 0 <= int(index) < len(self._SIDEBAR_ITEMS):
-            return str(self._SIDEBAR_ITEMS[int(index)])
-        return f"unknown-{index}"
+        return str(self._PAGE_LABELS.get(int(index), f"unknown-{index}"))
 
     # ────────────────────────────────────────────────────────
     #  BUILD UI
@@ -582,7 +623,8 @@ class MainWindow(QMainWindow):
         header = HeaderBar(parent)
         header.setGeometry(0, 0, WIN_W, HEADER_H)
 
-        # Brand glow
+        # Brand mark.  The bolt is a vector-safe glyph bundled with the
+        # platform font and replaces the temporary single-letter identity.
         brand_glow = QLabel("", header)
         brand_glow.setGeometry(14, 14, 40, 40)
         brand_glow.setStyleSheet(
@@ -592,17 +634,11 @@ class MainWindow(QMainWindow):
         )
 
         # Brand icon
-        brand_icon = QLabel("C", header)
+        brand_icon = BrandMark(header)
         brand_icon.setGeometry(16, 16, 36, 36)
-        brand_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_icon.setStyleSheet(
-            f"QLabel {{ background: {Gradients.ACCENT_BTN};"
-            f" color: #FFFFFF; border-radius: 10px;"
-            f" font-size: 15pt; font-weight: 800; }}"
-        )
 
         # Title
-        title_label = QLabel("스레드 쇼핑 자동화", header)
+        title_label = QLabel("THREAD AUTO", header)
         title_label.setGeometry(62, 8, 220, 28)
         title_label.setStyleSheet(
             f"color: {Colors.TEXT_PRIMARY}; font-size: 14pt; font-weight: 700;"
@@ -610,12 +646,15 @@ class MainWindow(QMainWindow):
         )
 
         # Subtitle
-        sub_label = QLabel("멀티 쇼핑 자동화", header)
+        sub_label = QLabel("COMMERCE PUBLISHING OS", header)
         sub_label.setGeometry(62, 38, 260, 20)
         sub_label.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; font-weight: 600;"
             " letter-spacing: 1.4px; background: transparent;"
         )
+        self._brand_glow = brand_glow
+        self._brand_title_label = title_label
+        self._brand_subtitle_label = sub_label
 
         # Right-side elements (positioned from right edge)
         _nav_pill_style = (
@@ -754,25 +793,46 @@ class MainWindow(QMainWindow):
     def _relayout_header_account_card(self):
         """Lay out header controls without clipping at compact window widths."""
         width = max(1, self.centralWidget().width() if self.centralWidget() else self.width())
+        compact = width < 900
         nav_buttons = [btn for btn in getattr(self, "_header_nav_buttons", ()) if btn is not None]
         right = width - 16
         for btn in nav_buttons:
             if btn is self.update_btn and not btn.isVisible():
                 continue
+            if compact:
+                if btn is self.tutorial_btn:
+                    btn.setText("?")
+                    btn.setToolTip("현재 화면 도움말 · F1")
+                elif btn is self.logout_btn:
+                    btn.setText("나")
+                    btn.setToolTip("로그아웃")
+                else:
+                    btn.setText("업")
+                    btn.setToolTip("업데이트")
+            elif btn is self.tutorial_btn:
+                btn.setText("도움말")
+            elif btn is self.logout_btn:
+                btn.setText("로그아웃")
+            else:
+                btn.setText("업데이트")
+            if btn is self.tutorial_btn:
+                # Qt 6 clears a QPushButton shortcut when its text changes.
+                btn.setShortcut(QKeySequence("F1"))
             btn.ensurePolished()
-            button_w = max(88, btn.sizeHint().width() + 4)
+            button_w = 40 if compact else max(76, btn.sizeHint().width() + 4)
             if btn is self.update_btn:
-                button_w = max(96, btn.sizeHint().width() + 8)
-            btn.setGeometry(right - button_w, 15, button_w, 38)
+                button_w = 40 if compact else max(92, btn.sizeHint().width() + 8)
+            top = 9 if getattr(self, "_layout_header_h", HEADER_H) < 68 else 15
+            btn.setGeometry(right - button_w, top, button_w, 38)
             right = btn.x() - 8
 
         nav_left = right + 8
         right = nav_left - 12
-        top = 15
+        top = 9 if getattr(self, "_layout_header_h", HEADER_H) < 68 else 15
         control_h = 38
         # Brand title ends at x=282.  Starting account pills at 284 keeps the
         # compact header collision-free even when the update action is visible.
-        min_left = 284
+        min_left = 410 if self._brand_subtitle_label.isVisible() else 284
         self.status_badge.setVisible(False)
 
         plan_text = self._plan_badge.text() or "무료계정"
@@ -785,13 +845,16 @@ class MainWindow(QMainWindow):
         work_text = self._work_label.text() or "0 / 0 회"
         work_w = max(self._work_label.fontMetrics().horizontalAdvance(work_text) + 30, 106)
         detail_width = plan_w + 8 + conn_w + 7 + 8 + 8 + user_w + 8 + work_w
-        show_account_detail = width >= 1110 and right - min_left >= detail_width
+        show_account_detail = width >= 1180 and right - min_left >= detail_width
         self._header_username_label.setVisible(show_account_detail)
         self._online_dot.setVisible(show_account_detail)
         self._connection_label.setVisible(show_account_detail)
 
-        self._plan_badge.setGeometry(max(min_left, right - plan_w), top, plan_w, control_h)
-        right = self._plan_badge.x() - 8
+        show_plan = width >= 1020 and right - min_left >= plan_w + work_w + 8
+        self._plan_badge.setVisible(show_plan)
+        if show_plan:
+            self._plan_badge.setGeometry(right - plan_w, top, plan_w, control_h)
+            right = self._plan_badge.x() - 8
 
         if show_account_detail:
             self._connection_label.setGeometry(max(min_left, right - conn_w), top + 9, conn_w, 20)
@@ -807,7 +870,10 @@ class MainWindow(QMainWindow):
             self._header_username_label.setToolTip(user_text)
             right = self._header_username_label.x() - 8
 
-        self._work_label.setGeometry(max(min_left, right - work_w), top, work_w, control_h)
+        show_work = width >= 900 and right - min_left >= work_w
+        self._work_label.setVisible(show_work)
+        if show_work:
+            self._work_label.setGeometry(right - work_w, top, work_w, control_h)
         self._work_label.setToolTip(work_text)
 
     # ── Sidebar ─────────────────────────────────────────────
@@ -815,161 +881,103 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self, parent):
         sidebar = SidebarPanel(parent)
         sidebar.setGeometry(0, HEADER_H, SIDEBAR_W, WIN_H - HEADER_H)
+        sidebar.setObjectName("appNavigation")
         self._sidebar = sidebar
 
-        # Button group for exclusive selection
+        # The visual order follows the day-to-day operating flow, while button
+        # ids keep the historical automation/settings page indexes stable.
         self._sidebar_group = QButtonGroup(self)
         self._sidebar_group.setExclusive(True)
-        self._sidebar_buttons = []
+        self._nav_buttons = []
+        self._nav_button_by_page = {}
 
-        for i, label in enumerate(self._SIDEBAR_ITEMS):
-            btn = QPushButton(f"  {label}", sidebar)
-            btn.setGeometry(0, 20 + i * 48, SIDEBAR_W, 44)
+        for row, (page_index, icon, label, shortcut) in enumerate(self._NAV_ITEMS):
+            btn = QPushButton(f"{icon}   {label}", sidebar)
+            btn.setGeometry(12, 18 + row * 52, SIDEBAR_W - 24, 44)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(self._sidebar_btn_style())
-            self._sidebar_group.addButton(btn, i)
-            self._sidebar_buttons.append(btn)
+            btn.setShortcut(QKeySequence(shortcut))
+            btn.setToolTip(f"{label} · {shortcut}")
+            btn.setAccessibleName(label)
+            btn.setProperty("navIcon", icon)
+            btn.setProperty("navLabel", label)
+            self._sidebar_group.addButton(btn, page_index)
+            self._nav_buttons.append(btn)
+            self._nav_button_by_page[page_index] = btn
 
-        self._sidebar_buttons[0].setShortcut(QKeySequence("Alt+1"))
-        self._sidebar_buttons[1].setShortcut(QKeySequence("Alt+2"))
-        self._sidebar_buttons[0].setToolTip("자동화 화면 · Alt+1")
-        self._sidebar_buttons[1].setToolTip("통합 설정 화면 · Alt+2")
-
-        self._sidebar_buttons[0].setChecked(True)
+        # Page-index ordered compatibility list.  Existing controller code may
+        # still address automation/settings as [0]/[1].
+        self._sidebar_buttons = [
+            self._nav_button_by_page[index]
+            for index in range(len(self._PAGE_LABELS))
+        ]
+        self._nav_button_by_page[0].setChecked(True)
         self._sidebar_group.idClicked.connect(
             lambda idx: self._switch_page(idx, source="sidebar_menu")
         )
 
         # Divider line below buttons
-        divider_y = 20 + len(self._SIDEBAR_ITEMS) * 48 + 12
+        divider_y = 18 + len(self._NAV_ITEMS) * 52 + 12
         divider = QFrame(sidebar)
-        divider.setGeometry(20, divider_y, SIDEBAR_W - 40, 1)
+        divider.setGeometry(16, divider_y, SIDEBAR_W - 32, 1)
         divider.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
         self._sidebar_divider_top = divider
 
-        # ── Progress Panel ─────────────────────────────────
-        prog_y = divider_y + 16
-
-        prog_title = QLabel("현재 진행 상황", sidebar)
-        prog_title.setGeometry(24, prog_y, 200, 20)
-        prog_title.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 700;"
-            " letter-spacing: 1.5px; background: transparent;"
-        )
-        self._sidebar_progress_title = prog_title
-        prog_y += 28
-
-        # Queue progress
+        # Compatibility state presenters remain alive for controller updates,
+        # but progress is now displayed once in the Live Pipeline Rail instead
+        # of being duplicated in the navigation.
+        prog_y = divider_y + 10
+        self._sidebar_progress_title = QLabel("현재 진행 상황", sidebar)
         self._progress_queue_label = QLabel("전체: 0 / 0", sidebar)
-        self._progress_queue_label.setGeometry(24, prog_y, 240, 20)
-        self._progress_queue_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 10.5pt; font-weight: 700;"
-            " background: transparent;"
-        )
-        prog_y += 28
-
-        # Step indicators
         self._step_dots = []
         self._step_labels = []
         for step_name in self._PROCESS_STEPS:
             dot = QLabel("○", sidebar)
-            dot.setGeometry(28, prog_y, 16, 20)
-            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            dot.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 10pt; background: transparent;"
-            )
             label = QLabel(step_name, sidebar)
-            label.setGeometry(48, prog_y, 200, 20)
-            label.setStyleSheet(
-                f"color: {Colors.TEXT_MUTED}; font-size: 9.5pt; background: transparent;"
-            )
             self._step_dots.append(dot)
             self._step_labels.append(label)
-            prog_y += 24
-
-        prog_y += 8
-
-        # Divider before counts
         divider2 = QFrame(sidebar)
-        divider2.setGeometry(20, prog_y, SIDEBAR_W - 40, 1)
         divider2.setStyleSheet(f"background-color: {Colors.BORDER}; border: none;")
         self._sidebar_divider_counts = divider2
-        prog_y += 12
-
-        # Status label
         self._sidebar_status_label = QLabel("대기중", sidebar)
-        self._sidebar_status_label.setGeometry(24, prog_y, 240, 20)
-        self._sidebar_status_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600;"
-            " background: transparent;"
-        )
-        prog_y += 26
         self._sidebar_counts_y = prog_y
-
-        # Success / Failed / Total (compact horizontal)
         self._sidebar_success_dot = QLabel("", sidebar)
-        self._sidebar_success_dot.setGeometry(24, prog_y + 4, 8, 8)
-        self._sidebar_success_dot.setStyleSheet(
-            f"background-color: {Colors.SUCCESS}; border-radius: 4px;"
-        )
         self._sidebar_success_label = QLabel("성공: 0", sidebar)
-        self._sidebar_success_label.setGeometry(40, prog_y, 70, 20)
-        self._sidebar_success_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
-        )
-
         self._sidebar_failed_dot = QLabel("", sidebar)
-        self._sidebar_failed_dot.setGeometry(120, prog_y + 4, 8, 8)
-        self._sidebar_failed_dot.setStyleSheet(
-            f"background-color: {Colors.ERROR}; border-radius: 4px;"
-        )
         self._sidebar_failed_label = QLabel("실패: 0", sidebar)
-        self._sidebar_failed_label.setGeometry(136, prog_y, 70, 20)
-        self._sidebar_failed_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
-        )
-
         self._sidebar_total_dot = QLabel("", sidebar)
-        self._sidebar_total_dot.setGeometry(216, prog_y + 4, 8, 8)
-        self._sidebar_total_dot.setStyleSheet(
-            f"background-color: {Colors.INFO}; border-radius: 4px;"
-        )
         self._sidebar_total_label = QLabel("전체: 0", sidebar)
-        self._sidebar_total_label.setGeometry(232, prog_y, 70, 20)
-        self._sidebar_total_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
-        )
-        prog_y += 30
-
-        # ── Mini Log Area ──────────────────────────────────
-        log_title = QLabel("작업 로그", sidebar)
-        log_title.setGeometry(24, prog_y, 200, 20)
-        log_title.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 700;"
-            " letter-spacing: 1.5px; background: transparent;"
-        )
-        self._sidebar_log_title = log_title
-        self._sidebar_log_title_y = prog_y
-        prog_y += 22
-
-        log_h = max(WIN_H - HEADER_H - prog_y - STATUSBAR_H - 8, 80)
+        self._sidebar_log_title = QLabel("작업 로그", sidebar)
         self.log_text = QTextEdit(sidebar)
-        self.log_text.setGeometry(12, prog_y, SIDEBAR_W - 24, log_h)
-        self._sidebar_log_text_y = prog_y
         self.log_text.setReadOnly(True)
         self.log_text.setTabChangesFocus(True)
         self.log_text.document().setMaximumBlockCount(self.MAX_LOG_LINES)
-        self.log_text.setStyleSheet(
-            f"QTextEdit {{"
-            f"  background-color: {Colors.BG_TERMINAL};"
-            f"  border: 1px solid {Colors.BORDER};"
-            f"  border-radius: 8px;"
-            f"  padding: 6px;"
-            f"  color: {Colors.TEXT_SECONDARY};"
-            f"  font-family: {Typography.FAMILY_MONO};"
-            f"  font-size: 10pt;"
-            f"}}"
+        for widget in (
+            self._sidebar_progress_title,
+            self._progress_queue_label,
+            *self._step_dots,
+            *self._step_labels,
+            self._sidebar_divider_counts,
+            self._sidebar_status_label,
+            self._sidebar_success_dot,
+            self._sidebar_success_label,
+            self._sidebar_failed_dot,
+            self._sidebar_failed_label,
+            self._sidebar_total_dot,
+            self._sidebar_total_label,
+            self._sidebar_log_title,
+            self.log_text,
+        ):
+            widget.hide()
+
+        self._sidebar_product_label = QLabel("THREAD AUTO", sidebar)
+        self._sidebar_product_label.setStyleSheet(
+            f"color: {Colors.TEXT_ON_INK}; font-size: 9pt; font-weight: 800;"
+        )
+        self._sidebar_health_label = QLabel("●  시스템 정상", sidebar)
+        self._sidebar_health_label.setStyleSheet(
+            f"color: {Colors.TEXT_ON_INK_MUTED}; font-size: 9pt; font-weight: 700;"
         )
 
     @staticmethod
@@ -978,7 +986,7 @@ class MainWindow(QMainWindow):
         return (
             f"QPushButton {{"
             f"  background: transparent;"
-            f"  color: {Colors.TEXT_SECONDARY};"
+            f"  color: {Colors.TEXT_ON_INK_MUTED};"
             f"  border: none;"
             f"  border-left: 3px solid transparent;"
             f"  text-align: left;"
@@ -987,34 +995,415 @@ class MainWindow(QMainWindow):
             f"  font-weight: 600;"
             f"}}"
             f"QPushButton:hover {{"
-            f"  background: {Colors.ACCENT_SUBTLE};"
-            f"  color: {Colors.TEXT_PRIMARY};"
+            f"  background: {Colors.DEEP_TEAL};"
+            f"  color: {Colors.TEXT_ON_INK};"
             f"}}"
             f"QPushButton:checked {{"
-            f"  background: {Colors.ACCENT_SUBTLE};"
-            f"  color: {Colors.ACCENT_LIGHT};"
-            f"  border-left: 3px solid {Colors.ACCENT};"
+            f"  background: {Colors.SIGNAL_TEAL};"
+            f"  color: {Colors.TEXT_ON_INK};"
+            f"  border-left: 3px solid {Colors.PAPER};"
             f"}}"
         )
 
     # ── Pages ───────────────────────────────────────────────
 
     def _build_pages(self, parent):
-        """Build the Automation and Settings workspaces."""
+        """Build the application workspace in one authoritative page stack."""
         page_x = SIDEBAR_W
         page_y = HEADER_H
         page_w = CONTENT_W
         page_h = CONTENT_H
 
+        self._page_stack = QStackedWidget(parent)
+        self._page_stack.setObjectName("appPageStack")
+        self._page_stack.setGeometry(page_x, page_y, page_w, page_h)
         self._pages = []
-        for _ in range(2):
-            page = QWidget(parent)
-            page.setGeometry(page_x, page_y, page_w, page_h)
-            page.setVisible(False)
+        for _ in range(len(self._PAGE_LABELS)):
+            page = QWidget()
+            page.setObjectName(f"appPage{len(self._pages)}")
+            self._page_stack.addWidget(page)
             self._pages.append(page)
 
         self._build_page0_links(self._pages[0])
         self._build_page2_settings(self._pages[1])
+        self._build_auxiliary_pages()
+
+    def _build_auxiliary_pages(self):
+        """Create dashboard/history/accounts/subscription surfaces.
+
+        These pages are intentionally view-only.  Existing MainWindow methods
+        remain the controller and receive user-intent signals from the views.
+        """
+        from src.redesign_pages import (
+            AccountsPage,
+            DashboardPage,
+            HistoryPage,
+            SubscriptionPage,
+        )
+
+        self.dashboard_page = DashboardPage(self._pages[2])
+        self.history_page = HistoryPage(self._pages[3])
+        self.accounts_page = AccountsPage(self._pages[4])
+        self.subscription_page = SubscriptionPage(self._pages[5])
+        for view, page in (
+            (self.dashboard_page, self._pages[2]),
+            (self.history_page, self._pages[3]),
+            (self.accounts_page, self._pages[4]),
+            (self.subscription_page, self._pages[5]),
+        ):
+            view.setParent(page)
+            view.setGeometry(page.rect())
+            view.show()
+
+        self.dashboard_page.new_automation_requested.connect(
+            lambda: self._switch_page(0, source="dashboard_primary")
+        )
+        self.dashboard_page.history_open_requested.connect(
+            lambda: self._switch_page(3, source="dashboard_history")
+        )
+        self.dashboard_page.account_selected.connect(
+            self._open_account_from_dashboard
+        )
+        self.history_page.retry_requested.connect(self._retry_history_record)
+        self.history_page.record_open_requested.connect(self._open_history_record)
+        self.history_page.filters_changed.connect(self._apply_history_filters)
+        self.history_page.export_requested.connect(self._export_history_csv)
+        self.accounts_page.add_account_requested.connect(
+            lambda: self.open_settings(1)
+        )
+        self.accounts_page.remove_account_requested.connect(
+            self._remove_account_from_redesign_page
+        )
+        self.accounts_page.account_selected.connect(
+            self._select_account_from_redesign_page
+        )
+        self.accounts_page.reconnect_account_requested.connect(
+            self._reconnect_account_from_redesign_page
+        )
+        self.accounts_page.test_account_requested.connect(
+            self._test_account_from_redesign_page
+        )
+        self.accounts_page.manage_subscription_requested.connect(
+            lambda: self._switch_page(5, source="account_plan")
+        )
+        self.subscription_page.manage_subscription_requested.connect(
+            lambda: self.open_settings(3)
+        )
+        self.subscription_page.support_requested.connect(self._open_contact)
+        self.subscription_page.plan_selected.connect(
+            self._choose_plan_from_redesign_page
+        )
+
+    def _open_account_from_dashboard(self, account_id):
+        """Open the account workspace focused on a dashboard health row."""
+        self._switch_page(4, source="dashboard_account")
+        self._select_account_from_redesign_page(account_id)
+
+    def _select_account_from_redesign_page(self, account_id):
+        account_id = str(account_id or "").strip()
+        if not account_id:
+            return
+        for index in range(self.threads_account_combo.count()):
+            if str(self.threads_account_combo.itemData(index) or "") == account_id:
+                self.threads_account_combo.setCurrentIndex(index)
+                self._apply_selected_threads_account(account_id)
+                self._refresh_auxiliary_pages()
+                return
+
+    def _remove_account_from_redesign_page(self, account_id):
+        self._select_account_from_redesign_page(account_id)
+        self._remove_selected_threads_account()
+
+    def _reconnect_account_from_redesign_page(self, account_id):
+        self._select_account_from_redesign_page(account_id)
+        self._open_threads_login()
+
+    def _test_account_from_redesign_page(self, account_id):
+        self._select_account_from_redesign_page(account_id)
+        self._check_login_status(account_id)
+
+    def _choose_plan_from_redesign_page(self, plan_id):
+        plan_id = str(plan_id or "").strip()
+        checkout_actions = {
+            "basic-week": lambda: self._request_payapp_checkout("stmaker_pro_week"),
+            "basic-month": lambda: self._request_payapp_checkout("stmaker_pro_month"),
+            "shopping-week": lambda: self._request_payapp_checkout(
+                "stmaker_shopping_pro_week"
+            ),
+            "shopping-month": lambda: self._request_payapp_checkout(
+                self._shopping_pro_month_plan_id()
+            ),
+        }
+        action = checkout_actions.get(plan_id)
+        if action is None:
+            self.open_settings(3)
+            return
+        action()
+
+    def _retry_history_record(self, record_id):
+        record = getattr(self, "_history_records_by_id", {}).get(str(record_id))
+        if not record:
+            return
+        url = str(record.get("url") or "").strip()
+        if not url:
+            return
+        existing = self.links_text.toPlainText().strip()
+        self.links_text.setPlainText(f"{existing}\n{url}".strip())
+        self._switch_page(0, source="history_retry")
+        self.links_text.setFocus()
+
+    def _open_history_record(self, record_id):
+        record = getattr(self, "_history_records_by_id", {}).get(str(record_id))
+        url = str((record or {}).get("url") or "").strip()
+        if url:
+            self._open_external_link(url, "history_record")
+
+    def _apply_history_filters(self, filters):
+        filters = dict(filters or {})
+        query = str(filters.get("query") or "").strip().lower()
+        account_filter = str(filters.get("account") or "").strip()
+        status_filter = str(filters.get("status") or "").strip()
+        period_filter = str(filters.get("period") or "").strip()
+        rows = list(getattr(self, "_all_history_rows", []) or [])
+        now = datetime.now().astimezone()
+
+        def matches(row):
+            haystack = " ".join(
+                str(row.get(key) or "")
+                for key in ("product", "url", "account", "channel", "result")
+            ).lower()
+            if query and query not in haystack:
+                return False
+            if account_filter and account_filter != "전체 계정" and row.get("account") != account_filter:
+                return False
+            if status_filter and status_filter != "전체 상태" and row.get("result") != status_filter:
+                return False
+            if period_filter and period_filter != "전체 기간":
+                try:
+                    row_time = datetime.fromisoformat(str(row.get("uploaded_at") or ""))
+                    if row_time.tzinfo is None:
+                        row_time = row_time.astimezone()
+                    days = (now - row_time.astimezone()).days
+                except (TypeError, ValueError):
+                    return False
+                if period_filter == "오늘" and row_time.date() != now.date():
+                    return False
+                if period_filter == "최근 7일" and days > 7:
+                    return False
+                if period_filter == "최근 30일" and days > 30:
+                    return False
+            return True
+
+        visible = [row for row in rows if matches(row)]
+        self._visible_history_rows = visible
+        self.history_page.render_history(
+            rows=visible,
+            metrics={
+                "전체": len(visible),
+                "성공": sum(row["result"] == "성공" for row in visible),
+                "실패": sum(row["result"] == "실패" for row in visible),
+            },
+        )
+
+    def _export_history_csv(self):
+        visible_rows = getattr(self, "_visible_history_rows", None)
+        rows = list(
+            getattr(self, "_all_history_rows", [])
+            if visible_rows is None
+            else visible_rows
+        )
+        if not rows:
+            show_info(self, "작업 기록", "내보낼 작업 기록이 없습니다.")
+            return
+        default_name = f"thread-auto-history-{datetime.now().strftime('%Y%m%d')}.csv"
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "작업 기록 CSV 내보내기",
+            default_name,
+            "CSV 파일 (*.csv)",
+        )
+        if not path:
+            return
+        fieldnames = ("time", "channel", "product", "url", "account", "result")
+        try:
+            with Path(path).open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows)
+        except OSError as exc:
+            logger.exception("작업 기록 CSV 내보내기에 실패했습니다.")
+            show_error(
+                self,
+                "내보내기 실패",
+                user_friendly_message(exc, "CSV 파일을 저장하지 못했습니다."),
+            )
+            return
+        show_info(self, "내보내기 완료", f"작업 기록을 저장했습니다.\n{path}")
+
+    def _refresh_auxiliary_pages(self):
+        """Render the secondary pages from current application state."""
+        if not hasattr(self, "dashboard_page"):
+            return
+        accounts = []
+        account_names = {}
+        for account in list(getattr(config, "threads_accounts", []) or []):
+            account_name = account.display_name or account.expected_username
+            account_names[account.account_id] = account_name
+            accounts.append(
+                {
+                    "id": account.account_id,
+                    "display_name": account_name,
+                    "name": account_name,
+                    "username": account.expected_username,
+                    "status": "정상" if account.last_verified_at else "확인 필요",
+                    "last_checked": account.last_verified_at or "확인 기록 없음",
+                    "session_status": (
+                        "로그인 확인됨" if account.last_verified_at else "연결 테스트 필요"
+                    ),
+                    "next_check": "앱 시작 및 게시 전 자동 확인",
+                }
+            )
+        success = int(getattr(self, "_last_success_count", 0) or 0)
+        failed = int(getattr(self, "_last_failed_count", 0) or 0)
+        work_label = getattr(self, "_work_label", None)
+        work_text = str(work_label.text() if work_label is not None else "0 / 0 회")
+        metrics = {
+            "완료 게시": success,
+            "성공률": "--" if success + failed == 0 else f"{success * 100 / (success + failed):.1f}%",
+            "연결 계정": len(accounts),
+            "이용량": work_text,
+        }
+
+        history_rows = []
+        history_records_by_id = {}
+        runtime = getattr(self, "_multi_account_runtime", None)
+        if runtime is not None:
+            for account in list(getattr(config, "threads_accounts", []) or []):
+                try:
+                    records = runtime.link_history(account.account_id).get_records()
+                except Exception:
+                    logger.exception("계정 작업 이력을 화면에 불러오지 못했습니다.")
+                    continue
+                for index, record in enumerate(records):
+                    url = str(record.get("url") or "")
+                    marketplace = marketplace_for_url(url)
+                    record_id = f"{account.account_id}:{index}"
+                    success_value = bool(record.get("success"))
+                    row = {
+                        "id": record_id,
+                        "time": str(record.get("uploaded_at") or "")[:16].replace("T", " "),
+                        "uploaded_at": str(record.get("uploaded_at") or ""),
+                        "started_at": str(record.get("uploaded_at") or "")[:16].replace("T", " "),
+                        "channel": marketplace.label if marketplace else "기타",
+                        "product": str(record.get("title") or url),
+                        "account": account_names.get(account.account_id, account.expected_username),
+                        "result": "성공" if success_value else "실패",
+                        "status": "완료" if success_value else "확인 필요",
+                        "duration": "—",
+                        "action": "열기" if success_value else "실패 재시도",
+                        "url": url,
+                    }
+                    history_rows.append(row)
+                    history_records_by_id[record_id] = row
+        history_rows.sort(key=lambda row: row.get("time", ""), reverse=True)
+        self._history_records_by_id = history_records_by_id
+        self._all_history_rows = history_rows
+        self._visible_history_rows = None
+        self.history_page.set_filter_options(
+            periods=("전체 기간", "오늘", "최근 7일", "최근 30일"),
+            accounts=("전체 계정", *sorted(set(account_names.values()))),
+            statuses=("전체 상태", "성공", "실패"),
+        )
+        self.dashboard_page.render_dashboard(
+            metrics=metrics,
+            accounts=accounts,
+            recent_jobs=history_rows[:5],
+        )
+        self._apply_history_filters(self.history_page.current_filters())
+        selected_id = self.selected_threads_account_id()
+        self.accounts_page.render_accounts(
+            accounts=accounts,
+            selected_id=selected_id,
+            limit=self._threads_account_limit(),
+            plan_name=str(
+                getattr(getattr(self, "_resolved_subscription_plan", None), "label", "")
+                or self._plan_badge.text()
+                or "무료계정"
+            ),
+        )
+        from src.subscription_plans import (
+            MONTHLY_PLAN_ID,
+            SHOPPING_PRO_FOUNDER_MONTHLY_PLAN_ID,
+            SHOPPING_PRO_MONTHLY_PLAN_ID,
+            SHOPPING_PRO_WEEKLY_PLAN_ID,
+            WEEKLY_PLAN_ID,
+        )
+
+        resolved_plan = getattr(self, "_resolved_subscription_plan", None)
+        current_plan_id = str(getattr(resolved_plan, "plan_id", "") or "")
+        current_plan = str(
+            getattr(resolved_plan, "label", "")
+            or self._plan_badge.text()
+            or "무료계정"
+        )
+        shopping_month_price = 69_000
+        shopping_month_tagline = "다채널·다계정 운영용"
+        shopping_month_features = ["전체 지원 채널", "Threads 최대 10개", "정기결제"]
+        if current_plan_id == SHOPPING_PRO_FOUNDER_MONTHLY_PLAN_ID:
+            shopping_month_price = int(getattr(resolved_plan, "price_krw", 59_000))
+            promotion_cycles = int(getattr(resolved_plan, "promotion_cycles", 6) or 6)
+            shopping_month_tagline = "기존 고객 전용 쇼핑 프로 혜택"
+            shopping_month_features = [
+                "전체 지원 채널",
+                "Threads 최대 10개",
+                f"프로모션 최대 {promotion_cycles}회",
+            ]
+        self.subscription_page.render_subscription(
+            subscription={
+                "plan_name": current_plan,
+                "detail": "AI 자동 작성과 안전한 중단 복구가 포함됩니다.",
+                "usage_label": work_text,
+                "support_response_time": "영업일 기준 순차 답변",
+            },
+            plans=(
+                {
+                    "id": "basic-week",
+                    "name": "쿠팡 기본 · 7일",
+                    "tagline": "단일 Threads 계정으로 가볍게 시작",
+                    "price": "19,000원 / 7일",
+                    "features": ["쿠팡 파트너스", "Threads 계정 1개", "일회결제"],
+                    "current": current_plan_id == WEEKLY_PLAN_ID,
+                },
+                {
+                    "id": "basic-month",
+                    "name": "쿠팡 기본 · 월간",
+                    "tagline": "쿠팡 운영을 여러 계정으로 확장",
+                    "price": "49,000원 / 30일",
+                    "features": ["쿠팡 파트너스", "Threads 최대 10개", "정기결제"],
+                    "current": current_plan_id == MONTHLY_PLAN_ID,
+                },
+                {
+                    "id": "shopping-week",
+                    "name": "쇼핑 프로 · 7일",
+                    "tagline": "8개 쇼핑 채널을 단기간 운영",
+                    "price": "29,000원 / 7일",
+                    "features": ["전체 지원 채널", "Threads 계정 3개", "일회결제"],
+                    "current": current_plan_id == SHOPPING_PRO_WEEKLY_PLAN_ID,
+                },
+                {
+                    "id": "shopping-month",
+                    "name": "쇼핑 프로 · 월간",
+                    "tagline": shopping_month_tagline,
+                    "price": f"{shopping_month_price:,}원 / 30일",
+                    "features": shopping_month_features,
+                    "current": current_plan_id
+                    in {
+                        SHOPPING_PRO_MONTHLY_PLAN_ID,
+                        SHOPPING_PRO_FOUNDER_MONTHLY_PLAN_ID,
+                    },
+                },
+            ),
+        )
 
     def _make_page_header(self, page, icon_char, title_text):
         """Page header helper: icon + title + separator. Returns next y."""
@@ -1070,12 +1459,33 @@ class MainWindow(QMainWindow):
             f"QTabBar::tab:focus {{ border: 2px solid {Colors.ACCENT_LIGHT}; }}"
         )
         self._upload_account_tabs.currentChanged.connect(self._on_upload_account_tab_changed)
-        cy = self._make_page_header(page, "◈", "링크 입력")
+        cy = self._make_page_header(page, "A", "링크 입력")
+
+        self._pipeline_rail = PipelineRail(self._PROCESS_STEPS, page)
+        self._pipeline_rail.setObjectName("livePipelineRail")
+        self._pipeline_rail.setMinimumHeight(64)
+        # Compatibility aliases for QA and existing extensions that inspect
+        # individual stage presenters.  State changes go through PipelineRail.
+        self._pipeline_step_badges = self._pipeline_rail._stage_nodes
+        self._pipeline_step_titles = self._pipeline_rail._stage_labels
+        self._pipeline_connectors = self._pipeline_rail._connectors
 
         self._page_help_btn = HelpButton("자동화 화면 도움말", page)
         self._page_help_btn.setGeometry(0, 22, 32, 32)
         self._page_help_btn.setToolTip("현재 화면 사용법을 바로 표시합니다")
         self._page_help_btn.toggled.connect(self.toggle_inline_help)
+
+        self._log_drawer_btn = QPushButton("작업 로그", page)
+        self._log_drawer_btn.setObjectName("automationLogDrawerButton")
+        self._log_drawer_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._log_drawer_btn.setAccessibleName("실시간 작업 로그 열기")
+        self._log_drawer_btn.setStyleSheet(
+            f"QPushButton {{ color: {Colors.TEXT_SECONDARY};"
+            f" background: {Colors.BG_CARD}; border: 1px solid {Colors.BORDER};"
+            " border-radius: 8px; font-weight: 700; }}"
+            f"QPushButton:hover {{ color: {Colors.ACCENT}; border-color: {Colors.ACCENT}; }}"
+        )
+        self._log_drawer_btn.clicked.connect(self.toggle_log_drawer)
 
         self._link_help_panel = InlineHelpPanel(
             "링크 자동화 사용법",
@@ -1152,7 +1562,7 @@ class MainWindow(QMainWindow):
         btn_y = cy + 24 + 160 + 12
 
         # Start button
-        self.start_btn = QPushButton("\u25B6  자동화 시작", page)
+        self.start_btn = QPushButton("검토하고 시작", page)
         self.start_btn.setGeometry(28, btn_y, 240, 44)
         self.start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_btn.setStyleSheet(
@@ -1179,7 +1589,7 @@ class MainWindow(QMainWindow):
         self.start_btn.setAccessibleDescription(self.start_btn.toolTip())
 
         # Add links button
-        self.add_btn = QPushButton("링크 추가", page)
+        self.add_btn = QPushButton("대기열에 추가", page)
         self.add_btn.setGeometry(278, btn_y, 160, 44)
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.setEnabled(False)
@@ -1188,7 +1598,7 @@ class MainWindow(QMainWindow):
         self.add_btn.setToolTip("실행 중인 현재 계정 대기열에 새 링크를 추가합니다")
 
         # Stop button
-        self.stop_btn = QPushButton("중지", page)
+        self.stop_btn = QPushButton("안전하게 중지", page)
         self.stop_btn.setGeometry(448, btn_y, 120, 44)
         self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.stop_btn.setEnabled(False)
@@ -1196,14 +1606,14 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_upload)
         self.stop_btn.setToolTip("현재 계정의 자동화를 안전하게 중지합니다")
 
-        self.start_all_btn = QPushButton("전체 시작", page)
+        self.start_all_btn = QPushButton("모든 연결 계정으로 배포", page)
         self.start_all_btn.setGeometry(578, btn_y, 180, 44)
         self.start_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.start_all_btn.setProperty("class", "outline-success")
         self.start_all_btn.clicked.connect(self.start_all_accounts)
         self.start_all_btn.setToolTip("링크가 준비된 모든 Threads 계정을 시작합니다")
 
-        self.stop_all_btn = QPushButton("전체 중지", page)
+        self.stop_all_btn = QPushButton("모든 계정 중지", page)
         self.stop_all_btn.setGeometry(768, btn_y, 204, 44)
         self.stop_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.stop_all_btn.setEnabled(False)
@@ -1326,16 +1736,34 @@ class MainWindow(QMainWindow):
         self._link_scroll_content = QWidget()
         self._link_scroll_content.setStyleSheet("background: transparent;")
         self._link_scroll.setWidget(self._link_scroll_content)
-        for widget in (
-            self._link_help_panel,
-            self._link_input_card,
-            self._links_hint,
-            self.links_text,
+
+        # Contextual actions remain reachable at every window height.  The
+        # footer lives outside the scrolling workbench, so 760×560 never hides
+        # the primary action behind a long queue.
+        self._automation_footer = QFrame(page)
+        self._automation_footer.setObjectName("automationActionFooter")
+        self._automation_footer.setStyleSheet(
+            f"QFrame#automationActionFooter {{ background-color: {Colors.BG_CARD};"
+            f" border-top: 1px solid {Colors.BORDER}; }}"
+        )
+        self._automation_footer_hint = QLabel(
+            "검증 결과와 계정을 확인한 뒤 시작하세요.", self._automation_footer
+        )
+        self._automation_footer_hint.setStyleSheet(muted_text_style("9.5pt"))
+        self._automation_footer_hint.setWordWrap(True)
+        for button in (
             self.start_btn,
             self.add_btn,
             self.stop_btn,
             self.start_all_btn,
             self.stop_all_btn,
+        ):
+            button.setParent(self._automation_footer)
+        for widget in (
+            self._link_help_panel,
+            self._link_input_card,
+            self._links_hint,
+            self.links_text,
             self._run_state_frame,
             self._link_table_label,
             self.link_table,
@@ -1344,11 +1772,35 @@ class MainWindow(QMainWindow):
             if widget is not self._link_help_panel:
                 widget.show()
         self._link_input_card.lower()
+        self._sync_automation_actions("idle")
+
+        self._log_drawer = QFrame(page)
+        self._log_drawer.setObjectName("automationLogDrawer")
+        self._log_drawer.setStyleSheet(
+            f"QFrame#automationLogDrawer {{ background-color: {Colors.INK};"
+            f" border-left: 1px solid {Colors.BORDER}; }}"
+        )
+        self._log_drawer_title = QLabel("실시간 작업 로그", self._log_drawer)
+        self._log_drawer_title.setStyleSheet(
+            f"color: {Colors.PAPER}; font-size: 12pt; font-weight: 800;"
+        )
+        self._log_drawer_close = QPushButton("닫기", self._log_drawer)
+        self._log_drawer_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._log_drawer_close.setAccessibleName("작업 로그 닫기")
+        self._log_drawer_close.setShortcut(QKeySequence("Esc"))
+        self._log_drawer_close.clicked.connect(lambda: self.toggle_log_drawer(False))
+        self.log_text.setParent(self._log_drawer)
+        self.log_text.setStyleSheet(
+            f"QTextEdit {{ background-color: {Colors.INK}; color: {Colors.PORCELAIN};"
+            f" border: 1px solid {Colors.SLATE}; border-radius: 8px; padding: 10px;"
+            f" font-family: {Typography.FAMILY_MONO}; font-size: 9.5pt; }}"
+        )
+        self._log_drawer.hide()
 
     # ── Page 1: 업로드 설정 ─────────────────────────────────
 
     def _build_page1_upload(self, page):
-        cy = self._make_page_header(page, "⬆", "업로드 설정")
+        cy = self._make_page_header(page, "U", "업로드 설정")
 
         _field_lbl_style = (
             f"color: {Colors.TEXT_SECONDARY}; font-size: 10pt; font-weight: 600;"
@@ -1371,16 +1823,19 @@ class MainWindow(QMainWindow):
         self.hour_spin.setGeometry(24, 68, 120, 38)
         self.hour_spin.setRange(0, 23)
         self.hour_spin.setSuffix(" 시간")
+        self.hour_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
 
         self.min_spin = QSpinBox(sec1)
         self.min_spin.setGeometry(156, 68, 100, 38)
         self.min_spin.setRange(0, 59)
         self.min_spin.setSuffix(" 분")
+        self.min_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
 
         self.sec_spin = QSpinBox(sec1)
         self.sec_spin.setGeometry(268, 68, 100, 38)
         self.sec_spin.setRange(0, 59)
         self.sec_spin.setSuffix(" 초")
+        self.sec_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
 
         # ── Upload Options Section ─────────────────────────
         sec2 = SectionFrame(page)
@@ -1430,7 +1885,7 @@ class MainWindow(QMainWindow):
     # ── Page 2: 설정 ────────────────────────────────────────
 
     def _build_page2_settings(self, page):
-        cy = self._make_page_header(page, "⚙", "설정")
+        cy = self._make_page_header(page, "S", "설정")
 
         _section_style = (
             f"QFrame#settingsSectionCard {{ background-color: {Colors.BG_CARD};"
@@ -1731,18 +2186,21 @@ class MainWindow(QMainWindow):
         self.hour_spin.setGeometry(24, 72, 112, _control_h)
         self.hour_spin.setRange(0, 23)
         self.hour_spin.setSuffix(" 시간")
+        self.hour_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
         self.hour_spin.setAccessibleName("업로드 간격 시간")
 
         self.min_spin = QSpinBox(concept_sec)
         self.min_spin.setGeometry(148, 72, 104, _control_h)
         self.min_spin.setRange(0, 59)
         self.min_spin.setSuffix(" 분")
+        self.min_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
         self.min_spin.setAccessibleName("업로드 간격 분")
 
         self.sec_spin = QSpinBox(concept_sec)
         self.sec_spin.setGeometry(264, 72, 104, _control_h)
         self.sec_spin.setRange(0, 59)
         self.sec_spin.setSuffix(" 초")
+        self.sec_spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.PlusMinus)
         self.sec_spin.setAccessibleName("업로드 간격 초")
 
         self.video_check = QCheckBox("이미지보다 영상 업로드 우선", concept_sec)
@@ -1752,6 +2210,7 @@ class MainWindow(QMainWindow):
         concept_label = QLabel("본문 작성 방식", concept_sec)
         concept_label.setGeometry(24, 138, 120, 20)
         concept_label.setStyleSheet(_field_lbl_style)
+        self._concept_label = concept_label
 
         self.settings_post_concept_combo = QComboBox(concept_sec)
         self.settings_post_concept_combo.setObjectName("settingsPostConceptCombo")
@@ -2108,9 +2567,23 @@ class MainWindow(QMainWindow):
         contact_desc.setStyleSheet(_hint_lbl_style)
         self._contact_desc = contact_desc
 
-        # ── Action Buttons Row ─────────────────────────────
-        self._settings_save_btn = QPushButton("설정 저장", page)
-        self._settings_save_btn.setGeometry(816, CONTENT_H - 52, 160, 40)
+        # ── Fixed settings footer ──────────────────────────
+        self._settings_footer = QFrame(page)
+        self._settings_footer.setObjectName("settingsActionFooter")
+        self._settings_footer.setStyleSheet(
+            f"QFrame#settingsActionFooter {{ background-color: {Colors.BG_CARD};"
+            f" border-top: 1px solid {Colors.BORDER}; }}"
+        )
+        self._settings_footer_hint = QLabel(
+            "저장한 값은 다음 자동화부터 모든 계정에 적용됩니다.",
+            self._settings_footer,
+        )
+        self._settings_footer_hint.setStyleSheet(muted_text_style("9.5pt"))
+        self._settings_footer_hint.setWordWrap(True)
+        self._settings_cancel_btn = QPushButton("변경 취소", self._settings_footer)
+        self._settings_cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._settings_cancel_btn.clicked.connect(lambda: self._load_settings())
+        self._settings_save_btn = QPushButton("변경사항 저장", self._settings_footer)
         self._settings_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._settings_save_btn.clicked.connect(self._save_settings)
 
@@ -2129,6 +2602,7 @@ class MainWindow(QMainWindow):
         self._pay_shopping_monthly_btn.setStyleSheet(_payment_primary_btn_style)
         self._pay_cancel_btn.setStyleSheet(_ghost_btn_style)
         self._pay_refresh_btn.setStyleSheet(_ghost_btn_style)
+        self._settings_cancel_btn.setStyleSheet(_ghost_btn_style)
         self._settings_save_btn.setStyleSheet(_primary_btn_style)
         self.check_login_btn.setStyleSheet(_ghost_btn_style)
         self._add_gemini_key_btn.setStyleSheet(_ghost_btn_style)
@@ -2147,9 +2621,11 @@ class MainWindow(QMainWindow):
             self._tutorial_settings_btn,
             self._contact_btn,
             self._add_gemini_key_btn,
+            self._settings_cancel_btn,
             self._settings_save_btn,
         ):
             btn.setFixedHeight(_control_h)
+        self._settings_save_btn.setFixedHeight(48)
         for btn in (
             self._pay_weekly_btn,
             self._pay_monthly_btn,
@@ -2174,9 +2650,8 @@ class MainWindow(QMainWindow):
         bar.setGeometry(0, WIN_H - STATUSBAR_H, WIN_W, STATUSBAR_H)
         bar.setStyleSheet(
             f"QFrame#statusBarFrame {{"
-            f"  background: qlineargradient(x1:0, y1:0, x2:1, y2:0,"
-            f"    stop:0 {Colors.BG_SIDEBAR}, stop:0.5 {Colors.BG_ELEVATED}, stop:1 {Colors.BG_SIDEBAR});"
-            f"  border-top: 1px solid {Colors.BORDER};"
+            f"  background: {Colors.INK};"
+            f"  border-top: 1px solid {Colors.DEEP_TEAL};"
             f"}}"
         )
         self._status_bar_frame = bar
@@ -2193,7 +2668,7 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("준비", bar)
         self.status_label.setGeometry(34, 10, 600, 20)
         self.status_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; font-weight: 600;"
+            f"color: {Colors.TEXT_ON_INK_MUTED}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent;"
         )
 
@@ -2202,7 +2677,7 @@ class MainWindow(QMainWindow):
         self._server_label.setGeometry(WIN_W - 400, 10, 200, 20)
         self._server_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._server_label.setStyleSheet(
-            f"color: {Colors.ACCENT_LIGHT}; font-size: 9.5pt; font-weight: 600;"
+            f"color: {Colors.TEXT_ON_INK}; font-size: 9.5pt; font-weight: 600;"
             " background: transparent;"
         )
 
@@ -2211,8 +2686,18 @@ class MainWindow(QMainWindow):
         self.progress_label.setGeometry(WIN_W - 190, 10, 180, 20)
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.progress_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; background: transparent;"
+            f"color: {Colors.TEXT_ON_INK_MUTED}; font-size: 9.5pt; background: transparent;"
         )
+
+        # When onboarding sends the user to a real management page, keep a
+        # clear return path without blocking that page with a modal dialog.
+        self._onboarding_resume_btn = QPushButton("빠른 시작 계속", bar)
+        self._onboarding_resume_btn.setAccessibleName("빠른 시작 가이드 계속")
+        self._onboarding_resume_btn.setFixedHeight(44)
+        self._onboarding_resume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._onboarding_resume_btn.setStyleSheet(accent_btn_style())
+        self._onboarding_resume_btn.clicked.connect(self._resume_onboarding)
+        self._onboarding_resume_btn.hide()
 
     def _relayout_main_window(self):
         """Fit the workspace to the current logical window size and DPI."""
@@ -2221,63 +2706,95 @@ class MainWindow(QMainWindow):
             return
         width = max(1, central.width())
         height = max(1, central.height())
-        sidebar_w = 240 if width >= 1180 else 210 if width >= 980 else 190
+        sidebar_w = 240 if width >= 1180 else 190 if width >= 900 else 72
+        header_h = 68 if width >= 900 and height >= 700 else 56
+        onboarding_resume_active = bool(
+            getattr(self, "_onboarding_resume_active", False)
+        )
+        status_h = 48 if onboarding_resume_active else 32 if height >= 700 else 28
         page_w = max(1, width - sidebar_w)
-        page_h = max(1, height - HEADER_H - STATUSBAR_H)
+        page_h = max(1, height - header_h - status_h)
 
-        self._header.setGeometry(0, 0, width, HEADER_H)
-        self._sidebar.setGeometry(0, HEADER_H, sidebar_w, page_h)
+        self._layout_header_h = header_h
+        self._layout_status_h = status_h
+        self._layout_sidebar_w = sidebar_w
+        self._header.setFixedHeight(header_h)
+        self._header.setGeometry(0, 0, width, header_h)
+        self._sidebar.setGeometry(0, header_h, sidebar_w, page_h)
+        self._page_stack.setGeometry(sidebar_w, header_h, page_w, page_h)
         for page in self._pages:
-            page.setGeometry(sidebar_w, HEADER_H, page_w, page_h)
-        self._status_bar_frame.setGeometry(0, height - STATUSBAR_H, width, STATUSBAR_H)
-        self._server_label.setGeometry(max(320, width - 410), 10, 200, 20)
-        self.progress_label.setGeometry(max(520, width - 200), 10, 184, 20)
-        self.status_label.setGeometry(34, 10, max(200, width - 460), 20)
+            page.setGeometry(0, 0, page_w, page_h)
+        self._status_bar_frame.setGeometry(0, height - status_h, width, status_h)
+        status_y = max(4, (status_h - 20) // 2)
+        self._statusbar_dot.setGeometry(16, status_y + 5, 10, 10)
+        self._server_label.setVisible(not onboarding_resume_active)
+        self.progress_label.setVisible(not onboarding_resume_active)
+        self._server_label.setGeometry(max(260, width - 410), status_y, 200, 20)
+        self.progress_label.setGeometry(max(440, width - 200), status_y, 184, 20)
+        self.status_label.setGeometry(
+            34,
+            status_y,
+            max(120, width - (244 if onboarding_resume_active else 460)),
+            20,
+        )
+        self._onboarding_resume_btn.setGeometry(
+            max(88, width - 196),
+            max(2, (status_h - 44) // 2),
+            180,
+            44,
+        )
+
+        compact_header = header_h < 68
+        self._brand_glow.setGeometry(12, 8 if compact_header else 14, 40, 40)
+        self._brand_icon.setGeometry(14, 10 if compact_header else 16, 36, 36)
+        self._brand_title_label.setGeometry(62, 4 if compact_header else 8, 220, 28)
+        self._brand_subtitle_label.setVisible(not compact_header and width >= 900)
+        if not compact_header:
+            self._brand_subtitle_label.setGeometry(62, 38, 340, 20)
 
         self._relayout_header_account_card()
         self._relayout_sidebar(sidebar_w, page_h)
         self._relayout_link_page(page_w, page_h)
         self._relayout_settings_page(page_w, page_h)
+        for page in (
+            getattr(self, "dashboard_page", None),
+            getattr(self, "history_page", None),
+            getattr(self, "accounts_page", None),
+            getattr(self, "subscription_page", None),
+        ):
+            if page is not None:
+                page.setGeometry(0, 0, page_w, page_h)
 
     def _relayout_sidebar(self, width, height):
-        for index, button in enumerate(self._sidebar_buttons):
-            button.setGeometry(0, 20 + index * 48, width, 44)
-        for divider in (self._sidebar_divider_top, self._sidebar_divider_counts):
-            divider.setGeometry(16, divider.y(), max(1, width - 32), 1)
-        for label in (self._sidebar_progress_title, self._progress_queue_label,
-                      self._sidebar_status_label, self._sidebar_log_title):
-            label.setFixedWidth(max(80, width - label.x() - 12))
-        for dot, label in zip(self._step_dots, self._step_labels):
-            dot.setGeometry(24, dot.y(), 18, 20)
-            label.setGeometry(44, label.y(), max(80, width - 56), 20)
-            label.setToolTip(label.text())
+        compact = width <= 80
+        for row, (page_index, icon, label, shortcut) in enumerate(self._NAV_ITEMS):
+            button = self._nav_button_by_page[page_index]
+            button.setGeometry(8 if compact else 12, 16 + row * 52,
+                               max(44, width - (16 if compact else 24)), 44)
+            button.setText(
+                icon
+                if compact
+                else label
+                if width < 220
+                else f"{icon}  {label}"
+            )
+            # QPushButton.setText() clears its explicit shortcut on Qt 6.
+            button.setShortcut(QKeySequence(shortcut))
+            button.setToolTip(label)
+            button.setAccessibleName(label)
 
-        columns = (
-            (self._sidebar_success_dot, self._sidebar_success_label),
-            (self._sidebar_failed_dot, self._sidebar_failed_label),
-            (self._sidebar_total_dot, self._sidebar_total_label),
+        divider_y = 16 + len(self._NAV_ITEMS) * 52 + 12
+        self._sidebar_divider_top.setGeometry(
+            14 if compact else 16,
+            divider_y,
+            max(32, width - (28 if compact else 32)),
+            1,
         )
-        counts_y = int(getattr(self, "_sidebar_counts_y", columns[0][1].y()))
-        if width < 260:
-            # Preserve every counter at compact widths without squeezing Korean text.
-            col_w = max(82, (width - 24) // 2)
-            positions = ((12, counts_y, col_w), (12 + col_w, counts_y, col_w),
-                         (12, counts_y + 24, max(82, width - 24)))
-            log_title_y = counts_y + 52
-        else:
-            col_w = max(70, (width - 24) // 3)
-            positions = tuple((12 + index * col_w, counts_y, col_w) for index in range(3))
-            log_title_y = counts_y + 30
-        for (dot, label), (x, row_y, cell_w) in zip(columns, positions):
-            dot.setGeometry(x, row_y + 6, 8, 8)
-            label.setGeometry(x + 13, row_y, max(52, cell_w - 14), 22)
-            label.setToolTip(label.text())
-        self._sidebar_log_title.setGeometry(
-            24, log_title_y, max(80, width - 36), 20
-        )
-        log_y = log_title_y + 22
-        self.log_text.setGeometry(10, log_y, max(80, width - 20),
-                                  max(52, height - log_y - 8))
+        self._sidebar_product_label.setVisible(not compact)
+        self._sidebar_health_label.setVisible(not compact)
+        if not compact:
+            self._sidebar_product_label.setGeometry(20, max(divider_y + 20, height - 72), width - 40, 18)
+            self._sidebar_health_label.setGeometry(20, max(divider_y + 42, height - 46), width - 40, 18)
 
     def _relayout_link_page(self, width, height):
         page = self._pages[0]
@@ -2288,14 +2805,30 @@ class MainWindow(QMainWindow):
         icon_bg.move(margin, 20)
         icon_label.move(margin, 20)
         title.move(margin + 48, 20)
-        self._page_help_btn.move(max(margin, width - margin - 32), 22)
-        self._coupang_link.setGeometry(max(margin, width - margin - 220), 28, 180, 24)
-        self.link_count_badge.setGeometry(max(margin, width - margin - 314), 26, 88, 28)
+        help_x = max(margin, width - margin - 32)
+        self._page_help_btn.move(help_x, 22)
+        self._log_drawer_btn.setGeometry(max(margin, help_x - 108), 20, 100, 40)
+        self._coupang_link.setVisible(False)
+        self.link_count_badge.setVisible(width >= 760)
+        if self.link_count_badge.isVisible():
+            badge_right = self._log_drawer_btn.x() - 8
+            self.link_count_badge.setGeometry(badge_right - 88, 26, 88, 28)
 
-        y = 82
+        rail_y = 78
+        rail_h = 72 if height < 700 else 84
+        self._pipeline_rail.setGeometry(margin, rail_y, page_inner_w, rail_h)
+        for label in self._pipeline_step_titles:
+            label.setVisible(page_inner_w >= 620)
+
+        y = rail_y + rail_h + 8
         self._upload_account_tabs.setGeometry(margin, y, page_inner_w, 40)
-        scroll_top = 130
-        scroll_h = max(80, height - scroll_top)
+        scroll_top = y + 46
+        footer_h = 64
+        footer_y = max(scroll_top + 80, height - footer_h)
+        self._automation_footer.setGeometry(0, footer_y, width, footer_h)
+        self._layout_automation_footer(width, footer_h)
+        self._automation_footer.raise_()
+        scroll_h = max(80, footer_y - scroll_top)
         self._link_scroll.setGeometry(0, scroll_top, width, scroll_h)
         canvas_w = max(320, width - 12)
         inner_w = max(280, canvas_w - margin * 2)
@@ -2308,34 +2841,34 @@ class MainWindow(QMainWindow):
         content_y = y
         gap = 16
         wide_bento = inner_w >= 900 and height >= 640
+        phase = str(getattr(self, "_latest_run_state", {}).get("phase") or "idle")
+        live_phase = phase in {
+            "running",
+            "processing",
+            "uploading",
+            "waiting",
+            "paused",
+            "stopping",
+            "offline",
+            "finished",
+            "blocked",
+            "error",
+            "session_expired",
+        }
 
         if wide_bento:
-            # 12-column Nordic Bento: editor 8 columns, live state 4 columns.
+            # Editorial 12-column workbench: editor 8 columns, live state 4.
             left_w = max(560, int((inner_w - gap) * (8 / 12)))
             right_w = max(280, inner_w - left_w - gap)
             right_x = margin + left_w + gap
-            card_h = 300 if height >= 700 else 276
+            card_h = 284 if height >= 700 else 252
             inner_x = margin + 20
             inner_left_w = max(240, left_w - 40)
 
             self._link_input_card.setGeometry(margin, content_y, left_w, card_h)
             self._links_hint.setGeometry(inner_x, content_y + 14, inner_left_w, 34)
-            links_h = 148 if card_h >= 280 else 124
+            links_h = max(124, card_h - 74)
             self.links_text.setGeometry(inner_x, content_y + 52, inner_left_w, links_h)
-
-            button_y = content_y + card_h - 58
-            action_gap = 8
-            start_w = max(200, int((inner_left_w - action_gap * 2) * .50))
-            add_w = max(118, int((inner_left_w - action_gap * 2) * .28))
-            stop_w = max(88, inner_left_w - start_w - add_w - action_gap * 2)
-            self.start_btn.setGeometry(inner_x, button_y, start_w, 44)
-            self.add_btn.setGeometry(inner_x + start_w + action_gap, button_y, add_w, 44)
-            self.stop_btn.setGeometry(
-                inner_x + start_w + add_w + action_gap * 2,
-                button_y,
-                stop_w,
-                44,
-            )
 
             self._run_state_frame.setGeometry(right_x, content_y, right_w, card_h)
             state_inner_w = max(120, right_w - 36)
@@ -2349,57 +2882,25 @@ class MainWindow(QMainWindow):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             )
             self._run_state_next.setGeometry(18, 152, state_inner_w, 32)
-
-            all_gap = 8
-            all_w = max(110, (state_inner_w - all_gap) // 2)
-            self.start_all_btn.setGeometry(right_x + 18, button_y, all_w, 44)
-            self.stop_all_btn.setGeometry(
-                right_x + 18 + all_w + all_gap,
-                button_y,
-                state_inner_w - all_w - all_gap,
-                44,
-            )
             y = content_y + card_h + 16
         else:
-            # Compact layouts keep every control and stack the two Bento cards.
+            # During a run the live state comes first, so compact laptop users
+            # see progress without scrolling past the editor.
             compact_h = height < 610
             card_inner_x = margin + 20
             card_inner_w = max(220, inner_w - 40)
-            self._links_hint.setGeometry(card_inner_x, content_y + 14, card_inner_w, 34)
             links_h = 86 if compact_h else 126 if height < 730 else 148
-            self.links_text.setGeometry(card_inner_x, content_y + 52, card_inner_w, links_h)
-            button_y = content_y + 52 + links_h + 10
-
-            start_w = max(150, int((card_inner_w - gap * 2) * .43))
-            add_w = max(100, int((card_inner_w - gap * 2) * .27))
-            stop_w = max(84, card_inner_w - start_w - add_w - gap * 2)
-            self.start_btn.setGeometry(card_inner_x, button_y, start_w, 44)
-            self.add_btn.setGeometry(card_inner_x + start_w + gap, button_y, add_w, 44)
-            self.stop_btn.setGeometry(
-                card_inner_x + start_w + add_w + gap * 2,
-                button_y,
-                stop_w,
-                44,
-            )
-            row2_y = button_y + 52
-            all_w = (card_inner_w - gap) // 2
-            self.start_all_btn.setGeometry(card_inner_x, row2_y, all_w, 44)
-            self.stop_all_btn.setGeometry(
-                card_inner_x + all_w + gap,
-                row2_y,
-                card_inner_w - all_w - gap,
-                44,
-            )
-            card_bottom = row2_y + 56
-            self._link_input_card.setGeometry(
-                margin,
-                content_y,
-                inner_w,
-                card_bottom - content_y,
-            )
-
-            state_y = card_bottom + 12
-            state_h = 116
+            input_h = 52 + links_h + 16
+            state_h = 124
+            if live_phase:
+                state_y = content_y
+                input_y = state_y + state_h + 12
+            else:
+                input_y = content_y
+                state_y = input_y + input_h + 12
+            self._link_input_card.setGeometry(margin, input_y, inner_w, input_h)
+            self._links_hint.setGeometry(card_inner_x, input_y + 14, card_inner_w, 34)
+            self.links_text.setGeometry(card_inner_x, input_y + 52, card_inner_w, links_h)
             self._run_state_frame.setGeometry(margin, state_y, inner_w, state_h)
             split = max(230, inner_w // 2)
             self._run_state_title.setGeometry(18, 10, max(140, split - 28), 22)
@@ -2422,22 +2923,104 @@ class MainWindow(QMainWindow):
                 max(110, inner_w - split - 18),
                 38,
             )
-            y = state_y + state_h + 12
-
-        for button in (
-            self.start_btn,
-            self.add_btn,
-            self.stop_btn,
-            self.start_all_btn,
-            self.stop_all_btn,
-        ):
-            button.raise_()
+            y = max(input_y + input_h, state_y + state_h) + 12
 
         self._link_table_label.setGeometry(margin, y, 220, 20)
         y += 26
-        table_h = max(140, scroll_h - y - 12)
+        table_h = max(180, scroll_h - y - 12)
         self.link_table.setGeometry(margin, y, inner_w, table_h)
+        compact_table = width < 900
+        self.link_table.setColumnHidden(LINK_TABLE_URL_COLUMN, compact_table)
+        self.link_table.setColumnHidden(LINK_TABLE_PRODUCT_COLUMN, compact_table)
+        self.link_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         self._link_scroll_content.setFixedSize(canvas_w, y + table_h + 12)
+        drawer_w = min(380, max(300, width - 32))
+        self._log_drawer.setGeometry(width - drawer_w, 0, drawer_w, height)
+        self._log_drawer_title.setGeometry(20, 18, drawer_w - 112, 28)
+        self._log_drawer_close.setGeometry(drawer_w - 88, 12, 72, 40)
+        self.log_text.setGeometry(16, 64, drawer_w - 32, max(120, height - 80))
+        if self._log_drawer.isVisible():
+            self._log_drawer.raise_()
+
+    def _layout_automation_footer(self, width, height):
+        margin = 16 if width < 820 else 24
+        visible_buttons = [
+            button
+            for button in (
+                self.start_btn,
+                self.start_all_btn,
+                self.add_btn,
+                self.stop_btn,
+                self.stop_all_btn,
+            )
+            if button.isVisible()
+        ]
+        gap = 8
+        preferred = {
+            self.start_btn: 206,
+            self.start_all_btn: 242,
+            self.add_btn: 148,
+            self.stop_btn: 164,
+            self.stop_all_btn: 164,
+        }
+        available = max(220, width - margin * 2)
+        total = sum(preferred.get(button, 160) for button in visible_buttons)
+        total += gap * max(0, len(visible_buttons) - 1)
+        if total > available:
+            button_w = max(108, (available - gap * max(0, len(visible_buttons) - 1)) // max(1, len(visible_buttons)))
+            widths = [button_w] * len(visible_buttons)
+        else:
+            widths = [preferred.get(button, 160) for button in visible_buttons]
+        actions_w = sum(widths) + gap * max(0, len(widths) - 1)
+        x = width - margin - actions_w
+        for button, button_w in zip(visible_buttons, widths):
+            button_h = 48 if button in (self.start_btn, self.start_all_btn) else 44
+            y = max(8, (height - button_h) // 2)
+            button.setGeometry(x, y, button_w, button_h)
+            button.raise_()
+            x += button_w + gap
+        hint_w = max(0, width - margin - actions_w - margin - 16)
+        self._automation_footer_hint.setVisible(hint_w >= 150)
+        if hint_w >= 150:
+            self._automation_footer_hint.setGeometry(
+                margin, max(8, (height - 38) // 2), hint_w, 38
+            )
+
+    def _sync_automation_actions(self, phase=None):
+        phase = str(
+            phase
+            or getattr(self, "_latest_run_state", {}).get("phase")
+            or "idle"
+        )
+        live = phase in {
+            "running",
+            "processing",
+            "uploading",
+            "waiting",
+            "paused",
+            "stopping",
+            "offline",
+        }
+        self.start_btn.setVisible(not live)
+        self.start_all_btn.setVisible(not live)
+        self.add_btn.setVisible(live)
+        self.stop_btn.setVisible(live)
+        self.stop_all_btn.setVisible(live)
+        if phase == "finished":
+            self.start_btn.setText("새 작업 시작")
+            footer_text = "완료 결과를 확인하거나 실패한 항목을 다시 실행하세요."
+        elif phase in {"blocked", "error", "session_expired"}:
+            self.start_btn.setText("문제 해결 후 다시 시작")
+            footer_text = "오류 원인을 확인한 뒤 안전하게 다시 시작할 수 있습니다."
+        elif live:
+            self.start_btn.setText("검토하고 시작")
+            footer_text = "실행 중에도 새 링크를 대기열에 추가할 수 있습니다."
+        else:
+            self.start_btn.setText("검토하고 시작")
+            footer_text = "검증 결과와 계정을 확인한 뒤 시작하세요."
+        self._automation_footer_hint.setText(footer_text)
 
     def _relayout_settings_page(self, width, height):
         page = self._pages[1]
@@ -2455,12 +3038,28 @@ class MainWindow(QMainWindow):
         if help_visible:
             self._settings_help_panel.setGeometry(margin, y, inner_w, 88)
             y += 98
-        footer_h = 58
+        footer_h = 64
         self._settings_scroll.setGeometry(0, y, width, max(80, height - y - footer_h))
         self._settings_content.setFixedWidth(width)
         self._settings_section_w = inner_w
         self._settings_section_x = margin
-        self._settings_save_btn.setGeometry(max(margin, width - margin - 172), height - 52, 172, 44)
+        self._settings_footer.setGeometry(0, height - footer_h, width, footer_h)
+        save_w = 184
+        cancel_w = 126
+        self._settings_save_btn.setGeometry(
+            width - margin - save_w, 8, save_w, 48
+        )
+        self._settings_cancel_btn.setGeometry(
+            width - margin - save_w - 8 - cancel_w,
+            10,
+            cancel_w,
+            44,
+        )
+        hint_w = width - margin * 2 - save_w - cancel_w - 32
+        self._settings_footer_hint.setVisible(hint_w >= 180)
+        if hint_w >= 180:
+            self._settings_footer_hint.setGeometry(margin, 12, hint_w, 40)
+        self._settings_footer.raise_()
         self._relayout_settings_sections()
         self._relayout_settings_section_contents(inner_w)
 
@@ -2492,18 +3091,20 @@ class MainWindow(QMainWindow):
         automation_w = max(320, self._settings_automation_sec.width())
         automation_content_w = max(200, automation_w - 48)
         if automation_w < 760:
-            self.video_check.setGeometry(24, 122, automation_content_w, 32)
+            self.video_check.setGeometry(24, 126, automation_content_w, 32)
+            self._concept_label.setGeometry(24, 166, automation_content_w, 20)
             self.settings_post_concept_combo.setGeometry(
-                24, 178, min(344, automation_content_w), 44
+                24, 190, min(344, automation_content_w), 44
             )
-            self._concept_desc.setGeometry(24, 230, automation_content_w, 54)
+            self._concept_desc.setGeometry(24, 242, automation_content_w, 54)
         else:
             self.video_check.setGeometry(404, 76, min(300, automation_w - 428), 32)
+            self._concept_label.setGeometry(24, 138, 120, 20)
             self.settings_post_concept_combo.setGeometry(24, 162, 344, 44)
             self._concept_desc.setGeometry(392, 162, max(180, automation_w - 416), 54)
 
         api_w = max(320, self._settings_api_sec.width())
-        self._ai_provider_hint.setGeometry(368, 72, max(120, api_w - 392), 40)
+        self._ai_provider_hint.setGeometry(368, 72, max(120, api_w - 392), 64)
         self._settings_api_hint.setGeometry(306, 120, max(120, api_w - 330), 40)
         self._grok_status_label.setGeometry(24, 120, max(180, api_w - 48), 38)
 
@@ -2520,8 +3121,8 @@ class MainWindow(QMainWindow):
             self._auto_start_check.setGeometry(24, 40, startup_content_w, 32)
             self._startup_desc.setGeometry(24, 76, startup_content_w, 34)
         else:
-            self._auto_start_check.setGeometry(24, 44, 260, 32)
-            self._startup_desc.setGeometry(304, 46, max(180, startup_w - 328), 34)
+            self._auto_start_check.setGeometry(24, 44, 300, 32)
+            self._startup_desc.setGeometry(336, 46, max(180, startup_w - 360), 34)
 
         tutorial_w = max(280, self._settings_tutorial_sec.width())
         self._tutorial_settings_btn.setGeometry(24, 40, max(180, tutorial_w - 48), 44)
@@ -2597,6 +3198,20 @@ class MainWindow(QMainWindow):
         self._relayout_main_window()
         self._log_user_activity("inline_help_toggled", f"enabled={enabled}; page={self._current_page}")
 
+    def toggle_log_drawer(self, visible=None):
+        """Open or close the non-blocking live log drawer."""
+        drawer = getattr(self, "_log_drawer", None)
+        if drawer is None:
+            return
+        should_show = (not drawer.isVisible()) if visible is None else bool(visible)
+        drawer.setVisible(should_show)
+        self.log_text.setVisible(should_show)
+        self._log_drawer_btn.setText("로그 닫기" if should_show else "작업 로그")
+        if should_show:
+            drawer.raise_()
+            self._log_drawer_close.setFocus()
+        self._relayout_link_page(self._page_stack.width(), self._page_stack.height())
+
     # ────────────────────────────────────────────────────────
     #  PAGE SWITCHING
     # ────────────────────────────────────────────────────────
@@ -2609,11 +3224,13 @@ class MainWindow(QMainWindow):
             return
         if not 0 <= index < len(self._pages):
             return
-        for i, page in enumerate(self._pages):
-            page.setVisible(i == index)
+        self._page_stack.setCurrentIndex(index)
         self._current_page = index
-        if hasattr(self, '_sidebar_buttons') and 0 <= index < len(self._sidebar_buttons):
-            self._sidebar_buttons[index].setChecked(True)
+        nav_button = getattr(self, "_nav_button_by_page", {}).get(index)
+        if nav_button is not None:
+            nav_button.setChecked(True)
+        if index >= 2:
+            self._refresh_auxiliary_pages()
         self._log_user_activity(
             "ui_tab_switch",
             f"index={index}; page={self._page_label(index)}; source={source}",
@@ -2652,6 +3269,14 @@ class MainWindow(QMainWindow):
         self._step_labels[index].setStyleSheet(
             f"{label_style} font-size: 9.5pt; background: transparent;"
         )
+        if hasattr(self, "_pipeline_rail"):
+            pipeline_status = {
+                "active": "running",
+                "done": "complete",
+                "error": "error",
+                "pending": "pending",
+            }.get(status, "pending")
+            self._pipeline_rail.set_step(index, pipeline_status)
         self._log_user_activity(
             "ui_process_step",
             f"index={index}; step={self._PROCESS_STEPS[index]}; status={status}",
@@ -2663,6 +3288,8 @@ class MainWindow(QMainWindow):
         """Reset all step indicators to pending state."""
         for i in range(len(self._step_dots)):
             self._update_step(i, "pending")
+        if hasattr(self, "_pipeline_rail"):
+            self._pipeline_rail.reset()
 
     # ────────────────────────────────────────────────────────
     #  LINK TABLE MANAGEMENT
@@ -2985,6 +3612,30 @@ class MainWindow(QMainWindow):
             bg = Colors.INFO_BG
             sidebar_status = f"예약 대기 · {pending}개 남음"
             progress_text = f"다음 {self._format_clock(next_allowed_at)}"
+        elif phase == "paused":
+            title = "자동화 일시정지"
+            main = message or "대기열과 현재 진행 위치를 안전하게 보존했습니다."
+            detail = f"남은 작업 {pending}개"
+            color = Colors.WARNING
+            bg = Colors.WARNING_BG
+            sidebar_status = "일시정지"
+            progress_text = "일시정지"
+        elif phase == "stopping":
+            title = "안전하게 중지 중"
+            main = message or "현재 단계가 끝나면 작업을 중지합니다."
+            detail = "진행 위치와 대기열은 보존됩니다."
+            color = Colors.WARNING
+            bg = Colors.WARNING_BG
+            sidebar_status = "중지 중"
+            progress_text = "중지 중"
+        elif phase == "offline":
+            title = "네트워크 재연결 중"
+            main = message or "연결이 복구되면 중단 지점부터 자동으로 이어갑니다."
+            detail = f"보존된 작업 {pending}개"
+            color = Colors.WARNING
+            bg = Colors.WARNING_BG
+            sidebar_status = "오프라인 · 재시도 중"
+            progress_text = "재연결 중"
         elif phase in {"processing", "uploading"}:
             title = "현재 업로드 중"
             main = current_item[:42] if current_item else (message or "항목 처리 중")
@@ -3009,9 +3660,13 @@ class MainWindow(QMainWindow):
             bg = Colors.SUCCESS_BG
             sidebar_status = "완료"
             progress_text = "완료"
-        elif phase in {"blocked", "error"}:
+        elif phase in {"blocked", "error", "session_expired"}:
             title = "확인 필요"
-            main = message or "자동화가 멈췄습니다."
+            main = message or (
+                "Threads 로그인이 만료되었습니다. 다시 연결해 주세요."
+                if phase == "session_expired"
+                else "자동화가 멈췄습니다."
+            )
             detail = current_item[:48] if current_item else "로그를 확인하세요"
             color = Colors.ERROR
             bg = Colors.ERROR_BG
@@ -3031,6 +3686,10 @@ class MainWindow(QMainWindow):
             next_text = f"다음 작업: {self._format_clock(next_allowed_at)} · {_format_interval(remaining)} 남음"
         elif current_item and phase in {"processing", "uploading"}:
             next_text = f"현재 항목: {current_item[:52]}"
+        elif phase == "paused":
+            next_text = "준비되면 중단 지점부터 이어서 실행합니다."
+        elif phase == "offline":
+            next_text = "네트워크 연결 복구를 기다리는 중입니다."
         elif pending:
             next_text = f"남은 작업: {pending}개"
 
@@ -3058,6 +3717,25 @@ class MainWindow(QMainWindow):
         self._statusbar_dot.setStyleSheet(
             f"background-color: {color}; border-radius: 5px; border: none;"
         )
+        self._sync_automation_actions(phase)
+        if hasattr(self, "_pipeline_rail"):
+            if phase == "finished":
+                self._pipeline_rail.complete()
+            elif phase in {"blocked", "error", "session_expired"}:
+                current_stage = min(
+                    max(0, self._pipeline_rail.current_index),
+                    self._pipeline_rail.stage_count - 1,
+                )
+                self._pipeline_rail.set_progress(
+                    current_stage, error_index=current_stage
+                )
+            elif phase == "idle":
+                self._pipeline_rail.reset()
+        if hasattr(self, "_layout_sidebar_w"):
+            self._relayout_link_page(
+                max(1, self._page_stack.width()),
+                max(1, self._page_stack.height()),
+            )
 
         self._log_user_activity(
             "ui_run_state",
@@ -3071,12 +3749,15 @@ class MainWindow(QMainWindow):
 
     def _set_results(self, success, failed):
         total = success + failed
+        self._last_success_count = int(success or 0)
+        self._last_failed_count = int(failed or 0)
         # Update sidebar progress labels
         self._sidebar_success_label.setText(f"성공: {success}")
         self._sidebar_failed_label.setText(f"실패: {failed}")
         self._sidebar_total_label.setText(f"전체: {total}")
         # Update queue progress
         self._set_queue_progress(f"전체: {total} 처리됨")
+        self._refresh_auxiliary_pages()
 
     def _set_queue_progress(self, message: str):
         text = str(message or "")
@@ -3109,10 +3790,11 @@ class MainWindow(QMainWindow):
         # are persisted as pending work and can be started as the next batch.
         self.add_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self.start_all_btn.setEnabled(True)
+        self.stop_all_btn.setEnabled(False)
         self.status_badge.update_style(Colors.SUCCESS, "준비")
         self._relayout_header_account_card()
         self._sidebar_status_label.setText("완료")
-        self._reset_steps()
         self._save_resume_state("batch_finished")
 
         while not self.link_queue.empty():
@@ -3125,6 +3807,21 @@ class MainWindow(QMainWindow):
         uploaded = results.get("uploaded", 0)
         failed = results.get("failed", 0)
         skipped = results.get("skipped", 0)
+        self._set_results(uploaded, failed + parse_failed)
+        self._set_run_state(
+            {
+                "phase": "finished",
+                "message": (
+                    "요청한 지점에서 안전하게 중지했습니다."
+                    if results.get("cancelled")
+                    else "모든 대기열 작업이 종료되었습니다."
+                ),
+                "completed": uploaded,
+                "failed": failed + parse_failed,
+                "total": uploaded + failed + parse_failed,
+                "pending": 0,
+            }
+        )
 
         # Stay on link page to see table results
         self._switch_page(0)
@@ -4048,7 +4745,7 @@ class MainWindow(QMainWindow):
         primary_w = w
         secondary_w = w
         if wide_bento:
-            primary_w = max(560, int((w - gap) * (8 / 12)))
+            primary_w = max(540, int((w - gap) * (7 / 12)))
             secondary_w = max(280, w - primary_w - gap)
 
         provider = self._selected_ai_provider()
@@ -4343,6 +5040,7 @@ class MainWindow(QMainWindow):
             add_btn.setToolTip(
                 "" if can_add else f"현재 요금제는 계정 {self._threads_account_limit()}개까지 가능합니다."
             )
+        self._refresh_auxiliary_pages()
 
     def _apply_selected_threads_account(self, account_id):
         account = next((item for item in self._threads_accounts() if item.account_id == str(account_id or "")), None)
@@ -4568,6 +5266,8 @@ class MainWindow(QMainWindow):
             self.stop_all_btn.setEnabled(any_active)
         if not any_active and isinstance(self._pending_update_info, dict):
             QTimer.singleShot(300, self._maybe_show_update_notice)
+        if phase in {"finished", "blocked", "error"}:
+            self._refresh_auxiliary_pages()
 
     def _add_threads_account_from_ui(self):
         if len(self._threads_accounts()) >= self._threads_account_limit():
@@ -4633,6 +5333,19 @@ class MainWindow(QMainWindow):
                     "대기열이 남아 있는 계정은 삭제할 수 없습니다. 먼저 작업을 완료해 주세요.",
                 )
                 return
+        account = config.get_threads_account(account_id)
+        account_label = (
+            account.display_name or f"@{account.expected_username}"
+            if account is not None
+            else "선택한 계정"
+        )
+        if not ask_yes_no(
+            self,
+            "Threads 계정 삭제",
+            f"{account_label} 연결을 삭제할까요?\n\n"
+            "저장된 브라우저 세션 연결이 해제되며, 이 계정의 작업 기록 파일은 복구를 위해 유지됩니다.",
+        ):
+            return
         try:
             config.remove_threads_account(account_id)
             if not config.save():
@@ -4750,7 +5463,7 @@ class MainWindow(QMainWindow):
             self._log_user_activity("settings_save_blocked", "reason=missing_gemini_keys", level="WARNING")
             tab_bar = getattr(self, "_settings_tab_bar", None)
             if tab_bar is not None:
-                tab_bar.setCurrentIndex(1)
+                tab_bar.setCurrentIndex(2)
             rows = getattr(self, "_gemini_key_rows", [])
             if rows:
                 rows[0]["edit"].setFocus()
@@ -4898,7 +5611,9 @@ class MainWindow(QMainWindow):
 
         resolved_plan = resolve_plan(state)
         paid_plan_label = resolved_plan.label if resolved_plan else "유료 계정"
-        header_plan_label = "쇼핑 프로" if resolved_plan and resolved_plan.is_shopping_pro else paid_plan_label
+        header_plan_label = paid_plan_label
+        self._subscription_state = dict(state)
+        self._resolved_subscription_plan = resolved_plan
 
         # Header plan badge
         if paid_account:
@@ -5018,6 +5733,7 @@ class MainWindow(QMainWindow):
 
         # Version label
         self._version_label.setText(f"현재 버전: {self._app_version}")
+        self._refresh_auxiliary_pages()
 
     def _open_contact(self):
         """Open contact/support dialog."""
@@ -5774,6 +6490,7 @@ class MainWindow(QMainWindow):
         self.add_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.stop_all_btn.setEnabled(True)
+        self._sync_automation_actions("running")
         self.status_badge.update_style(Colors.WARNING, "실행중")
         self._sidebar_status_label.setText("실행중")
         self._reset_steps()
@@ -5821,6 +6538,14 @@ class MainWindow(QMainWindow):
         self.is_running = True
         self.start_all_btn.setEnabled(False)
         self.stop_all_btn.setEnabled(True)
+        self._set_run_state(
+            {
+                "phase": "running",
+                "message": f"전체 계정 대기열 {pending_total}개를 시작합니다.",
+                "pending": pending_total,
+                "total": pending_total,
+            }
+        )
         for account in self._threads_accounts()[: self._threads_account_limit()]:
             state = runtime.snapshot(account.account_id)
             if state.get("current_item") or state.get("pending_items"):
@@ -5837,6 +6562,12 @@ class MainWindow(QMainWindow):
         self.is_running = False
         self.start_all_btn.setEnabled(True)
         self.stop_all_btn.setEnabled(False)
+        self._set_run_state(
+            {
+                "phase": "stopping",
+                "message": "현재 단계가 끝나면 모든 계정이 안전하게 중지됩니다.",
+            }
+        )
         self.signals.log.emit("전체 계정 대기열 중지를 요청했습니다.")
 
     def _start_existing_selected_queue(self) -> bool:
@@ -5864,6 +6595,14 @@ class MainWindow(QMainWindow):
         self.add_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.stop_all_btn.setEnabled(True)
+        self._set_run_state(
+            {
+                "phase": "running",
+                "message": f"저장된 대기열 {pending}개를 이어서 시작합니다.",
+                "pending": pending,
+                "total": pending,
+            }
+        )
         runtime.start_account(account.account_id)
         self.signals.log.emit(
             f"@{account.expected_username}의 저장된 대기열 {pending}개를 시작했습니다."
@@ -6895,6 +7634,12 @@ class MainWindow(QMainWindow):
                 self.signals.log.emit("선택한 계정의 대기열 중지를 요청했습니다.")
                 self.signals.status.emit("중지중...")
                 self.stop_btn.setEnabled(False)
+                self._set_run_state(
+                    {
+                        "phase": "stopping",
+                        "message": "현재 단계가 끝나면 선택 계정을 안전하게 중지합니다.",
+                    }
+                )
                 return
         if self.is_running:
             self.signals.log.emit("중지 요청됨. 현재 항목 처리 후 중단합니다.")
@@ -6902,6 +7647,12 @@ class MainWindow(QMainWindow):
             self.status_badge.update_style(Colors.WARNING, "중지중")
             self._relayout_header_account_card()
             self._sidebar_status_label.setText("중지중...")
+            self._set_run_state(
+                {
+                    "phase": "stopping",
+                    "message": "현재 단계가 끝나면 작업을 안전하게 중지합니다.",
+                }
+            )
             self._save_resume_state("user_stop")
             self.is_running = False
             pipeline = self._active_pipeline or self.pipeline
@@ -7427,9 +8178,112 @@ class MainWindow(QMainWindow):
         return True
 
     def open_tutorial(self):
-        """Show help beside the controls instead of opening a new window."""
-        logger.info("인라인 도움말 열기 호출")
-        self.toggle_inline_help(True)
+        """Show the canonical keyboard-accessible contextual tour."""
+        logger.info("화면 도움말 오버레이 열기 호출")
+        overlay = getattr(self, "_tutorial_overlay", None)
+        if overlay is None:
+            overlay = TutorialOverlay(self.centralWidget())
+            self._tutorial_overlay = overlay
+        overlay.show_overlay()
+
+    def _set_onboarding_resume_visible(self, visible):
+        """Reserve status-bar space for the resumable first-run guide."""
+        self._onboarding_resume_active = bool(visible)
+        self._onboarding_resume_btn.setVisible(bool(visible))
+        self._relayout_main_window()
+        if visible:
+            self._onboarding_resume_btn.raise_()
+
+    def _show_onboarding_if_needed(self):
+        if os.getenv("THREAD_AUTO_DISABLE_ONBOARDING", "").strip() == "1":
+            return
+        if bool(getattr(self, "_onboarding_dismissed_for_session", False)):
+            return
+        if not isinstance(getattr(self, "_auth_data", None), dict) or not self._auth_data:
+            # Unit tests and local view previews construct MainWindow without
+            # a login payload; first-run guidance belongs to authenticated use.
+            return
+        if bool(getattr(config, "onboarding_completed", False)):
+            if not config.tutorial_shown:
+                self.open_tutorial()
+            return
+        dialog = self._onboarding_dialog
+        if dialog is None:
+            dialog = OnboardingDialog(self)
+            dialog.skipped.connect(self._dismiss_onboarding_for_session)
+            dialog.finished.connect(self._complete_onboarding)
+            dialog.open_subscription_requested.connect(
+                lambda: self._leave_onboarding_for_page(5, "onboarding_subscription")
+            )
+            dialog.open_accounts_requested.connect(
+                lambda: self._leave_onboarding_for_page(4, "onboarding_accounts")
+            )
+            dialog.open_settings_requested.connect(
+                lambda: self._leave_onboarding_for_page(1, "onboarding_settings")
+            )
+            dialog.sample_link_requested.connect(
+                self._onboarding_sample_link_requested
+            )
+            self._onboarding_dialog = dialog
+        self._set_onboarding_resume_visible(False)
+        work_text = self._work_label.text() or "이용량 확인 필요"
+        dialog.set_step_status(0, "complete", f"현재 이용량: {work_text}")
+        accounts = self._threads_accounts()
+        if any(account.last_verified_at for account in accounts):
+            dialog.set_step_status(1, "complete", "확인된 Threads 계정이 연결되어 있습니다.")
+        elif accounts:
+            dialog.set_step_status(1, "needs_attention", "계정 연결 테스트가 필요합니다.")
+        else:
+            dialog.set_step_status(1, "current", "Threads 계정을 추가해 주세요.")
+        dialog.set_step_status(
+            2,
+            "complete",
+            f"업로드 간격 {_format_interval(max(30, int(config.upload_interval or 30)))}",
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _leave_onboarding_for_page(self, page_index, source):
+        dialog = self._onboarding_dialog
+        if dialog is not None:
+            dialog.hide()
+        self._switch_page(page_index, source=source)
+        self._set_onboarding_resume_visible(True)
+        self.raise_()
+        self.activateWindow()
+
+    def _onboarding_sample_link_requested(self, sample_link):
+        link = str(sample_link or "").strip()
+        if not link:
+            return
+        self.links_text.setPlainText(link)
+        dialog = self._onboarding_dialog
+        if dialog is not None:
+            dialog.set_step_status(3, "complete", "자동화 화면에서 링크 검증 결과를 확인하세요.")
+            dialog.hide()
+        self._switch_page(0, source="onboarding_sample")
+        self._set_onboarding_resume_visible(True)
+        self.links_text.setFocus()
+
+    def _resume_onboarding(self):
+        """Return to the active first-run checklist after inspecting a page."""
+        self._set_onboarding_resume_visible(False)
+        self._show_onboarding_if_needed()
+
+    def _dismiss_onboarding_for_session(self):
+        """Honor 'later' without permanently marking setup as completed."""
+        self._onboarding_dismissed_for_session = True
+        self._set_onboarding_resume_visible(False)
+
+    def _complete_onboarding(self):
+        self._set_onboarding_resume_visible(False)
+        config.onboarding_completed = True
+        config.tutorial_shown = True
+        if not config.save():
+            config.load()
+            logger.warning("온보딩 완료 상태를 저장하지 못했습니다.")
+        self._refresh_auxiliary_pages()
 
     # ────────────────────────────────────────────────────────
     #  EVENTS
@@ -7437,12 +8291,9 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not config.tutorial_shown:
-            config.tutorial_shown = True
-            if not config.save():
-                config.load()
-                logger.warning("도움말 표시 상태를 저장하지 못했습니다.")
-            QTimer.singleShot(0, lambda: self.toggle_inline_help(True))
+        if not getattr(self, "_first_run_surface_scheduled", False):
+            self._first_run_surface_scheduled = True
+            QTimer.singleShot(0, self._show_onboarding_if_needed)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

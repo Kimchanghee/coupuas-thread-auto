@@ -14,9 +14,9 @@ from src.ai_provider import (
     normalize_ai_provider,
 )
 from src.fs_security import secure_dir_permissions, secure_file_permissions
+from src.models.threads_account import ThreadsAccount, normalize_threads_username
 from src.secure_storage import protect_secret, unprotect_secret
 from src.services.post_concepts import DEFAULT_POST_CONCEPT_ID, normalize_concept_id
-from src.models.threads_account import ThreadsAccount, normalize_threads_username
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,7 @@ class Config:
         self.instruction = str(data.get("instruction", "") or "")
         self.post_concept = normalize_concept_id(data.get("post_concept"))
         self.tutorial_shown = bool(data.get("tutorial_shown", False))
+        self.onboarding_completed = bool(data.get("onboarding_completed", False))
 
     @staticmethod
     def _legacy_profile_id(legacy_value: str, normalized_username: str) -> str:
@@ -195,6 +196,7 @@ class Config:
         self.instruction = ""
         self.post_concept = DEFAULT_POST_CONCEPT_ID
         self.tutorial_shown = False
+        self.onboarding_completed = False
 
     @staticmethod
     def _local_ai_providers_enabled() -> bool:
@@ -353,6 +355,7 @@ class Config:
                 "instruction": self.instruction,
                 "post_concept": normalize_concept_id(getattr(self, "post_concept", "")),
                 "tutorial_shown": self.tutorial_shown,
+                "onboarding_completed": self.onboarding_completed,
             }
             try:
                 config_existed, previous_config = self._read_file_snapshot(self.config_file)

@@ -6,9 +6,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set
@@ -177,6 +177,15 @@ class LinkHistory:
                 "success": int(stats.get("success", 0)),
                 "failed": int(stats.get("failed", 0)),
             }
+
+    def get_records(self) -> list[dict]:
+        """Return defensive copies for the read-only operations-history view."""
+        with self._lock:
+            return [
+                dict(record)
+                for record in self._history.get("uploaded_links", [])
+                if isinstance(record, dict)
+            ]
 
     def filter_new_links(self, urls: List[str]) -> List[str]:
         with self._lock:
