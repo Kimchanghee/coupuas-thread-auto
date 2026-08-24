@@ -1,7 +1,8 @@
-# -*- coding: utf-8 -*-
 """Responsive update center used by both manual and automatic checks."""
 
-from PyQt6.QtCore import QThread, QUrl, Qt, pyqtSignal
+from typing import ClassVar
+
+from PyQt6.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -39,7 +40,7 @@ class UpdateCheckThread(QThread):
                 self.update_found.emit(update_info)
             else:
                 self.no_update.emit()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - worker must convert every provider failure to UI state
             self.error.emit(
                 user_friendly_message(
                     exc,
@@ -49,9 +50,17 @@ class UpdateCheckThread(QThread):
 
 
 class UpdateDialog(QDialog):
-    """Polished, non-blocking update surface with responsive sizing."""
+    """Polished update center with six explicit, testable UI states."""
 
     install_requested = pyqtSignal(object)
+    VALID_STATES: ClassVar[set[str]] = {
+        "checking",
+        "latest",
+        "available",
+        "downloading",
+        "installing",
+        "error",
+    }
 
     def __init__(self, current_version: str, parent=None, *, update_info=None):
         super().__init__(parent)
@@ -59,6 +68,7 @@ class UpdateDialog(QDialog):
         self.update_info = None
         self._busy = False
         self._check_thread = None
+        self._state = "checking"
 
         self.setWindowTitle("Thread Auto 업데이트")
         self.setModal(False)
@@ -86,44 +96,44 @@ class UpdateDialog(QDialog):
         self.setStyleSheet(
             f"""
             QDialog {{
-                background-color: {Colors.BG_DARK};
+                background-color: {Colors.BG_CARD};
                 color: {Colors.TEXT_PRIMARY};
             }}
             QFrame#updateHero {{
-                background: {Gradients.CARD_SUBTLE};
-                border: 1px solid {Colors.BORDER};
+                background: {getattr(Colors, 'INK', '#101C24')};
+                border: 1px solid {getattr(Colors, 'INK', '#101C24')};
                 border-radius: {Radius.XL};
             }}
             QLabel {{ background: transparent; }}
             """
         )
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 18, 28, 18)
-        root.setSpacing(12)
+        root.setContentsMargins(28, 16, 28, 16)
+        root.setSpacing(9)
 
         top = QHBoxLayout()
         top.setSpacing(12)
         title_box = QVBoxLayout()
         title_box.setSpacing(4)
-        title = QLabel("새로운 업데이트")
-        title.setFont(self._ui_font(18, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        self.header_title = QLabel("업데이트 센터")
+        self.header_title.setFont(self._ui_font(18, QFont.Weight.Bold))
+        self.header_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
         subtitle = QLabel("안전하게 내려받고, 설치 후 하던 작업을 이어갈 수 있어요.")
         subtitle.setFont(self._ui_font(10.5))
         subtitle.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
         subtitle.setWordWrap(True)
-        title_box.addWidget(title)
+        title_box.addWidget(self.header_title)
         title_box.addWidget(subtitle)
         top.addLayout(title_box, 1)
-        badge = QLabel("업데이트")
-        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setMinimumSize(84, 30)
-        badge.setStyleSheet(
+        self.state_badge = QLabel("확인 중")
+        self.state_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.state_badge.setMinimumSize(84, 30)
+        self.state_badge.setStyleSheet(
             f"background: {Colors.ACCENT_SUBTLE}; color: {Colors.ACCENT_LIGHT};"
-            f"border: 1px solid {Colors.ACCENT_DARK}; border-radius: 14px;"
+            f"border: 1px solid {Colors.INFO_BORDER}; border-radius: 14px;"
             "font-size: 9.5pt; font-weight: 800; letter-spacing: 0.3px;"
         )
-        top.addWidget(badge, 0, Qt.AlignmentFlag.AlignTop)
+        top.addWidget(self.state_badge, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(top)
 
         hero = QFrame()
@@ -134,10 +144,10 @@ class UpdateDialog(QDialog):
 
         version_row = QHBoxLayout()
         version_row.setSpacing(12)
-        current_box = self._version_box("현재 버전", self.current_version, Colors.TEXT_SECONDARY)
+        current_box = self._version_box("현재 버전", self.current_version, "#FFFFFF")
         self.target_version_value = QLabel("확인 중")
         target_box = self._version_box(
-            "업데이트 버전", "", Colors.ACCENT_LIGHT, self.target_version_value
+            "새 버전", "", "#25B9BC", self.target_version_value
         )
         version_row.addWidget(current_box, 1)
         version_row.addWidget(target_box, 1)
@@ -145,13 +155,13 @@ class UpdateDialog(QDialog):
 
         self.status_label = QLabel("최신 버전을 확인하고 있어요")
         self.status_label.setFont(self._ui_font(12, QFont.Weight.Bold))
-        self.status_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        self.status_label.setStyleSheet("color: #FFFFFF;")
         self.status_label.setWordWrap(True)
         hero_layout.addWidget(self.status_label)
 
         self.status_detail = QLabel("잠시만 기다려 주세요.")
         self.status_detail.setFont(self._ui_font(9.5))
-        self.status_detail.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
+        self.status_detail.setStyleSheet("color: #B8C7CB;")
         self.status_detail.setWordWrap(True)
         hero_layout.addWidget(self.status_detail)
         root.addWidget(hero)
@@ -170,7 +180,7 @@ class UpdateDialog(QDialog):
 
         self.changelog_text = QTextEdit()
         self.changelog_text.setReadOnly(True)
-        self.changelog_text.setMinimumHeight(100)
+        self.changelog_text.setMinimumHeight(72)
         self.changelog_text.setFont(self._ui_font(10.5))
         self.changelog_text.setPlaceholderText("업데이트 내용을 불러오는 중입니다.")
         self.changelog_text.setStyleSheet(
@@ -196,6 +206,27 @@ class UpdateDialog(QDialog):
         self.progress_label.setVisible(False)
         progress_row.addWidget(self.progress_label)
         root.addLayout(progress_row)
+
+        self.safety_frame = QFrame()
+        self.safety_frame.setObjectName("updateSafetyFrame")
+        self.safety_frame.setMinimumHeight(54)
+        self.safety_frame.setStyleSheet(
+            f"#updateSafetyFrame {{ background: {Colors.INFO_BG}; border: 1px solid {Colors.INFO_BORDER};"
+            f" border-radius: {Radius.MD}; }}"
+        )
+        safety_layout = QHBoxLayout(self.safety_frame)
+        safety_layout.setContentsMargins(14, 8, 14, 8)
+        safety_layout.setSpacing(10)
+        safety_icon = QLabel("✓")
+        safety_icon.setFont(self._ui_font(14, QFont.Weight.Bold))
+        safety_icon.setStyleSheet(f"color: {Colors.ACCENT};")
+        self.safety_label = QLabel("현재 대기열은 자동 저장됩니다. 설치 후 중단 지점부터 이어서 시작합니다.")
+        self.safety_label.setWordWrap(True)
+        self.safety_label.setFont(self._ui_font(8.5))
+        self.safety_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY};")
+        safety_layout.addWidget(safety_icon)
+        safety_layout.addWidget(self.safety_label, 1)
+        root.addWidget(self.safety_frame)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(12)
@@ -248,6 +279,33 @@ class UpdateDialog(QDialog):
 
         # Compatibility alias for older callers and UI tests.
         self.download_btn = self.install_btn
+        self._set_state("checking")
+
+    @property
+    def state(self):
+        """Current presentation state for automation and accessibility tests."""
+        return self._state
+
+    def _set_state(self, state):
+        if state not in self.VALID_STATES:
+            raise ValueError(f"Unknown update dialog state: {state}")
+        self._state = state
+        labels = {
+            "checking": "확인 중",
+            "latest": "최신",
+            "available": "UPDATE",
+            "downloading": "다운로드",
+            "installing": "설치 중",
+            "error": "다시 확인",
+        }
+        self.state_badge.setText(labels[state])
+        is_error = state == "error"
+        self.state_badge.setStyleSheet(
+            f"background: {Colors.ERROR_BG if is_error else Colors.ACCENT_SUBTLE};"
+            f" color: {Colors.ERROR if is_error else Colors.ACCENT_LIGHT};"
+            f" border: 1px solid {Colors.ERROR_BORDER if is_error else Colors.INFO_BORDER};"
+            " border-radius: 14px; font-size: 9.5pt; font-weight: 800; letter-spacing: 0.3px;"
+        )
 
     def _ui_font(self, point_size, weight=None):
         """Return the same family used by the rest of the application."""
@@ -261,7 +319,8 @@ class UpdateDialog(QDialog):
         frame = QFrame()
         frame.setObjectName("updateVersionBox")
         frame.setStyleSheet(
-            f"QFrame#updateVersionBox {{ background-color: {Colors.BG_INPUT}; border: 1px solid {Colors.BORDER_SUBTLE};"
+            "QFrame#updateVersionBox { background-color: rgba(255, 255, 255, 0.04);"
+            " border: 1px solid rgba(255, 255, 255, 0.12);"
             f"border-radius: {Radius.MD}; }}"
         )
         layout = QVBoxLayout(frame)
@@ -269,7 +328,7 @@ class UpdateDialog(QDialog):
         layout.setSpacing(3)
         caption_label = QLabel(caption)
         caption_label.setFont(self._ui_font(9))
-        caption_label.setStyleSheet(f"color: {Colors.TEXT_MUTED}; border: none;")
+        caption_label.setStyleSheet("color: #B8C7CB; border: none;")
         layout.addWidget(caption_label)
         label = value_label or QLabel(value)
         label.setText(value or label.text())
@@ -281,7 +340,28 @@ class UpdateDialog(QDialog):
         layout.addWidget(label)
         return frame
 
+    def set_checking(self):
+        """Render the checking state without starting external I/O."""
+        self._busy = True
+        self._set_state("checking")
+        self.header_title.setText("업데이트를 확인하고 있어요")
+        self.target_version_value.setText("확인 중")
+        self.status_label.setText("최신 버전을 확인하고 있어요")
+        self.status_label.setStyleSheet("color: #FFFFFF;")
+        self.status_detail.setText("잠시만 기다려 주세요.")
+        self.install_btn.setVisible(True)
+        self.install_btn.setText("확인 중")
+        self.install_btn.setEnabled(False)
+        self.close_btn.setVisible(True)
+        self.close_btn.setText("나중에")
+        self.close_btn.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+
     def _check_for_updates(self):
+        if self._check_thread is not None and self._check_thread.isRunning():
+            return
+        self.set_checking()
         self._check_thread = UpdateCheckThread(self.current_version)
         self._check_thread.update_found.connect(self._on_update_found)
         self._check_thread.no_update.connect(self._on_no_update)
@@ -289,8 +369,11 @@ class UpdateDialog(QDialog):
         self._check_thread.start()
 
     def _on_update_found(self, update_info):
+        self._busy = False
+        self._set_state("available")
         self.update_info = dict(update_info)
         version = str(update_info.get("version", "") or "").strip()
+        self.header_title.setText("새 업데이트가 준비되었습니다")
         self.target_version_value.setText(version or "새 버전")
         self.status_label.setText(f"{version or '새 버전'} 업데이트를 사용할 수 있어요")
         self.status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
@@ -299,18 +382,39 @@ class UpdateDialog(QDialog):
         self.status_detail.setText("업데이트 후 프로그램이 자동으로 다시 시작됩니다.")
         changelog = AutoUpdater.get_changelog_summary(update_info.get("changelog", ""))
         self.changelog_text.setPlainText(changelog or "안정성과 사용성을 개선했습니다.")
+        self.install_btn.setVisible(True)
+        self.install_btn.setText("지금 업데이트")
         self.install_btn.setEnabled(True)
+        self.manual_download_btn.setVisible(False)
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+        self.close_btn.setVisible(True)
+        self.close_btn.setText("나중에")
+        self.close_btn.setEnabled(True)
+        self.safety_label.setText("현재 대기열은 자동 저장됩니다. 설치 후 중단 지점부터 이어서 시작합니다.")
 
     def _on_no_update(self):
+        self._busy = False
+        self._set_state("latest")
+        self.header_title.setText("최신 버전을 사용 중입니다")
         self.target_version_value.setText(self.current_version)
         self.status_label.setText("현재 최신 버전을 사용하고 있어요")
         self.status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
         self.status_detail.setText("새 업데이트가 나오면 실행 중에도 자동으로 알려드릴게요.")
         self.changelog_text.setPlainText("추가로 설치할 업데이트가 없습니다.")
         self.install_btn.setVisible(False)
+        self.manual_download_btn.setVisible(False)
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+        self.close_btn.setVisible(True)
         self.close_btn.setText("확인")
+        self.close_btn.setEnabled(True)
+        self.safety_label.setText("추가로 설치할 항목이 없습니다. 새 버전이 있으면 실행 중에 알려드립니다.")
 
     def _on_check_error(self, error_message):
+        self._busy = False
+        self._set_state("error")
+        self.header_title.setText("업데이트를 확인하지 못했어요")
         self.target_version_value.setText("확인 실패")
         self.status_label.setText("업데이트 정보를 확인하지 못했어요")
         self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
@@ -321,17 +425,38 @@ class UpdateDialog(QDialog):
             )
         )
         self.changelog_text.setPlainText("잠시 후 다시 시도해 주세요.")
+        self.install_btn.setVisible(True)
+        self.install_btn.setText("다시 확인")
+        self.install_btn.setEnabled(True)
+        self.manual_download_btn.setVisible(False)
+        self.progress_bar.setVisible(False)
+        self.progress_label.setVisible(False)
+        self.close_btn.setVisible(True)
+        self.close_btn.setEnabled(True)
+        self.safety_label.setText("현재 작업과 대기열에는 영향이 없습니다. 네트워크를 확인한 뒤 다시 시도하세요.")
 
     def _request_install(self):
-        if self._busy or not isinstance(self.update_info, dict):
+        if self._busy:
+            return
+        if not isinstance(self.update_info, dict):
+            if self._state == "error":
+                self._check_for_updates()
             return
         self._busy = True
+        self._set_state("downloading")
+        self.header_title.setText("업데이트를 준비하고 있어요")
         self.manual_download_btn.setVisible(False)
         self.install_btn.setEnabled(False)
         self.close_btn.setEnabled(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(True)
+        self.progress_label.setText("0%")
+        self.progress_label.setVisible(True)
         self.status_label.setText("업데이트를 준비하고 있어요")
         self.status_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT};")
         self.status_detail.setText("현재 작업을 안전하게 확인한 뒤 다운로드를 시작합니다.")
+        self.safety_label.setText("현재 작업과 대기열을 저장했습니다. 안전하게 다운로드를 시작합니다.")
         self.install_requested.emit(dict(self.update_info))
 
     def _open_manual_download(self):
@@ -345,23 +470,40 @@ class UpdateDialog(QDialog):
     def set_download_progress(self, percent):
         value = max(0, min(100, int(float(percent or 0))))
         self._busy = True
+        self._set_state("downloading")
+        self.header_title.setText("업데이트를 내려받고 있어요")
         self.progress_bar.setVisible(True)
         self.progress_label.setVisible(True)
         self.progress_bar.setValue(value)
         self.progress_label.setText(f"{value}%")
         self.status_label.setText("업데이트를 내려받고 있어요")
         self.status_detail.setText("완료되면 설치 프로그램이 자동으로 시작됩니다.")
+        self.safety_label.setText("다운로드 중에도 저장된 대기열은 보호됩니다.")
+        self.install_btn.setText("다운로드 중")
+        self.install_btn.setEnabled(False)
+        self.close_btn.setVisible(True)
+        self.close_btn.setText("닫기")
+        self.close_btn.setEnabled(True)
 
     def set_installing(self):
         self._busy = True
+        self._set_state("installing")
+        self.header_title.setText("새 버전을 설치하고 있어요")
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.progress_label.setVisible(False)
         self.status_label.setText("설치를 시작하고 있어요")
         self.status_detail.setText("잠시 후 프로그램이 종료되고 새 버전으로 다시 실행됩니다.")
+        self.safety_label.setText("설치가 완료되면 프로그램이 재시작되고 중단 지점을 복원합니다.")
+        self.install_btn.setText("설치 중")
+        self.install_btn.setEnabled(False)
+        self.close_btn.setVisible(False)
+        self.close_btn.setEnabled(False)
 
     def set_install_error(self, message):
         self._busy = False
+        self._set_state("error")
+        self.header_title.setText("업데이트를 완료하지 못했어요")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
@@ -375,7 +517,9 @@ class UpdateDialog(QDialog):
         )
         self.install_btn.setText("다시 시도")
         self.install_btn.setEnabled(True)
+        self.close_btn.setVisible(True)
         self.close_btn.setEnabled(True)
+        self.safety_label.setText("저장된 작업은 유지됩니다. 재시도하거나 공식 설치 파일을 사용하세요.")
         download_url = (
             str(self.update_info.get("download_url", "") or "").strip()
             if isinstance(self.update_info, dict)

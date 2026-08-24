@@ -1,152 +1,201 @@
-"""Thread Auto desktop design system.
+"""Thread Auto's *Editorial Control Room* desktop design system.
 
-Nordic Bento uses a cool paper canvas, white cards and a deep teal action
-color.  Every screen consumes the same semantic tokens so dialogs, settings,
-tables and the automation workspace remain visually consistent.
+The public token names in this module pre-date the redesign and are imported
+throughout the application.  They deliberately remain available as semantic
+aliases, while the canonical palette below mirrors the implementation
+blueprint.  Keeping the aliases here lets existing screens adopt the redesign
+without duplicating raw colour values or breaking callers.
 """
 
 
 class Colors:
-    """Nordic Bento light palette with WCAG-friendly text contrast."""
+    """Canonical palette plus backwards-compatible semantic aliases."""
 
-    BG_DARK = "#EDF1F3"
-    BG_CARD = "#FFFFFF"
-    BG_INPUT = "#F6F9FA"
-    BG_ELEVATED = "#E8EEF1"
-    BG_HOVER = "#DEE7EB"
-    BG_TERMINAL = "#F1F5F6"
-    BG_SURFACE = "#F8FAFB"
-    BG_SIDEBAR = "#F7F9FA"
-    BG_HEADER = "#F9FBFC"
+    # Canonical blueprint tokens.  Do not replace these with page-local hues.
+    INK = "#101C24"
+    PORCELAIN = "#F4F1EA"
+    PAPER = "#FFFEFB"
+    SLATE = "#52636D"
+    LINE = "#D7DDD9"
+    SIGNAL_TEAL = "#0D7C84"
+    DEEP_TEAL = "#075D63"
+    AMBER = "#F2A93B"
+    CORAL = "#D9544D"
+    EMERALD = "#27856A"
+    SKY = "#DCEFF1"
 
-    ACCENT = "#176B87"
-    ACCENT_LIGHT = "#0F607B"
-    ACCENT_DARK = "#0D536B"
-    ACCENT_GLOW = "rgba(23, 107, 135, 0.14)"
-    ACCENT_SHADOW = "rgba(23, 107, 135, 0.24)"
-    ACCENT_SUBTLE = "rgba(23, 107, 135, 0.10)"
+    # Legacy/public semantic names used by MainWindow, LoginWindow and dialogs.
+    BG_DARK = PORCELAIN
+    BG_CARD = PAPER
+    BG_INPUT = "#FBFAF6"
+    BG_ELEVATED = "#ECE9E1"
+    BG_HOVER = SKY
+    BG_TERMINAL = INK
+    BG_SURFACE = PAPER
+    BG_SIDEBAR = INK
+    BG_HEADER = PAPER
 
-    SUCCESS = "#237A58"
-    SUCCESS_BG = "rgba(35, 122, 88, 0.10)"
-    SUCCESS_BORDER = "rgba(35, 122, 88, 0.28)"
-    WARNING = "#A86400"
-    WARNING_BG = "rgba(168, 100, 0, 0.10)"
-    WARNING_BORDER = "rgba(168, 100, 0, 0.28)"
-    ERROR = "#C23F49"
-    ERROR_BG = "rgba(194, 63, 73, 0.10)"
-    ERROR_BORDER = "rgba(194, 63, 73, 0.28)"
-    INFO = "#176B87"
-    INFO_BG = "rgba(23, 107, 135, 0.10)"
-    INFO_BORDER = "rgba(23, 107, 135, 0.28)"
+    ACCENT = SIGNAL_TEAL
+    ACCENT_LIGHT = SIGNAL_TEAL
+    ACCENT_DARK = DEEP_TEAL
+    ACCENT_GLOW = "rgba(13, 124, 132, 0.14)"
+    ACCENT_SHADOW = "rgba(7, 93, 99, 0.22)"
+    ACCENT_SUBTLE = "rgba(13, 124, 132, 0.10)"
 
-    TEXT_PRIMARY = "#17272F"
-    TEXT_SECONDARY = "#344B55"
-    TEXT_MUTED = "#5E7078"
-    TEXT_PLACEHOLDER = "#5D6F78"
-    TEXT_ACCENT = "#0F607B"
-    TEXT_BRIGHT = "#FFFFFF"
+    SUCCESS = EMERALD
+    SUCCESS_BG = "rgba(39, 133, 106, 0.12)"
+    SUCCESS_BORDER = "rgba(39, 133, 106, 0.34)"
+    WARNING = AMBER
+    WARNING_BG = "rgba(242, 169, 59, 0.16)"
+    WARNING_BORDER = "rgba(242, 169, 59, 0.42)"
+    ERROR = CORAL
+    ERROR_BG = "rgba(217, 84, 77, 0.12)"
+    ERROR_BORDER = "rgba(217, 84, 77, 0.38)"
+    INFO = SIGNAL_TEAL
+    INFO_BG = SKY
+    INFO_BORDER = "rgba(13, 124, 132, 0.32)"
 
-    BORDER = "#CBD5DA"
-    BORDER_LIGHT = "#A9B8C0"
-    BORDER_ACTIVE = "#176B87"
-    BORDER_SUBTLE = "#DDE4E7"
+    TEXT_PRIMARY = INK
+    TEXT_SECONDARY = SLATE
+    TEXT_MUTED = "#5E6D74"
+    TEXT_PLACEHOLDER = "#5E6D74"
+    TEXT_ACCENT = DEEP_TEAL
+    TEXT_BRIGHT = PAPER
+    TEXT_ON_INK = PAPER
+    TEXT_ON_INK_MUTED = "#B8C7CB"
 
-    SCROLLBAR = "#B8C5CB"
-    SCROLLBAR_HOVER = "#8799A2"
-    SHADOW = "rgba(56, 73, 81, 0.18)"
-    OVERLAY = "rgba(23, 39, 47, 0.72)"
+    BORDER = LINE
+    BORDER_LIGHT = "#BCC7C4"
+    BORDER_ACTIVE = SIGNAL_TEAL
+    BORDER_SUBTLE = "#E7E8E2"
+
+    SCROLLBAR = "#B9C3C0"
+    SCROLLBAR_HOVER = SLATE
+    SHADOW = "rgba(16, 28, 36, 0.16)"
+    OVERLAY = "rgba(16, 28, 36, 0.74)"
 
 
 class Typography:
     """Korean desktop type scale, resolved at runtime by ``resolve_fonts``."""
-    FAMILY = "Segoe UI"
+    FAMILY = "Pretendard"
     FAMILY_MONO = "Consolas"
 
-    TITLE_XL = f"font-family: {FAMILY}; font-size: 22pt; font-weight: 700; letter-spacing: -0.5px;"
-    TITLE_LG = f"font-family: {FAMILY}; font-size: 18pt; font-weight: 700; letter-spacing: -0.35px;"
-    TITLE_MD = f"font-family: {FAMILY}; font-size: 16pt; font-weight: 700; letter-spacing: -0.2px;"
-    TITLE_SM = f"font-family: {FAMILY}; font-size: 12pt; font-weight: 700;"
-    BODY = f"font-family: {FAMILY}; font-size: 10.5pt; font-weight: 400;"
-    BODY_SM = f"font-family: {FAMILY}; font-size: 10pt; font-weight: 400;"
-    CAPTION = f"font-family: {FAMILY}; font-size: 9.5pt; font-weight: 500;"
-    MONO = f"font-family: {FAMILY_MONO}; font-size: 9.5pt;"
+    DISPLAY_SIZE = 26
+    PAGE_TITLE_SIZE = 22
+    SECTION_SIZE = 17
+    BODY_SIZE = 14
+    CAPTION_SIZE = 12
+    MONO_SIZE = 12
+
+    DISPLAY = f"font-family: {FAMILY}; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;"
+    PAGE_TITLE = f"font-family: {FAMILY}; font-size: 22px; font-weight: 700; letter-spacing: -0.35px;"
+    SECTION = f"font-family: {FAMILY}; font-size: 17px; font-weight: 700; letter-spacing: -0.2px;"
+    BODY = f"font-family: {FAMILY}; font-size: 14px; font-weight: 400;"
+    CAPTION = f"font-family: {FAMILY}; font-size: 12px; font-weight: 500;"
+    MONO = f"font-family: {FAMILY_MONO}; font-size: 12px;"
+
+    # Compatibility aliases for the existing view layer.
+    TITLE_XL = PAGE_TITLE
+    TITLE_LG = PAGE_TITLE
+    TITLE_MD = SECTION
+    TITLE_SM = SECTION
+    BODY_SM = BODY
 
 
 class Radius:
-    SM = "6px"
-    MD = "9px"
-    LG = "14px"
-    XL = "18px"
-    XXL = "22px"
-    PILL = "100px"
+    """Blueprint radii: input 8, card 12 and hero/modal 16 DIP."""
+
+    INPUT = "8px"
+    CARD = "12px"
+    HERO = "16px"
+
+    # Compatibility aliases.
+    SM = INPUT
+    MD = INPUT
+    LG = CARD
+    XL = HERO
+    XXL = HERO
+    PILL = "999px"
 
 
 class Spacing:
-    """Consistent spacing scale (4px base)."""
+    """Editorial spacing scale in device-independent pixels."""
     XS = 4
     SM = 8
     MD = 12
     LG = 16
-    XL = 20
-    XXL = 24
-    XXXL = 32
+    XL = 24
+    XXL = 32
+    XXXL = 48
+
+    SPACE_4 = XS
+    SPACE_8 = SM
+    SPACE_12 = MD
+    SPACE_16 = LG
+    SPACE_24 = XL
+    SPACE_32 = XXL
+    SPACE_48 = XXXL
+
+
+class ControlHeight:
+    """Shared control heights in logical DIP (Qt handles DPI scaling)."""
+
+    ICON = 40
+    INPUT = 44
+    PRIMARY = 48
+    FIXED_FOOTER = 64
+
+
+class Breakpoints:
+    """Responsive contract from the blueprint, expressed in logical DIP."""
+
+    MINIMUM_WIDTH = 760
+    MINIMUM_HEIGHT = 560
+    STANDARD_WIDTH = 900
+    WIDE_WIDTH = 1180
+
+    NAV_COMPACT = 72
+    NAV_STANDARD = 190
+    NAV_WIDE = 240
+    CTA_SAFE_AREA = ControlHeight.FIXED_FOOTER
+
+    DPI_QA_SCALES = (100, 125, 150, 175, 200)
+
+    @classmethod
+    def navigation_width(cls, viewport_width: int) -> int:
+        """Return the layout width; never multiply it by devicePixelRatio."""
+
+        if viewport_width >= cls.WIDE_WIDTH:
+            return cls.NAV_WIDE
+        if viewport_width >= cls.STANDARD_WIDTH:
+            return cls.NAV_STANDARD
+        return cls.NAV_COMPACT
 
 
 class Shadows:
     """Box shadow presets (CSS-like, for custom painting)."""
-    CARD = (0, 2, 10, "rgba(56, 73, 81, 0.10)")
-    ELEVATED = (0, 6, 20, "rgba(56, 73, 81, 0.14)")
-    DROPDOWN = (0, 10, 28, "rgba(56, 73, 81, 0.18)")
-    GLOW_ACCENT = (0, 0, 14, "rgba(23, 107, 135, 0.20)")
-    GLOW_SUCCESS = (0, 0, 12, "rgba(35, 122, 88, 0.18)")
-    GLOW_ERROR = (0, 0, 12, "rgba(194, 63, 73, 0.18)")
+    CARD = (0, 2, 10, "rgba(16, 28, 36, 0.08)")
+    ELEVATED = (0, 6, 20, "rgba(16, 28, 36, 0.12)")
+    DROPDOWN = (0, 10, 28, "rgba(16, 28, 36, 0.16)")
+    GLOW_ACCENT = (0, 0, 14, "rgba(13, 124, 132, 0.20)")
+    GLOW_SUCCESS = (0, 0, 12, "rgba(39, 133, 106, 0.18)")
+    GLOW_ERROR = (0, 0, 12, "rgba(217, 84, 77, 0.18)")
 
 
 class Gradients:
-    """Low-contrast gradients used only for hierarchy, never decoration."""
+    """Compatibility paint values for a deliberately near-flat interface."""
 
-    # Buttons — restrained Nordic teal
-    ACCENT_BTN = (
-        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 #1C7897, stop:1 {Colors.ACCENT})"
-    )
-    ACCENT_BTN_HOVER = (
-        "qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        "stop:0 #2387A8, stop:1 #1C7897)"
-    )
-    ACCENT_BTN_PRESSED = (
-        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 {Colors.ACCENT_DARK}, stop:1 #0A465B)"
-    )
-
-    # Header — paper white, near-flat
-    HEADER = (
-        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 {Colors.BG_HEADER}, stop:1 {Colors.BG_DARK})"
-    )
-    HEADER_ACCENT = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 rgba(23, 107, 135, 0), stop:0.3 {Colors.ACCENT}, "
-        f"stop:0.7 {Colors.ACCENT_LIGHT}, stop:1 rgba(23, 107, 135, 0))"
-    )
-
-    # Progress
-    PROGRESS = (
-        f"qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-        f"stop:0 {Colors.ACCENT}, stop:1 {Colors.ACCENT_LIGHT})"
-    )
-
-    # Surface
-    CARD_SUBTLE = (
-        f"qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-        f"stop:0 {Colors.BG_CARD}, stop:1 {Colors.BG_SURFACE})"
-    )
-
-    # Login splash — cool Nordic teal wash
-    LOGIN_SPLASH = (
-        "qlineargradient(x1:0, y1:0, x2:1, y2:1, "
-        "stop:0 #142A34, stop:0.48 #17526A, stop:0.82 #176B87, stop:1 #0D536B)"
-    )
+    # The editorial language relies on colour blocks rather than decorative
+    # gradients.  These names remain because several existing screens consume
+    # them through QSS ``background`` declarations.
+    ACCENT_BTN = Colors.SIGNAL_TEAL
+    ACCENT_BTN_HOVER = Colors.DEEP_TEAL
+    ACCENT_BTN_PRESSED = Colors.INK
+    HEADER = Colors.PAPER
+    HEADER_ACCENT = Colors.SIGNAL_TEAL
+    PROGRESS = Colors.SIGNAL_TEAL
+    CARD_SUBTLE = Colors.PAPER
+    LOGIN_SPLASH = Colors.INK
 
 
 class Timing:
@@ -206,24 +255,35 @@ def stat_card_style(color):
 
 
 def ghost_btn_style():
-    """Ghost button using the shared desktop control scale."""
+    """Secondary action with a visible keyboard-focus treatment."""
     return f"""
         QPushButton {{
             background-color: transparent;
             color: {Colors.TEXT_SECONDARY};
             border: 1px solid {Colors.BORDER_LIGHT};
             border-radius: {Radius.MD};
-            padding: 9px 16px;
+            padding: 0 16px;
+            min-height: {ControlHeight.ICON}px;
             font-weight: 600;
             font-size: 10.5pt;
         }}
         QPushButton:hover {{
-            background-color: {Colors.BG_ELEVATED};
+            background-color: {Colors.SKY};
             color: {Colors.TEXT_PRIMARY};
             border-color: {Colors.ACCENT};
         }}
+        QPushButton:focus {{
+            background-color: {Colors.SKY};
+            color: {Colors.TEXT_PRIMARY};
+            border: 2px solid {Colors.ACCENT};
+        }}
         QPushButton:pressed {{
-            background-color: {Colors.BG_HOVER};
+            background-color: {Colors.BG_ELEVATED};
+        }}
+        QPushButton:disabled {{
+            background-color: {Colors.BG_ELEVATED};
+            color: {Colors.TEXT_MUTED};
+            border-color: {Colors.BORDER};
         }}
     """
 
@@ -235,35 +295,47 @@ def accent_btn_style(use_gradient=True):
             QPushButton {{
                 background: {Gradients.ACCENT_BTN};
                 color: {Colors.TEXT_BRIGHT};
-                border: none;
+                border: 2px solid {Colors.ACCENT};
                 border-radius: {Radius.MD};
-                padding: 11px 28px;
+                padding: 0 28px;
+                min-height: {ControlHeight.PRIMARY}px;
                 font-weight: 600;
                 font-size: 11pt;
             }}
             QPushButton:hover {{
                 background: {Gradients.ACCENT_BTN_HOVER};
+                border-color: {Colors.ACCENT_DARK};
+            }}
+            QPushButton:focus {{
+                background: {Gradients.ACCENT_BTN};
+                border: 2px solid {Colors.INK};
             }}
             QPushButton:pressed {{
                 background: {Gradients.ACCENT_BTN_PRESSED};
+                border-color: {Colors.INK};
             }}
             QPushButton:disabled {{
                 background-color: {Colors.BG_ELEVATED};
                 color: {Colors.TEXT_MUTED};
+                border-color: {Colors.BORDER};
             }}
         """
     return f"""
         QPushButton {{
             background-color: {Colors.ACCENT};
             color: {Colors.TEXT_BRIGHT};
-            border: none;
+            border: 2px solid {Colors.ACCENT};
             border-radius: {Radius.MD};
-            padding: 11px 28px;
+            padding: 0 28px;
+            min-height: {ControlHeight.PRIMARY}px;
             font-weight: 600;
             font-size: 11pt;
         }}
         QPushButton:hover {{
             background-color: {Colors.ACCENT_LIGHT};
+        }}
+        QPushButton:focus {{
+            border: 2px solid {Colors.INK};
         }}
         QPushButton:pressed {{
             background-color: {Colors.ACCENT_DARK};
@@ -271,6 +343,7 @@ def accent_btn_style(use_gradient=True):
         QPushButton:disabled {{
             background-color: {Colors.BG_ELEVATED};
             color: {Colors.TEXT_MUTED};
+            border-color: {Colors.BORDER};
         }}
     """
 
@@ -283,7 +356,8 @@ def outline_btn_style(color):
             color: {color};
             border: 1px solid {color};
             border-radius: {Radius.MD};
-            padding: 10px 20px;
+            padding: 0 20px;
+            min-height: {ControlHeight.ICON}px;
             font-weight: 600;
             font-size: 10.5pt;
         }}
@@ -294,6 +368,11 @@ def outline_btn_style(color):
         QPushButton:pressed {{
             background-color: {color};
             color: {Colors.TEXT_BRIGHT};
+        }}
+        QPushButton:focus {{
+            background-color: {Colors.BG_CARD};
+            color: {color};
+            border: 2px solid {color};
         }}
         QPushButton:disabled {{
             background-color: {Colors.BG_ELEVATED};
@@ -308,9 +387,10 @@ def input_style():
     return f"""
         QLineEdit {{
             background-color: {Colors.BG_INPUT};
-            border: 2px solid {Colors.BORDER};
+            border: 1px solid {Colors.BORDER};
             border-radius: {Radius.MD};
-            padding: 0;
+            padding: 0 14px;
+            min-height: {ControlHeight.INPUT}px;
             color: {Colors.TEXT_PRIMARY};
             font-size: 11pt;
         }}
@@ -321,6 +401,7 @@ def input_style():
         QLineEdit:disabled {{
             background-color: {Colors.BG_ELEVATED};
             color: {Colors.TEXT_MUTED};
+            border-color: {Colors.BORDER_SUBTLE};
         }}
         QLineEdit::placeholder {{
             color: {Colors.TEXT_PLACEHOLDER};
@@ -373,6 +454,12 @@ def close_btn_style():
             background-color: {Colors.BG_ELEVATED};
             color: {Colors.TEXT_PRIMARY};
         }}
+        QPushButton:focus {{
+            background-color: {Colors.SKY};
+            color: {Colors.TEXT_PRIMARY};
+            border: 2px solid {Colors.ACCENT};
+        }}
+        QPushButton:disabled {{ color: {Colors.BORDER_LIGHT}; }}
     """
 
 
@@ -397,6 +484,10 @@ def tab_widget_style():
             color: {Colors.TEXT_SECONDARY};
             background-color: {Colors.BG_ELEVATED};
         }}
+        QTabBar::tab:focus {{
+            color: {Colors.TEXT_PRIMARY};
+            border: 2px solid {Colors.ACCENT};
+        }}
         QTabBar::tab:selected {{
             color: {Colors.TEXT_BRIGHT};
             background-color: {Colors.ACCENT};
@@ -411,7 +502,7 @@ def terminal_text_style():
             border: 1px solid {Colors.BORDER};
             border-radius: {Radius.LG};
             padding: 14px;
-            color: {Colors.TEXT_SECONDARY};
+            color: {Colors.TEXT_ON_INK_MUTED};
             font-family: {Typography.FAMILY_MONO};
             font-size: 9.5pt;
             selection-background-color: {Colors.ACCENT};
@@ -426,7 +517,7 @@ def progress_bar_style():
             background-color: {Colors.BG_INPUT};
             border: 1px solid {Colors.BORDER};
             border-radius: 7px;
-            height: 24px;
+            min-height: 24px;
             text-align: center;
             color: {Colors.TEXT_SECONDARY};
             font-size: 9.5pt;
@@ -465,6 +556,11 @@ def window_control_btn_style(is_close=False):
             color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; padding: 0; min-height: 0;
         }}
         QPushButton:hover {{ background: {hover_bg}; color: {hover_color}; }}
+        QPushButton:focus {{
+            background: {hover_bg}; color: {hover_color};
+            border: 2px solid {Colors.ACCENT};
+        }}
+        QPushButton:disabled {{ color: {Colors.BORDER_LIGHT}; }}
     """
 
 
@@ -472,7 +568,7 @@ def window_control_btn_style(is_close=False):
 
 
 def global_stylesheet():
-    """Application-wide base stylesheet — Nordic Bento."""
+    """Application-wide base stylesheet for Editorial Control Room."""
     c = Colors
     r = Radius
     t = Typography
@@ -497,9 +593,9 @@ def global_stylesheet():
 
         /* ===== Scrollbar ===== */
         QScrollBar:vertical {{
-            background: transparent;
-            width: 8px;
-            margin: 4px 2px;
+            background: {c.BG_ELEVATED};
+            width: 10px;
+            margin: 3px 1px;
         }}
         QScrollBar::handle:vertical {{
             background: {c.SCROLLBAR};
@@ -531,7 +627,7 @@ def global_stylesheet():
 
         /* ===== Text Input ===== */
         QTextEdit, QPlainTextEdit {{
-            background-color: {c.BG_TERMINAL};
+            background-color: {c.BG_CARD};
             border: 1px solid {c.BORDER};
             border-radius: {r.LG};
             padding: 14px;
@@ -543,13 +639,19 @@ def global_stylesheet():
         }}
         QTextEdit:focus, QPlainTextEdit:focus {{
             border-color: {c.ACCENT};
-            border-width: 1.5px;
+            border-width: 2px;
+        }}
+        QTextEdit:disabled, QPlainTextEdit:disabled {{
+            background-color: {c.BG_ELEVATED};
+            color: {c.TEXT_MUTED};
+            border-color: {c.BORDER_SUBTLE};
         }}
         QLineEdit {{
             background-color: {c.BG_INPUT};
-            border: 2px solid {c.BORDER};
+            border: 1px solid {c.BORDER};
             border-radius: {r.MD};
-            padding: 8px 14px;
+            padding: 0 14px;
+            min-height: 42px;
             color: {c.TEXT_PRIMARY};
             font-size: 11pt;
         }}
@@ -561,6 +663,7 @@ def global_stylesheet():
         QLineEdit:disabled {{
             background-color: {c.BG_ELEVATED};
             color: {c.TEXT_MUTED};
+            border-color: {c.BORDER_SUBTLE};
         }}
         QLineEdit::placeholder {{
             color: {c.TEXT_PLACEHOLDER};
@@ -570,7 +673,7 @@ def global_stylesheet():
         QPushButton {{
             background: {g.ACCENT_BTN};
             color: {c.TEXT_BRIGHT};
-            border: none;
+            border: 2px solid {c.ACCENT};
             border-radius: {r.MD};
             padding: 9px 18px;
             min-height: 24px;
@@ -579,13 +682,20 @@ def global_stylesheet():
         }}
         QPushButton:hover {{
             background: {g.ACCENT_BTN_HOVER};
+            border-color: {c.ACCENT_DARK};
+        }}
+        QPushButton:focus {{
+            background: {g.ACCENT_BTN};
+            border: 2px solid {c.INK};
         }}
         QPushButton:pressed {{
             background: {g.ACCENT_BTN_PRESSED};
+            border-color: {c.INK};
         }}
         QPushButton:disabled {{
             background-color: {c.BG_ELEVATED};
             color: {c.TEXT_MUTED};
+            border-color: {c.BORDER};
         }}
 
         QPushButton[class="ghost"] {{
@@ -595,9 +705,14 @@ def global_stylesheet():
             padding: 9px 14px;        /* base QPushButton 28px padding override → 한국어 텍스트 잘림 방지 */
         }}
         QPushButton[class="ghost"]:hover {{
-            background-color: {c.BG_ELEVATED};
+            background-color: {c.SKY};
             color: {c.TEXT_PRIMARY};
             border-color: {c.ACCENT};
+        }}
+        QPushButton[class="ghost"]:focus {{
+            background-color: {c.SKY};
+            color: {c.TEXT_PRIMARY};
+            border: 2px solid {c.ACCENT};
         }}
 
         QPushButton[class="outline-danger"] {{
@@ -622,7 +737,7 @@ def global_stylesheet():
 
         /* ===== Lists ===== */
         QListWidget {{
-            background-color: {c.BG_INPUT};
+            background-color: {c.BG_CARD};
             border: 1px solid {c.BORDER};
             border-radius: {r.LG};
             padding: 6px;
@@ -634,8 +749,8 @@ def global_stylesheet():
             border-radius: {r.SM};
         }}
         QListWidget::item:selected {{
-            background-color: {c.ACCENT_GLOW};
-            color: {c.ACCENT_LIGHT};
+            background-color: {c.SKY};
+            color: {c.TEXT_PRIMARY};
         }}
         QListWidget::item:hover {{
             background-color: {c.BG_ELEVATED};
@@ -653,45 +768,13 @@ def global_stylesheet():
             qproperty-alignment: 'AlignVCenter | AlignLeft';
         }}
         QSpinBox:focus {{
-            border-color: {c.ACCENT};
+            border: 2px solid {c.ACCENT};
         }}
-        QSpinBox::up-button {{
-            subcontrol-origin: border;
-            subcontrol-position: top right;
+        QSpinBox:disabled {{
             background-color: {c.BG_ELEVATED};
-            border: none;
-            border-top-right-radius: {r.MD};
-            border-left: 1px solid {c.BORDER};
-            border-bottom: 1px solid {c.BORDER_SUBTLE};
-            width: 24px;
+            color: {c.TEXT_MUTED};
+            border-color: {c.BORDER_SUBTLE};
         }}
-        QSpinBox::down-button {{
-            subcontrol-origin: border;
-            subcontrol-position: bottom right;
-            background-color: {c.BG_ELEVATED};
-            border: none;
-            border-bottom-right-radius: {r.MD};
-            border-left: 1px solid {c.BORDER};
-            width: 24px;
-        }}
-        QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-            background-color: {c.ACCENT};
-        }}
-        QSpinBox::up-arrow {{
-            image: none;
-            width: 0; height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-bottom: 5px solid {c.TEXT_SECONDARY};
-        }}
-        QSpinBox::down-arrow {{
-            image: none;
-            width: 0; height: 0;
-            border-left: 4px solid transparent;
-            border-right: 4px solid transparent;
-            border-top: 5px solid {c.TEXT_SECONDARY};
-        }}
-
         /* ===== Checkbox ===== */
         QCheckBox {{
             color: {c.TEXT_PRIMARY};
@@ -711,6 +794,13 @@ def global_stylesheet():
         }}
         QCheckBox::indicator:hover {{
             border-color: {c.ACCENT};
+        }}
+        QCheckBox:focus {{ color: {c.TEXT_PRIMARY}; }}
+        QCheckBox::indicator:focus {{ border: 2px solid {c.ACCENT}; }}
+        QCheckBox:disabled {{ color: {c.TEXT_MUTED}; }}
+        QCheckBox::indicator:disabled {{
+            background-color: {c.BG_ELEVATED};
+            border-color: {c.BORDER};
         }}
 
         /* ===== RadioButton ===== */
@@ -733,6 +823,13 @@ def global_stylesheet():
         QRadioButton::indicator:hover {{
             border-color: {c.ACCENT};
         }}
+        QRadioButton:focus {{ color: {c.TEXT_PRIMARY}; }}
+        QRadioButton::indicator:focus {{ border: 2px solid {c.ACCENT}; }}
+        QRadioButton:disabled {{ color: {c.TEXT_MUTED}; }}
+        QRadioButton::indicator:disabled {{
+            background-color: {c.BG_ELEVATED};
+            border-color: {c.BORDER};
+        }}
 
         /* ===== ComboBox ===== */
         QComboBox {{
@@ -744,7 +841,12 @@ def global_stylesheet():
             font-size: 10.5pt;
         }}
         QComboBox:focus {{
-            border-color: {c.ACCENT};
+            border: 2px solid {c.ACCENT};
+        }}
+        QComboBox:disabled {{
+            background-color: {c.BG_ELEVATED};
+            color: {c.TEXT_MUTED};
+            border-color: {c.BORDER_SUBTLE};
         }}
         QComboBox::drop-down {{
             border: none;
@@ -756,8 +858,28 @@ def global_stylesheet():
             border-radius: {r.MD};
             padding: 4px;
             color: {c.TEXT_PRIMARY};
-            selection-background-color: {c.ACCENT_GLOW};
-            selection-color: {c.ACCENT_LIGHT};
+            selection-background-color: {c.SKY};
+            selection-color: {c.TEXT_PRIMARY};
+        }}
+
+        /* ===== Editorial tables ===== */
+        QTableView, QTableWidget {{
+            background-color: {c.BG_CARD};
+            alternate-background-color: {c.BG_INPUT};
+            color: {c.TEXT_PRIMARY};
+            border: 1px solid {c.BORDER};
+            border-radius: {r.CARD};
+            gridline-color: {c.BORDER_SUBTLE};
+            selection-background-color: {c.SKY};
+            selection-color: {c.TEXT_PRIMARY};
+        }}
+        QHeaderView::section {{
+            background-color: {c.BG_ELEVATED};
+            color: {c.TEXT_SECONDARY};
+            border: none;
+            border-bottom: 1px solid {c.BORDER};
+            padding: 8px 12px;
+            font-weight: 600;
         }}
 
         /* ===== ProgressBar ===== */
@@ -850,8 +972,9 @@ def resolve_fonts():
     from PyQt6.QtGui import QFontDatabase
     available = set(QFontDatabase.families())
 
-    ui_candidates = ["LINE Seed Sans KR", "LINE Seed Sans KR OTF",
-                     "Pretendard", "SUIT", "Noto Sans KR", "맑은 고딕",
+    ui_candidates = ["Pretendard", "Pretendard Variable",
+                     "LINE Seed Sans KR", "LINE Seed Sans KR OTF",
+                     "SUIT", "Noto Sans KR", "맑은 고딕",
                      "Malgun Gothic", "Apple SD Gothic Neo", "Inter",
                      "Segoe UI Variable", "Segoe UI"]
     for name in ui_candidates:
@@ -859,7 +982,7 @@ def resolve_fonts():
             Typography.FAMILY = name
             break
 
-    mono_candidates = ["JetBrains Mono", "Cascadia Code", "Consolas", "Courier New"]
+    mono_candidates = ["Consolas", "JetBrains Mono", "Cascadia Code", "Courier New"]
     for name in mono_candidates:
         if name in available:
             Typography.FAMILY_MONO = name
@@ -867,11 +990,21 @@ def resolve_fonts():
 
     f = Typography.FAMILY
     fm = Typography.FAMILY_MONO
-    Typography.TITLE_XL = f"font-family: {f}; font-size: 22pt; font-weight: 700; letter-spacing: -0.5px;"
-    Typography.TITLE_LG = f"font-family: {f}; font-size: 18pt; font-weight: 700; letter-spacing: -0.35px;"
-    Typography.TITLE_MD = f"font-family: {f}; font-size: 16pt; font-weight: 700; letter-spacing: -0.2px;"
-    Typography.TITLE_SM = f"font-family: {f}; font-size: 12pt; font-weight: 700;"
-    Typography.BODY = f"font-family: {f}; font-size: 10.5pt; font-weight: 400;"
-    Typography.BODY_SM = f"font-family: {f}; font-size: 10pt; font-weight: 400;"
-    Typography.CAPTION = f"font-family: {f}; font-size: 9.5pt; font-weight: 500;"
-    Typography.MONO = f"font-family: {fm}; font-size: 9.5pt;"
+    Typography.DISPLAY = (
+        f"font-family: {f}; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;"
+    )
+    Typography.PAGE_TITLE = (
+        f"font-family: {f}; font-size: 22px; font-weight: 700; letter-spacing: -0.35px;"
+    )
+    Typography.SECTION = (
+        f"font-family: {f}; font-size: 17px; font-weight: 700; letter-spacing: -0.2px;"
+    )
+    Typography.BODY = f"font-family: {f}; font-size: 14px; font-weight: 400;"
+    Typography.CAPTION = f"font-family: {f}; font-size: 12px; font-weight: 500;"
+    Typography.MONO = f"font-family: {fm}; font-size: 12px;"
+
+    Typography.TITLE_XL = Typography.PAGE_TITLE
+    Typography.TITLE_LG = Typography.PAGE_TITLE
+    Typography.TITLE_MD = Typography.SECTION
+    Typography.TITLE_SM = Typography.SECTION
+    Typography.BODY_SM = Typography.BODY

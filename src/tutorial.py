@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 사용법 안내 - 튜토리얼 다이얼로그 & 오버레이
 쇼핑 상품 스레드 자동화의 모든 기능을 단계별로 설명합니다.
@@ -6,17 +5,30 @@
 오버레이 모드: 메인 윈도우의 실제 버튼/입력창 위치를 직접 하이라이트하여 안내합니다.
 다이얼로그 모드: [사용법] 버튼으로 열리는 독립 안내 창입니다.
 """
-from PyQt6.QtWidgets import QDialog, QLabel, QPushButton, QWidget, QCheckBox, QFrame
-from PyQt6.QtCore import Qt, QRectF, QRect, QPoint
-from PyQt6.QtGui import QColor, QPainter, QLinearGradient, QPen, QPainterPath, QFont
+from PyQt6.QtCore import QPoint, QRect, QRectF, Qt
+from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from src.app_icon import apply_window_icon
 from src.theme import (
-    Colors, Radius, Gradients,
-    close_btn_style, ghost_btn_style,
-    muted_text_style, header_title_style
+    Colors,
+    Gradients,
+    Radius,
+    close_btn_style,
+    ghost_btn_style,
+    header_title_style,
+    muted_text_style,
 )
-
 
 # ─── Tutorial Dialog Pages ─────────────────────────────────
 
@@ -363,137 +375,43 @@ class TutorialDialog(QDialog):
 
 OVERLAY_STEPS = [
     {
-        "widget": None,  # 전체 소개 (하이라이트 없음)
-        "title": "환영합니다!",
-        "desc": (
-            "여러 쇼핑몰의 상품 링크를 Threads에\n"
-            "자동으로 업로드하는 도구입니다.\n"
-            "\n"
-            "각 단계별로 실제 버튼과 입력창의\n"
-            "위치를 직접 보여드립니다."
-        ),
-        "tooltip_pos": "center",
-    },
-    {
-        "widget": "_header",
-        "title": "상단 헤더 영역",
-        "desc": (
-            "프로그램 이름과 현재 상태를\n"
-            "표시하는 헤더 영역입니다.\n"
-            "\n"
-            "우측에 상태 배지, 사용법/설정\n"
-            "버튼이 배치되어 있습니다."
-        ),
-        "tooltip_pos": "bottom",
-    },
-    {
         "widget": "_sidebar",
-        "title": "사이드바 메뉴",
-        "desc": (
-            "왼쪽 사이드바에서 원하는 메뉴를\n"
-            "클릭하여 각 페이지로 이동합니다.\n"
-            "\n"
-            "링크 입력 → 작업 로그 → 결과 확인\n"
-            "→ Threads 계정 → 설정"
-        ),
+        "title": "운영 흐름을 둘러보세요",
+        "desc": "운영 홈, 자동화, 작업 기록, Threads 계정과 설정을 한 곳에서 이동합니다.",
         "tooltip_pos": "right",
     },
     {
-        "widget": "tutorial_btn",
-        "title": "사용법 버튼",
-        "desc": (
-            "이 사용법 안내를 다시 볼 수 있습니다.\n"
-            "언제든 클릭하세요."
-        ),
-        "tooltip_pos": "bottom",
-    },
-    {
-        "widget": "status_badge",
-        "title": "상태 표시 배지",
-        "desc": (
-            "현재 프로그램 상태를 표시합니다.\n"
-            "\n"
-            "대기중 / 실행중 / 완료 / 오류 등\n"
-            "실시간으로 업데이트됩니다."
-        ),
-        "tooltip_pos": "bottom",
+        "widget": "_run_state_frame",
+        "title": "실행 준비를 확인하세요",
+        "desc": "연결 계정, 남은 작업량과 업로드 단계를 자동화 시작 전에 한 번에 확인할 수 있습니다.",
+        "tooltip_pos": "left",
+        "padding": 8,
     },
     {
         "widget": "links_text",
-        "title": "링크 입력란",
-        "desc": (
-            "제휴 프로그램에서 이미 발급받은 URL을\n"
-            "한 줄에 하나씩 붙여넣기 합니다.\n"
-            "\n"
-            "원본 제휴 URL은 게시물에 유지됩니다.\n"
-            "쿠팡 외 링크는 쇼핑 프로가 필요합니다."
-        ),
+        "title": "상품 링크를 붙여넣으세요",
+        "desc": "제휴 프로그램에서 발급한 URL을 한 줄에 하나씩 입력하면 채널과 오류를 즉시 검사합니다.",
         "tooltip_pos": "right",
-        "padding": 4,
+        "padding": 6,
     },
     {
         "widget": "start_btn",
-        "title": "자동화 시작 버튼",
-        "desc": (
-            "입력된 모든 링크를 순서대로\n"
-            "분석하고 Threads에 업로드합니다.\n"
-            "\n"
-            "시작 전 링크 개수와 업로드 간격을\n"
-            "확인하는 대화상자가 나타납니다."
-        ),
-        "tooltip_pos": "right",
+        "title": "확인 후 자동화를 시작하세요",
+        "desc": "실행 전 요약에서 링크 수와 간격을 확인한 뒤 분석, 글 생성, 업로드를 진행합니다.",
+        "tooltip_pos": "top",
     },
     {
-        "widget": "add_btn",
-        "title": "링크 추가 버튼",
-        "desc": (
-            "자동화 실행 중에만 활성화됩니다.\n"
-            "새로운 링크를 대기열에 추가할 수 있으며\n"
-            "중복 링크는 자동으로 제외됩니다."
-        ),
-        "tooltip_pos": "right",
-    },
-    {
-        "widget": "stop_btn",
-        "title": "중지 버튼",
-        "desc": (
-            "현재 진행 중인 작업을 마무리한 후\n"
-            "안전하게 자동화를 중지합니다.\n"
-            "즉시 중지가 아닌 안전한 중지입니다."
-        ),
-        "tooltip_pos": "right",
-    },
-    {
-        "widget": "_sidebar",
-        "title": "작업 로그 / 결과 확인",
-        "desc": (
-            "사이드바에서 [작업 로그]를 클릭하면\n"
-            "실시간 진행 상황을 확인할 수 있습니다.\n"
-            "\n"
-            "[결과 확인]에서 성공/실패/전체 통계와\n"
-            "처리된 항목 목록을 볼 수 있습니다."
-        ),
-        "tooltip_pos": "right",
-    },
-    {
-        "widget": None,  # 마지막 - 빠른 시작 요약
-        "title": "시작할 준비가 되었습니다!",
-        "desc": (
-            "빠른 시작 순서:\n"
-            "\n"
-            "1. 프로그램 로그인 및 이용량 확인\n"
-            "2. [Threads 계정] 페이지에서 로그인\n"
-            "3. [링크 입력] 페이지에서 링크 붙여넣기\n"
-            "4. [자동화 시작] 버튼 클릭"
-        ),
-        "tooltip_pos": "center",
+        "widget": "_settings_tab_bar",
+        "title": "언제든 설정을 조정할 수 있어요",
+        "desc": "계정 연결, 글쓰기 방식, AI와 앱 설정은 저장된 상태로 유지되며 화면 도움말은 F1로 다시 열 수 있습니다.",
+        "tooltip_pos": "bottom",
     },
 ]
 
 
 # ─── Tutorial Overlay Widget (위젯 하이라이트 방식) ──────────
 
-class TutorialOverlay(QWidget):
+class _LegacyTutorialOverlay(QWidget):
     """메인 윈도우의 실제 위젯을 하이라이트하는 튜토리얼 오버레이"""
 
     TOOLTIP_W = 340
@@ -849,6 +767,312 @@ class TutorialOverlay(QWidget):
 
     def _close_overlay(self):
         from src.config import config
+        if self._dont_show_again:
+            config.tutorial_shown = True
+            if not config.save():
+                config.load()
+        self.hide()
+
+    def mousePressEvent(self, event):
+        event.accept()
+
+
+class TutorialOverlay(QWidget):
+    """Canonical five-step contextual help overlay.
+
+    The card is layout-driven and clamped to the visible viewport, so Korean
+    copy and controls remain readable at the supported 760 x 560 minimum.
+    """
+
+    TOOLTIP_W = 340
+    TOOLTIP_H_MAX = 360
+    HIGHLIGHT_PAD = 6
+    EDGE_MARGIN = 20
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._step_index = 0
+        self._steps = OVERLAY_STEPS
+        self._dont_show_again = False
+        self._highlight_rect = None
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMouseTracking(True)
+        self.setAccessibleName("현재 화면 도움말")
+        self._build_ui()
+        self._update_step()
+
+    def show_overlay(self):
+        if self.parent():
+            self.setGeometry(self.parent().rect())
+        self.raise_()
+        self.show()
+        self.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    def _get_main_window(self):
+        widget = self.parent()
+        while widget:
+            if hasattr(widget, "_sidebar"):
+                return widget
+            widget = widget.parent() if hasattr(widget, "parent") else None
+        return None
+
+    def _get_highlight_rect(self):
+        step = self._steps[self._step_index]
+        widget_name = step.get("widget")
+        main_win = self._get_main_window()
+        if main_win is not None and hasattr(main_win, "_switch_page"):
+            settings_targets = {"_settings_tab_bar"}
+            automation_targets = {
+                "_run_state_frame",
+                "links_text",
+                "start_btn",
+            }
+            if widget_name in settings_targets:
+                main_win._switch_page(1, source="tutorial")
+            elif widget_name in automation_targets:
+                main_win._switch_page(0, source="tutorial")
+        target = getattr(main_win, widget_name, None) if main_win and widget_name else None
+        if target is None or not target.isVisible():
+            return None
+        if widget_name in {"_run_state_frame", "links_text"}:
+            scroll = getattr(main_win, "_link_scroll", None)
+            if scroll is not None:
+                scroll.ensureWidgetVisible(target, 12, 12)
+        pad = int(step.get("padding", self.HIGHLIGHT_PAD))
+        global_pos = target.mapToGlobal(QPoint(0, 0))
+        local_pos = self.mapFromGlobal(global_pos)
+        highlight = QRect(
+            local_pos.x() - pad,
+            local_pos.y() - pad,
+            target.width() + pad * 2,
+            target.height() + pad * 2,
+        )
+        return highlight.intersected(self.rect().adjusted(4, 4, -4, -4))
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        full = QPainterPath()
+        full.addRect(QRectF(self.rect()))
+        dim = QColor(16, 28, 36, 205)
+        if self._highlight_rect and not self._highlight_rect.isEmpty():
+            hole = QPainterPath()
+            hole.addRoundedRect(QRectF(self._highlight_rect), 12, 12)
+            painter.fillPath(full.subtracted(hole), dim)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor(37, 185, 188), 3))
+            painter.drawRoundedRect(QRectF(self._highlight_rect), 12, 12)
+
+            # A short connector keeps the relationship obvious without
+            # obscuring the highlighted control.
+            card = self.tooltip_card.geometry()
+            target = self._highlight_rect.center()
+            if card.center().x() <= target.x():
+                origin = QPoint(card.right(), card.center().y())
+            else:
+                origin = QPoint(card.left(), card.center().y())
+            painter.drawLine(origin, target)
+        else:
+            painter.fillPath(full, dim)
+
+    def _build_ui(self):
+        self.tooltip_card = QFrame(self)
+        self.tooltip_card.setObjectName("contextHelpCard")
+        self.tooltip_card.setStyleSheet(f"""
+            QFrame#contextHelpCard {{ background: {Colors.BG_CARD}; border: 2px solid {Colors.ACCENT};
+                border-radius: 14px; }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        card_layout = QVBoxLayout(self.tooltip_card)
+        card_layout.setContentsMargins(22, 20, 22, 18)
+        card_layout.setSpacing(8)
+        self._tooltip_layout = card_layout
+
+        self.step_label = QLabel()
+        self.step_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.step_label.setFixedSize(64, 28)
+        self.step_label.setFont(QFont("Pretendard", 9, QFont.Weight.Bold))
+        self.step_label.setStyleSheet(
+            f"background: {Colors.INFO_BG}; color: {Colors.ACCENT_LIGHT}; border-radius: 14px;"
+        )
+        card_layout.addWidget(self.step_label, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.title_label = QLabel()
+        self.title_label.setWordWrap(True)
+        self.title_label.setFont(QFont("Pretendard", 14, QFont.Weight.Bold))
+        self.title_label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY};")
+        card_layout.addWidget(self.title_label)
+
+        self.desc_label = QLabel()
+        self.desc_label.setWordWrap(True)
+        self.desc_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.desc_label.setFont(QFont("Pretendard", 10))
+        self.desc_label.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; line-height: 1.45;")
+        card_layout.addWidget(self.desc_label)
+
+        self.shortcut_label = QLabel("Esc로 언제든 닫을 수 있습니다.")
+        self.shortcut_label.setFont(QFont("Pretendard", 8))
+        self.shortcut_label.setStyleSheet(f"color: {Colors.TEXT_MUTED};")
+        card_layout.addWidget(self.shortcut_label)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        self.prev_btn = QPushButton("이전")
+        self.prev_btn.setMinimumSize(88, 44)
+        self.prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.prev_btn.setAccessibleName("이전 도움말 단계")
+        self.prev_btn.setStyleSheet(ghost_btn_style())
+        self.prev_btn.clicked.connect(self._prev_step)
+        button_row.addWidget(self.prev_btn)
+
+        self.next_btn = QPushButton("다음")
+        self.next_btn.setMinimumHeight(44)
+        self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.next_btn.setAccessibleName("다음 도움말 단계")
+        self.next_btn.setStyleSheet(f"""
+            QPushButton {{ background: {Gradients.ACCENT_BTN}; color: #FFFFFF; border: none;
+                border-radius: 8px; min-height: 44px; padding: 0 20px; font-weight: 700; }}
+            QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
+            QPushButton:focus {{ border: 2px solid {Colors.INK}; }}
+        """)
+        self.next_btn.clicked.connect(self._next_step)
+        button_row.addWidget(self.next_btn, 1)
+        card_layout.addLayout(button_row)
+
+        self.dont_show_check = QCheckBox("다시 보지 않기")
+        self.dont_show_check.setMinimumHeight(30)
+        self.dont_show_check.setStyleSheet(f"""
+            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; font-size: 9.5pt; spacing: 8px; }}
+            QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {Colors.BORDER_LIGHT};
+                border-radius: 5px; background: {Colors.BG_INPUT}; }}
+            QCheckBox::indicator:checked {{ background: {Colors.ACCENT}; border-color: {Colors.ACCENT}; }}
+        """)
+        self.dont_show_check.toggled.connect(self._on_dont_show_toggled)
+        card_layout.addWidget(self.dont_show_check)
+
+        self.skip_btn = QPushButton("도움말 닫기", self)
+        self.skip_btn.setAccessibleName("도움말 닫기")
+        self.skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.skip_btn.setFixedSize(112, 40)
+        self.skip_btn.setStyleSheet(
+            "QPushButton { background: rgba(16, 28, 36, 0.88); color: white; border: 1px solid #52636D;"
+            " border-radius: 8px; padding: 0; min-height: 40px; }"
+            "QPushButton:hover { background: #0D7C84; }"
+        )
+        self.skip_btn.clicked.connect(self._close_overlay)
+
+    def _position_tooltip(self):
+        width = max(1, self.width())
+        height = max(1, self.height())
+        card_w = max(280, min(self.TOOLTIP_W, width - self.EDGE_MARGIN * 2))
+        inner_w = max(220, card_w - 44)
+        self.title_label.setFixedWidth(inner_w)
+        self.desc_label.setFixedWidth(inner_w)
+        desc_bounds = self.desc_label.fontMetrics().boundingRect(
+            QRect(0, 0, inner_w, 1000),
+            int(Qt.TextFlag.TextWordWrap),
+            self.desc_label.text(),
+        )
+        self.desc_label.setFixedHeight(max(46, desc_bounds.height() + 4))
+        title_bounds = self.title_label.fontMetrics().boundingRect(
+            QRect(0, 0, inner_w, 200),
+            int(Qt.TextFlag.TextWordWrap),
+            self.title_label.text(),
+        )
+        self.title_label.setFixedHeight(max(28, title_bounds.height() + 2))
+        self._tooltip_layout.activate()
+        card_h = min(self.TOOLTIP_H_MAX, self.tooltip_card.sizeHint().height())
+
+        highlight = self._highlight_rect
+        position = self._steps[self._step_index].get("tooltip_pos", "right")
+        margin = 16
+        if highlight and not highlight.isEmpty():
+            if position == "right":
+                x, y = highlight.right() + margin, highlight.top()
+                if x + card_w > width - self.EDGE_MARGIN:
+                    x = highlight.left() - card_w - margin
+            elif position == "left":
+                x, y = highlight.left() - card_w - margin, highlight.top()
+                if x < self.EDGE_MARGIN:
+                    x = highlight.right() + margin
+            elif position == "top":
+                x, y = highlight.center().x() - card_w // 2, highlight.top() - card_h - margin
+                if y < self.EDGE_MARGIN:
+                    y = highlight.bottom() + margin
+            else:
+                x, y = highlight.center().x() - card_w // 2, highlight.bottom() + margin
+                if y + card_h > height - self.EDGE_MARGIN:
+                    y = highlight.top() - card_h - margin
+        else:
+            x, y = (width - card_w) // 2, (height - card_h) // 2
+
+        x = max(self.EDGE_MARGIN, min(int(x), width - card_w - self.EDGE_MARGIN))
+        y = max(self.EDGE_MARGIN, min(int(y), height - card_h - self.EDGE_MARGIN))
+        self.tooltip_card.setGeometry(x, y, card_w, card_h)
+        self.skip_btn.move(width - self.skip_btn.width() - 16, 16)
+
+    def _update_step(self):
+        step = self._steps[self._step_index]
+        is_last = self._step_index == len(self._steps) - 1
+        self._highlight_rect = self._get_highlight_rect()
+        self.step_label.setText(f"{self._step_index + 1} / {len(self._steps)}")
+        self.title_label.setText(step["title"])
+        self.desc_label.setText(step["desc"])
+        self.prev_btn.setEnabled(self._step_index > 0)
+        self.next_btn.setText("완료" if is_last else "다음")
+        self.dont_show_check.setVisible(is_last)
+        self._position_tooltip()
+        self.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._highlight_rect = self._get_highlight_rect()
+        self._position_tooltip()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
+            self._close_overlay()
+        elif key in (Qt.Key.Key_Left, Qt.Key.Key_Backspace, Qt.Key.Key_P):
+            self._prev_step()
+        elif key in (
+            Qt.Key.Key_Right,
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+            Qt.Key.Key_N,
+        ):
+            self._next_step()
+        elif key == Qt.Key.Key_Home:
+            self._step_index = 0
+            self._update_step()
+        elif key == Qt.Key.Key_End:
+            self._step_index = len(self._steps) - 1
+            self._update_step()
+        else:
+            super().keyPressEvent(event)
+            return
+        event.accept()
+
+    def _next_step(self):
+        if self._step_index < len(self._steps) - 1:
+            self._step_index += 1
+            self._update_step()
+        else:
+            self._close_overlay()
+
+    def _prev_step(self):
+        if self._step_index > 0:
+            self._step_index -= 1
+            self._update_step()
+
+    def _on_dont_show_toggled(self, checked):
+        self._dont_show_again = bool(checked)
+
+    def _close_overlay(self):
+        from src.config import config
+
         if self._dont_show_again:
             config.tutorial_shown = True
             if not config.save():

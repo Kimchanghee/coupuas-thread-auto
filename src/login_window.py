@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 로그인/회원가입 윈도우 (PyQt6)
 스레드 쇼핑 자동화 전용 - Nordic Bento 테마
@@ -8,26 +7,42 @@ import logging
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QStackedWidget,
-    QVBoxLayout, QHBoxLayout, QApplication, QScrollArea
-)
-from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer
-from PyQt6.QtGui import (
-    QFont, QPainter, QColor, QLinearGradient, QPen
-)
-from PyQt6.QtCore import QRectF
 
+from PyQt6.QtCore import QPointF, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QFont,
+    QLinearGradient,
+    QPainter,
+    QPolygonF,
+)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from src import auth_client
+from src.app_icon import apply_window_icon
 from src.theme import (
     Colors,
-    Typography,
     Gradients,
+    Typography,
     input_style,
     window_control_btn_style,
 )
-from src.app_icon import apply_window_icon
-from src import auth_client
+from src.ui_components import BrandMark
 from src.ui_messages import show_info, show_warning, user_friendly_message
 
 logger = logging.getLogger(__name__)
@@ -60,6 +75,7 @@ LEFT_PANEL_WIDTH = 300
 RIGHT_PANEL_WIDTH = WINDOW_WIDTH - LEFT_PANEL_WIDTH
 REGISTER_PAGE_HEIGHT = 980
 WEBSITE_BASE_URL = "https://coupuas-thread-auto-ten.vercel.app"
+COMPACT_BRAND_HEIGHT = 58
 
 
 def _resolve_app_version() -> str:
@@ -88,6 +104,79 @@ class UsernameCheckWorker(QThread):
     def run(self):
         result = auth_client.check_username(self.username)
         self.finished.emit(result.get("available", False), result.get("message", ""))
+
+
+class AuthBrandPanel(QFrame):
+    """Paints the wide authentication value proposition in its own surface."""
+
+    def __init__(self, version, parent=None):
+        super().__init__(parent)
+        self._version = version
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        width, height = self.width(), self.height()
+        fn = _get_font()
+
+        gradient = QLinearGradient(0, 0, width, height)
+        gradient.setColorAt(0, QColor("#101F27"))
+        gradient.setColorAt(0.68, QColor("#102730"))
+        gradient.setColorAt(1, QColor("#0D3138"))
+        painter.fillRect(self.rect(), gradient)
+        painter.fillRect(0, 0, width, 3, QColor("#25B9BC"))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#25B9BC"))
+        painter.drawRoundedRect(38, 42, 42, 42, 12, 12)
+        painter.setBrush(QColor("#FFFFFF"))
+        painter.drawPolygon(
+            QPolygonF(
+                [
+                    QPointF(62, 48),
+                    QPointF(50, 65),
+                    QPointF(58, 65),
+                    QPointF(54, 78),
+                    QPointF(68, 59),
+                    QPointF(60, 59),
+                ]
+            )
+        )
+        painter.setPen(QColor("#FFFFFF"))
+        painter.setFont(QFont(fn, 13, QFont.Weight.Bold))
+        painter.drawText(94, 51, width - 112, 22, Qt.AlignmentFlag.AlignVCenter, "THREAD AUTO")
+        painter.setPen(QColor("#A9C2C9"))
+        painter.setFont(QFont(fn, 7, QFont.Weight.DemiBold))
+        painter.drawText(94, 72, width - 112, 14, Qt.AlignmentFlag.AlignVCenter, "COMMERCE PUBLISHING OS")
+
+        painter.setPen(QColor("#FFFFFF"))
+        painter.setFont(QFont(fn, 17, QFont.Weight.Bold))
+        painter.drawText(38, 152, width - 68, 62, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "상품 링크에서\n게시까지 한 흐름으로.")
+        painter.setPen(QColor("#C3D4D9"))
+        painter.setFont(QFont(fn, 9))
+        painter.drawText(38, 224, width - 68, 48, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "여러 쇼핑 채널의 제휴 링크를 검사하고\nThreads 게시까지 자동화합니다.")
+
+        metrics_y = min(326, max(286, height - 380))
+        metrics = (("8", "지원 쇼핑 채널"), ("10", "Threads 계정"), ("4", "자동 복구 단계"))
+        for index, (value, label) in enumerate(metrics):
+            y = metrics_y + index * 58
+            painter.setPen(QColor("#25B9BC"))
+            painter.setFont(QFont(fn, 15, QFont.Weight.Bold))
+            painter.drawText(38, y, 42, 24, Qt.AlignmentFlag.AlignVCenter, value)
+            painter.setPen(QColor("#D8E4E7"))
+            painter.setFont(QFont(fn, 9, QFont.Weight.DemiBold))
+            painter.drawText(82, y, width - 106, 24, Qt.AlignmentFlag.AlignVCenter, label)
+
+        painter.setPen(QColor(169, 194, 201, 180))
+        painter.setFont(QFont(fn, 8))
+        version_text = (
+            f"Thread Auto v{self._version}"
+            if self._version and self._version.lower() != "unknown"
+            else "Thread Auto"
+        )
+        painter.drawText(38, height - 38, width - 68, 18, Qt.AlignmentFlag.AlignLeft, version_text)
 
 
 # ─── Login / Register Window ───────────────────────────────
@@ -125,32 +214,53 @@ class LoginWindow(QMainWindow):
         apply_window_icon(self)
 
         central = QWidget()
+        central.setObjectName("authRoot")
+        central.setStyleSheet(f"#authRoot {{ background: {Colors.BG_CARD}; }}")
         self.setCentralWidget(central)
 
-        # ─── Left Panel (Brand) ─────────────────────────────
-        self.left_panel = QFrame(central)
+        # Wide mode uses a persistent product story panel. Compact mode swaps it
+        # for a 58 DIP wordmark bar, leaving the full remaining height to forms.
+        self.left_panel = AuthBrandPanel(self._app_version, central)
+        self.left_panel.setObjectName("authBrandPanel")
         self.left_panel.setGeometry(0, 0, LEFT_PANEL_WIDTH, WINDOW_HEIGHT)
 
-        # ─── Right Panel (Forms) ────────────────────────────
         self.right_panel = QFrame(central)
+        self.right_panel.setObjectName("authFormPanel")
         self.right_panel.setGeometry(LEFT_PANEL_WIDTH, 0, RIGHT_PANEL_WIDTH, WINDOW_HEIGHT)
-        self.right_panel.setStyleSheet(f"background-color: {Colors.BG_DARK};")
+        self.right_panel.setStyleSheet(f"#authFormPanel {{ background-color: {Colors.BG_CARD}; }}")
 
-        # Stacked widget for login / register
+        self.compact_brand_bar = QFrame(central)
+        self.compact_brand_bar.setObjectName("compactBrandBar")
+        self.compact_brand_bar.setStyleSheet(
+            "#compactBrandBar { background: #101F27; border: none; }"
+        )
+        compact_brand_layout = QHBoxLayout(self.compact_brand_bar)
+        compact_brand_layout.setContentsMargins(20, 0, 100, 0)
+        compact_brand_layout.setSpacing(10)
+        compact_mark = BrandMark()
+        compact_mark.setFixedSize(34, 34)
+        compact_wordmark = QLabel("THREAD AUTO")
+        compact_wordmark.setFont(QFont(_get_font(), 13, QFont.Weight.Bold))
+        compact_wordmark.setStyleSheet("color: #FFFFFF; background: transparent;")
+        compact_brand_layout.addWidget(compact_mark)
+        compact_brand_layout.addWidget(compact_wordmark)
+        compact_brand_layout.addStretch(1)
+
         self._form_scroll = QScrollArea(self.right_panel)
         self._form_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._form_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._form_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._form_scroll.setStyleSheet(
-            f"QScrollArea {{ background-color: {Colors.BG_DARK}; border: none; }}"
-            f"QScrollBar:vertical {{ background: {Colors.BG_DARK}; width: 10px; }}"
+            f"QScrollArea {{ background-color: {Colors.BG_CARD}; border: none; }}"
+            f"QScrollBar:vertical {{ background: {Colors.BG_CARD}; width: 8px; }}"
             f"QScrollBar::handle:vertical {{ background: {Colors.BORDER_LIGHT}; border-radius: 5px; min-height: 28px; }}"
             "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
         )
-        self._form_scroll.viewport().setStyleSheet(f"background-color: {Colors.BG_DARK};")
+        self._form_scroll.viewport().setStyleSheet(f"background-color: {Colors.BG_CARD};")
 
         self.stack = QStackedWidget()
-        self.stack.setFixedSize(RIGHT_PANEL_WIDTH, WINDOW_HEIGHT)
+        self.stack.setObjectName("authStack")
+        self.stack.resize(RIGHT_PANEL_WIDTH, WINDOW_HEIGHT)
         self.stack.setStyleSheet("background: transparent;")
         self._form_scroll.setWidget(self.stack)
 
@@ -161,19 +271,27 @@ class LoginWindow(QMainWindow):
         self.stack.setCurrentIndex(0)
         self._on_auth_page_changed(0)
 
-        # ─── Window controls ────────────────────────────────
-        self.btn_minimize = QPushButton("─", central)
-        self.btn_minimize.setGeometry(WINDOW_WIDTH - 50, 8, 20, 20)
+        # 40 DIP targets remain operable at 200% Windows scaling.
+        self.btn_minimize = QPushButton("−", central)
+        self.btn_minimize.setGeometry(WINDOW_WIDTH - 88, 8, 40, 40)
+        self.btn_minimize.setAccessibleName("창 최소화")
+        self.btn_minimize.setFont(QFont("Segoe UI Symbol", 13, QFont.Weight.DemiBold))
         self.btn_minimize.setStyleSheet(window_control_btn_style(is_close=False))
         self.btn_minimize.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_minimize.clicked.connect(self.showMinimized)
 
-        self.btn_close = QPushButton("✕", central)
-        self.btn_close.setGeometry(WINDOW_WIDTH - 26, 8, 20, 20)
+        self.btn_close = QPushButton("×", central)
+        self.btn_close.setGeometry(WINDOW_WIDTH - 44, 8, 40, 40)
+        self.btn_close.setAccessibleName("창 닫기")
+        self.btn_close.setFont(QFont("Segoe UI Symbol", 15, QFont.Weight.DemiBold))
         self.btn_close.setStyleSheet(window_control_btn_style(is_close=True))
         self.btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_close.clicked.connect(self._close_app)
         self._relayout_window()
+        # Restore credentials before __init__ decides whether to schedule
+        # automatic login.  Loading them only after opening registration would
+        # leave the primary login surface blank on every app start.
+        self._load_saved_login()
 
     def _relayout_window(self):
         """Keep login usable on narrow or short logical work areas."""
@@ -183,13 +301,32 @@ class LoginWindow(QMainWindow):
         left_width = max(240, width - RIGHT_PANEL_WIDTH) if show_brand else 0
         right_width = min(RIGHT_PANEL_WIDTH, width)
         right_x = left_width if show_brand else max(0, (width - right_width) // 2)
+        compact_y = 0 if show_brand else COMPACT_BRAND_HEIGHT
+        form_height = max(1, height - compact_y)
         self._left_panel_width = left_width
         self.left_panel.setVisible(show_brand)
         self.left_panel.setGeometry(0, 0, left_width, height)
-        self.right_panel.setGeometry(right_x, 0, right_width, height)
-        self._form_scroll.setGeometry(0, 0, right_width, height)
-        self.btn_minimize.move(width - 50, 8)
-        self.btn_close.move(width - 26, 8)
+        self.compact_brand_bar.setVisible(not show_brand)
+        self.compact_brand_bar.setGeometry(right_x, 0, right_width, COMPACT_BRAND_HEIGHT)
+        self.right_panel.setGeometry(right_x, compact_y, right_width, form_height)
+        self._form_scroll.setGeometry(0, 0, right_width, form_height)
+        self.btn_minimize.setGeometry(width - 88, 8, 40, 40)
+        self.btn_close.setGeometry(width - 44, 8, 40, 40)
+        self._compact_mode = not show_brand
+        if hasattr(self, "_login_title"):
+            self._login_layout.setContentsMargins(40, 32 if self._compact_mode else 84, 40, 18)
+            self._login_title.setText(
+                "콘텐츠 운영을 시작하세요"
+                if self._compact_mode
+                else "다시 오신 것을 환영합니다"
+            )
+            self._login_subtitle.setText(
+                "저장된 작업과 연결 계정을 이어서 사용합니다."
+                if self._compact_mode
+                else "계정에 로그인하고 자동화를 이어가세요."
+            )
+            self._restore_notice.setVisible(not self._compact_mode)
+        self._on_auth_page_changed(self.stack.currentIndex())
         self.update()
 
     def resizeEvent(self, event):
@@ -198,128 +335,82 @@ class LoginWindow(QMainWindow):
             self._relayout_window()
 
     def _on_auth_page_changed(self, index: int) -> None:
-        """Give dense registration fields room and let the outer area scroll."""
-        self.stack.setFixedHeight(WINDOW_HEIGHT if int(index) == 0 else REGISTER_PAGE_HEIGHT)
-
-    # ─── Left Panel Paint ───────────────────────────────────
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        fn = _get_font()
-        panel_w = int(getattr(self, "_left_panel_width", LEFT_PANEL_WIDTH))
-        panel_h = self.height()
-        if panel_w <= 0:
+        """Size only the active auth flow; the compact login never scrolls."""
+        if not hasattr(self, "_form_scroll"):
             return
-
-        # Deep Nordic brand panel; the form surface remains bright and quiet.
-        grad = QLinearGradient(0, 0, panel_w, panel_h)
-        grad.setColorAt(0, QColor("#142A34"))
-        grad.setColorAt(0.55, QColor("#17526A"))
-        grad.setColorAt(1, QColor("#0D536B"))
-        painter.fillRect(0, 0, panel_w, panel_h, grad)
-
-        # Top accent line
-        top_grad = QLinearGradient(0, 0, panel_w, 0)
-        top_grad.setColorAt(0, QColor(167, 221, 231, 0))
-        top_grad.setColorAt(0.5, QColor("#A7DDE7"))
-        top_grad.setColorAt(1, QColor(167, 221, 231, 0))
-        painter.fillRect(0, 0, panel_w, 2, top_grad)
-
-        # Brand icon
-        painter.setPen(Qt.PenStyle.NoPen)
-        cx, cy = panel_w // 2, 180
-        # Glow
-        painter.setBrush(QColor(167, 221, 231, 38))
-        painter.drawEllipse(cx - 50, cy - 50, 100, 100)
-        # Ring
-        painter.setPen(QPen(QColor("#A7DDE7"), 3))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawArc(cx - 30, cy - 30, 60, 60, 30 * 16, 300 * 16)
-        # Letter
-        painter.setPen(QColor("#FFFFFF"))
-        painter.setFont(QFont(fn, 22, QFont.Weight.Bold))
-        painter.drawText(QRectF(cx - 30, cy - 30, 60, 60), Qt.AlignmentFlag.AlignCenter, "ST")
-
-        # Title
-        painter.setPen(QColor("#FFFFFF"))
-        painter.setFont(QFont(fn, 16, QFont.Weight.Bold))
-        painter.drawText(0, 260, panel_w, 30, Qt.AlignmentFlag.AlignCenter, "스레드 쇼핑 자동화")
-
-        # Subtitle
-        painter.setPen(QColor("#A7DDE7"))
-        painter.setFont(QFont(fn, 11))
-        painter.drawText(0, 298, panel_w, 22, Qt.AlignmentFlag.AlignCenter, "멀티 쇼핑 자동화")
-
-        # Tagline
-        painter.setPen(QColor(255, 255, 255, 230))
-        painter.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
-        painter.drawText(0, 352, panel_w, 40, Qt.AlignmentFlag.AlignCenter, "멀티 쇼핑 Threads\n자동 업로드 솔루션")
-
-        # Features
-        painter.setPen(QColor(255, 255, 255, 200))
-        painter.setFont(QFont(fn, 9, QFont.Weight.DemiBold))
-        painter.drawText(0, panel_h - 120, panel_w, 20, Qt.AlignmentFlag.AlignCenter, "AI 분석  |  자동 포스팅  |  성과 추적")
-
-        # Version
-        painter.setPen(QColor(255, 255, 255, 180))
-        painter.setFont(QFont(fn, 9))
-        painter.drawText(0, panel_h - 32, panel_w, 20, Qt.AlignmentFlag.AlignCenter, self._app_version)
-
-        # Border right
-        painter.setPen(QColor(Colors.BORDER))
-        painter.drawLine(panel_w, 0, panel_w, panel_h)
+        viewport_h = max(1, self._form_scroll.height())
+        if int(index) == 0:
+            content_h = viewport_h
+        else:
+            # Each registration step is short enough at 720 x 760. On the
+            # 420 x 560 compact canvas, only registration may scroll.
+            content_h = max(viewport_h, 720)
+        self.stack.resize(max(1, self._form_scroll.width()), content_h)
+        self._form_scroll.verticalScrollBar().setValue(0)
+        if hasattr(self, "_register_steps") and int(index) == 1:
+            self._update_register_step_ui()
 
     # ─── Login Page ─────────────────────────────────────────
     def _build_login_page(self):
         page = QWidget()
+        page.setObjectName("loginPage")
         fn = _get_font()
+        layout = QVBoxLayout(page)
+        self._login_layout = layout
+        layout.setContentsMargins(40, 34, 40, 18)
+        layout.setSpacing(7)
 
-        title = QLabel("로그인", page)
-        title.setGeometry(50, 70, 320, 35)
-        title.setFont(QFont(fn, 18, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+        self._login_title = QLabel("다시 오신 것을 환영합니다")
+        self._login_title.setMinimumHeight(34)
+        self._login_title.setFont(QFont(fn, 17, QFont.Weight.Bold))
+        self._login_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+        layout.addWidget(self._login_title)
 
-        subtitle = QLabel("스레드 쇼핑 자동화에 오신 것을 환영합니다", page)
-        subtitle.setGeometry(40, 108, 340, 34)
-        subtitle.setWordWrap(True)
-        subtitle.setFont(QFont(fn, 11))
-        subtitle.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
+        self._login_subtitle = QLabel("계정에 로그인하고 자동화를 이어가세요.")
+        self._login_subtitle.setWordWrap(True)
+        self._login_subtitle.setMinimumHeight(32)
+        self._login_subtitle.setFont(QFont(fn, 10))
+        self._login_subtitle.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
+        layout.addWidget(self._login_subtitle)
+        layout.addSpacing(12)
 
-        # ID
-        lbl_id = QLabel("아이디", page)
-        lbl_id.setGeometry(50, 168, 100, 20)
-        lbl_id.setFont(QFont(fn, 10, QFont.Weight.Bold))
-        lbl_id.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+        def _field_label(text: str) -> QLabel:
+            label = QLabel(text)
+            label.setFixedHeight(18)
+            label.setFont(QFont(fn, 10, QFont.Weight.Bold))
+            label.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+            return label
 
-        self.login_id = QLineEdit(page)
-        self.login_id.setGeometry(50, 192, 320, 48)
+        layout.addWidget(_field_label("아이디"))
+        self.login_id = QLineEdit()
         self.login_id.setPlaceholderText("아이디를 입력하세요")
+        self.login_id.setAccessibleName("로그인 아이디")
         self._apply_input_style(self.login_id)
+        self.login_id.setFixedHeight(50)
+        layout.addWidget(self.login_id)
+        layout.addSpacing(5)
 
-        # PW
-        lbl_pw = QLabel("비밀번호", page)
-        lbl_pw.setGeometry(50, 256, 100, 20)
-        lbl_pw.setFont(QFont(fn, 10, QFont.Weight.Bold))
-        lbl_pw.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
-
-        self.login_pw = QLineEdit(page)
-        self.login_pw.setGeometry(50, 280, 320, 48)
+        layout.addWidget(_field_label("비밀번호"))
+        self.login_pw = QLineEdit()
         self.login_pw.setPlaceholderText("비밀번호를 입력하세요")
         self.login_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self.login_pw.setAccessibleName("로그인 비밀번호")
         self._apply_input_style(self.login_pw)
+        self.login_pw.setFixedHeight(50)
+        layout.addWidget(self.login_pw)
+        layout.addSpacing(5)
 
-        # Remember
-        self.remember_cb = QCheckBox("아이디/비밀번호 저장", page)
-        self.remember_cb.setGeometry(50, 342, 178, 30)
-        self.remember_cb.setFont(QFont(fn, 10))
+        option_row = QHBoxLayout()
+        option_row.setContentsMargins(0, 0, 0, 0)
+        option_row.setSpacing(8)
+        self.remember_cb = QCheckBox("로그인 정보 저장")
+        self.remember_cb.setMinimumHeight(28)
+        self.remember_cb.setFont(QFont(fn, 9))
         self.remember_cb.setStyleSheet(f"""
-            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 10pt; spacing: 8px; }}
+            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 9.5pt; spacing: 7px; }}
             QCheckBox::indicator {{
                 width: 16px; height: 16px;
-                border: 2px solid {Colors.BORDER_LIGHT};
+                border: 1px solid {Colors.BORDER_LIGHT};
                 border-radius: 4px; background: {Colors.BG_INPUT};
             }}
             QCheckBox::indicator:checked {{
@@ -328,17 +419,21 @@ class LoginWindow(QMainWindow):
         """)
         self.remember_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         self.remember_cb.toggled.connect(self._on_remember_toggled)
+        option_row.addWidget(self.remember_cb, 1)
 
-        self.auto_login_cb = QCheckBox("자동 로그인", page)
-        self.auto_login_cb.setGeometry(240, 342, 130, 30)
-        self.auto_login_cb.setFont(QFont(fn, 10))
+        self.auto_login_cb = QCheckBox("자동 로그인")
+        self.auto_login_cb.setMinimumHeight(28)
+        self.auto_login_cb.setFixedWidth(112)
+        self.auto_login_cb.setFont(QFont(fn, 9))
         self.auto_login_cb.setStyleSheet(self.remember_cb.styleSheet())
         self.auto_login_cb.setCursor(Qt.CursorShape.PointingHandCursor)
         self.auto_login_cb.toggled.connect(self._on_auto_login_toggled)
+        option_row.addWidget(self.auto_login_cb, 0)
+        layout.addLayout(option_row)
 
-        # Login button
-        self.btn_login = QPushButton("로그인", page)
-        self.btn_login.setGeometry(50, 390, 320, 48)
+        self.btn_login = QPushButton("로그인")
+        self.btn_login.setFixedHeight(48)
+        self.btn_login.setAccessibleName("로그인 실행")
         self.btn_login.setFont(QFont(fn, 11, QFont.Weight.Bold))
         self.btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_login.setStyleSheet(f"""
@@ -350,33 +445,85 @@ class LoginWindow(QMainWindow):
             QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
         """)
         self.btn_login.clicked.connect(self._do_login)
+        layout.addWidget(self.btn_login)
 
-        # Register button
-        self.btn_go_register = QPushButton("회원가입", page)
-        self.btn_go_register.setGeometry(50, 452, 320, 46)
-        self.btn_go_register.setFont(QFont(fn, 11, QFont.Weight.Bold))
+        self._password_reset_btn = QPushButton("비밀번호 재설정")
+        self._password_reset_btn.setMinimumHeight(30)
+        self._password_reset_btn.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
+        self._password_reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._password_reset_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {Colors.ACCENT_LIGHT}; border: none;
+                padding: 0; min-height: 30px; }}
+            QPushButton:hover {{ color: {Colors.ACCENT}; text-decoration: underline; }}
+        """)
+        self._password_reset_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(f"{WEBSITE_BASE_URL}/forgot-password"))
+        )
+        layout.addWidget(self._password_reset_btn)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet(f"background: {Colors.BORDER_SUBTLE}; border: none; max-height: 1px;")
+        layout.addWidget(divider)
+
+        join_row = QHBoxLayout()
+        join_row.setContentsMargins(0, 0, 0, 0)
+        join_row.addStretch(1)
+        join_copy = QLabel("계정이 없으신가요?")
+        join_copy.setFont(QFont(fn, 9))
+        join_copy.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
+        join_row.addWidget(join_copy)
+        self.btn_go_register = QPushButton("계정 만들기")
+        self.btn_go_register.setMinimumHeight(46)
+        self.btn_go_register.setMinimumWidth(104)
+        self.btn_go_register.setFont(QFont(fn, 9, QFont.Weight.Bold))
         self.btn_go_register.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_go_register.setStyleSheet(f"""
             QPushButton {{
-                color: {Colors.ACCENT_LIGHT}; background: transparent;
-                border: 2px solid {Colors.ACCENT_LIGHT}; border-radius: 8px;
+                color: {Colors.ACCENT_LIGHT}; background: transparent; border: none;
+                padding: 0 6px; min-height: 46px;
             }}
-            QPushButton:hover {{ background: {Colors.ACCENT_SUBTLE}; }}
+            QPushButton:hover {{ color: {Colors.ACCENT}; text-decoration: underline; }}
         """)
-        self.btn_go_register.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        self.btn_go_register.clicked.connect(self._open_registration)
+        join_row.addWidget(self.btn_go_register)
+        join_row.addStretch(1)
+        layout.addLayout(join_row)
 
-        # Status
-        self.login_status = QLabel("", page)
-        self.login_status.setGeometry(50, 510, 320, 44)
+        self.login_status = QLabel("")
         self.login_status.setWordWrap(True)
-        self.login_status.setFont(QFont(fn, 10))
+        self.login_status.setMinimumHeight(28)
+        self.login_status.setFont(QFont(fn, 9))
         self.login_status.setStyleSheet(f"color: {Colors.ERROR}; background: transparent;")
         self.login_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.login_status)
+
+        self._restore_notice = QFrame()
+        self._restore_notice.setObjectName("restoreNotice")
+        self._restore_notice.setMinimumHeight(58)
+        self._restore_notice.setStyleSheet(
+            f"#restoreNotice {{ background: {Colors.INFO_BG}; border: 1px solid {Colors.INFO_BORDER}; border-radius: 10px; }}"
+        )
+        restore_layout = QHBoxLayout(self._restore_notice)
+        restore_layout.setContentsMargins(16, 8, 16, 8)
+        restore_layout.setSpacing(10)
+        restore_icon = QLabel("✓")
+        restore_icon.setFont(QFont(fn, 14, QFont.Weight.Bold))
+        restore_icon.setStyleSheet(f"color: {Colors.ACCENT}; background: transparent;")
+        restore_copy = QLabel("로그인 후 마지막 작업과 연결 상태를 자동으로 복원합니다.")
+        restore_copy.setWordWrap(True)
+        restore_copy.setFont(QFont(fn, 9))
+        restore_copy.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
+        restore_layout.addWidget(restore_icon)
+        restore_layout.addWidget(restore_copy, 1)
+        layout.addStretch(1)
+        layout.addWidget(self._restore_notice)
 
         self.stack.addWidget(page)
 
-        # Load saved credentials
-        self._load_saved_login()
+    def _open_registration(self) -> None:
+        self._show_register_step(0)
+        self.stack.setCurrentIndex(1)
 
     def _load_saved_login(self):
         """Load saved username/password."""
@@ -418,117 +565,101 @@ class LoginWindow(QMainWindow):
     # ─── Register Page ──────────────────────────────────────
     def _build_register_page(self):
         page = QWidget()
+        page.setObjectName("registerPage")
         fn = _get_font()
-
-        # Back button
-        btn_back = QPushButton("← 돌아가기", page)
-        btn_back.setGeometry(15, 10, 120, 40)
-        btn_back.setFont(QFont(fn, 10))
-        btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_back.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent; color: {Colors.TEXT_SECONDARY};
-                border: none; padding: 0 12px; min-height: 0;
-            }}
-            QPushButton:hover {{ color: {Colors.TEXT_PRIMARY}; }}
-        """)
-        btn_back.clicked.connect(lambda: self.stack.setCurrentIndex(0))
-
-        title = QLabel("회원가입", page)
-        title.setGeometry(30, 50, 360, 30)
-        title.setFont(QFont(fn, 16, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
-
-        sub = QLabel("가입 정보를 입력해주세요. (체험판 제공)", page)
-        sub.setGeometry(30, 82, 360, 18)
-        sub.setFont(QFont(fn, 10))
-        sub.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
-
-        form_card = QFrame(page)
-        form_card.setGeometry(20, 112, RIGHT_PANEL_WIDTH - 40, REGISTER_PAGE_HEIGHT - 124)
-        form_card.setObjectName("registerFormCard")
-        form_card.setStyleSheet(f"""
-            #registerFormCard {{
-                background-color: {Colors.BG_CARD};
-                border: 1px solid {Colors.BORDER};
-                border-radius: 12px;
-            }}
-        """)
-
-        form_layout = QVBoxLayout(form_card)
-        form_layout.setContentsMargins(16, 12, 16, 14)
-        form_layout.setSpacing(8)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(28, 14, 28, 18)
+        root.setSpacing(7)
 
         def _field_label(text: str) -> QLabel:
             lbl = QLabel(text)
+            lbl.setFixedHeight(18)
             lbl.setFont(QFont(fn, 10, QFont.Weight.Bold))
             lbl.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
             return lbl
 
-        # Name
-        form_layout.addWidget(_field_label("가입자 명"))
+        self._register_back_btn = QPushButton("←  돌아가기")
+        self._register_back_btn.setFixedHeight(34)
+        self._register_back_btn.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
+        self._register_back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._register_back_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {Colors.TEXT_SECONDARY};
+                border: none; padding: 0; min-height: 34px; text-align: left; }}
+            QPushButton:hover {{ color: {Colors.ACCENT_LIGHT}; }}
+        """)
+        self._register_back_btn.clicked.connect(self._register_back)
+        root.addWidget(self._register_back_btn)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        self._register_title = QLabel("계정 만들기")
+        self._register_title.setFont(QFont(fn, 17, QFont.Weight.Bold))
+        self._register_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+        title_row.addWidget(self._register_title, 1)
+        self._register_step_text = QLabel("1 / 2")
+        self._register_step_text.setFont(QFont(fn, 10, QFont.Weight.Bold))
+        self._register_step_text.setStyleSheet(f"color: {Colors.ACCENT_LIGHT}; background: transparent;")
+        title_row.addWidget(self._register_step_text)
+        root.addLayout(title_row)
+
+        self._register_subtitle = QLabel("필요한 정보만 입력하세요.")
+        self._register_subtitle.setFont(QFont(fn, 10))
+        self._register_subtitle.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
+        root.addWidget(self._register_subtitle)
+
+        self._register_progress = QProgressBar()
+        self._register_progress.setRange(0, 2)
+        self._register_progress.setValue(1)
+        self._register_progress.setTextVisible(False)
+        self._register_progress.setFixedHeight(6)
+        self._register_progress.setStyleSheet(f"""
+            QProgressBar {{ background: {Colors.BORDER_SUBTLE}; border: none; border-radius: 3px; }}
+            QProgressBar::chunk {{ background: {Colors.ACCENT}; border-radius: 3px; }}
+        """)
+        root.addWidget(self._register_progress)
+        root.addSpacing(5)
+
+        self._register_steps = QStackedWidget()
+        self._register_steps.setObjectName("registerSteps")
+        self._register_steps.setStyleSheet("background: transparent;")
+        root.addWidget(self._register_steps, 1)
+
+        # Step 1: identity and sign-in credentials. Values remain in these
+        # widgets while the local QStackedWidget moves to step 2.
+        identity_page = QWidget()
+        identity_layout = QVBoxLayout(identity_page)
+        identity_layout.setContentsMargins(0, 0, 0, 0)
+        identity_layout.setSpacing(5)
+
+        identity_layout.addWidget(_field_label("이름"))
         self.reg_name = QLineEdit()
         self.reg_name.setPlaceholderText("이름을 입력하세요")
+        self.reg_name.setAccessibleName("회원가입 이름")
         self._apply_input_style(self.reg_name)
-        form_layout.addWidget(self.reg_name)
+        self.reg_name.setFixedHeight(50)
+        identity_layout.addWidget(self.reg_name)
 
-        # Email
-        form_layout.addWidget(_field_label("이메일"))
+        identity_layout.addWidget(_field_label("이메일"))
         self.reg_email = QLineEdit()
         self.reg_email.setPlaceholderText("example@email.com")
+        self.reg_email.setAccessibleName("회원가입 이메일")
         self._apply_input_style(self.reg_email)
-        form_layout.addWidget(self.reg_email)
+        self.reg_email.setFixedHeight(50)
+        identity_layout.addWidget(self.reg_email)
 
-        # Consent
-        self.reg_news_opt_in = QCheckBox("와이엠 프로그램 소식/정보 이메일 수신에\n동의합니다 (선택)")
-        self.reg_news_opt_in.setFont(QFont(fn, 10))
-        self.reg_news_opt_in.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.reg_news_opt_in.setMinimumHeight(44)
-        self.reg_news_opt_in.setStyleSheet(f"""
-            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 10pt; spacing: 8px; }}
-            QCheckBox::indicator {{
-                width: 15px; height: 15px;
-                border: 1px solid {Colors.BORDER_LIGHT};
-                border-radius: 4px; background: {Colors.BG_INPUT};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {Colors.ACCENT}; border-color: {Colors.ACCENT};
-            }}
-        """)
-        form_layout.addWidget(self.reg_news_opt_in)
-
-        self.reg_legal_consent = QCheckBox("이용약관 및 개인정보처리방침에 동의합니다\n(필수)")
-        self.reg_legal_consent.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
-        self.reg_legal_consent.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.reg_legal_consent.setMinimumHeight(44)
-        self.reg_legal_consent.setStyleSheet(self.reg_news_opt_in.styleSheet())
-        form_layout.addWidget(self.reg_legal_consent)
-
-        self.reg_legal_links = QLabel(
-            f'<a href="{WEBSITE_BASE_URL}/terms" style="color:{Colors.ACCENT_LIGHT};">이용약관 보기</a>'
-            f' &nbsp;·&nbsp; '
-            f'<a href="{WEBSITE_BASE_URL}/privacy" style="color:{Colors.ACCENT_LIGHT};">개인정보처리방침 보기</a>'
-        )
-        self.reg_legal_links.setFont(QFont(fn, 10))
-        self.reg_legal_links.setOpenExternalLinks(True)
-        self.reg_legal_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        self.reg_legal_links.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
-        self.reg_legal_links.setWordWrap(True)
-        self.reg_legal_links.setToolTip("웹사이트에서 최신 약관과 개인정보처리방침을 확인합니다.")
-        form_layout.addWidget(self.reg_legal_links)
-
-        # Username + check
-        form_layout.addWidget(_field_label("아이디"))
+        identity_layout.addWidget(_field_label("아이디"))
         username_row = QHBoxLayout()
         username_row.setSpacing(8)
         self.reg_username = QLineEdit()
         self.reg_username.setPlaceholderText("영문, 숫자, 밑줄(_)")
+        self.reg_username.setAccessibleName("회원가입 아이디")
         self._apply_input_style(self.reg_username)
+        self.reg_username.setFixedHeight(50)
         self.reg_username.textChanged.connect(self._on_reg_username_changed)
         username_row.addWidget(self.reg_username, 1)
 
         self.btn_check_user = QPushButton("중복확인")
-        self.btn_check_user.setFixedSize(96, 46)
+        self.btn_check_user.setFixedSize(104, 48)
         self.btn_check_user.setFont(QFont(fn, 10))
         self.btn_check_user.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_check_user.setStyleSheet(f"""
@@ -540,52 +671,132 @@ class LoginWindow(QMainWindow):
         """)
         self.btn_check_user.clicked.connect(self._check_username)
         username_row.addWidget(self.btn_check_user, 0)
-        form_layout.addLayout(username_row)
+        identity_layout.addLayout(username_row)
 
         self.reg_user_status = QLabel("")
-        self.reg_user_status.setFont(QFont(fn, 10))
+        self.reg_user_status.setFont(QFont(fn, 9))
         self.reg_user_status.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
         self.reg_user_status.setWordWrap(True)
-        self.reg_user_status.setMinimumHeight(30)
-        form_layout.addWidget(self.reg_user_status)
+        self.reg_user_status.setFixedHeight(24)
+        identity_layout.addWidget(self.reg_user_status)
 
-        # Password
-        form_layout.addWidget(_field_label("비밀번호"))
+        identity_layout.addWidget(_field_label("비밀번호"))
         self.reg_pw = QLineEdit()
-        self.reg_pw.setPlaceholderText("비밀번호를 입력하세요")
+        self.reg_pw.setPlaceholderText(f"{MIN_REGISTER_PASSWORD_LENGTH}자 이상 입력하세요")
         self.reg_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self.reg_pw.setAccessibleName("회원가입 비밀번호")
         self._apply_input_style(self.reg_pw)
+        self.reg_pw.setFixedHeight(50)
         self.reg_pw.textChanged.connect(self._update_password_match_status)
-        form_layout.addWidget(self.reg_pw)
+        identity_layout.addWidget(self.reg_pw)
 
-        # Password confirm
-        form_layout.addWidget(_field_label("비밀번호 확인"))
+        identity_layout.addWidget(_field_label("비밀번호 확인"))
         self.reg_pw_confirm = QLineEdit()
         self.reg_pw_confirm.setPlaceholderText("비밀번호를 다시 입력")
         self.reg_pw_confirm.setEchoMode(QLineEdit.EchoMode.Password)
+        self.reg_pw_confirm.setAccessibleName("회원가입 비밀번호 확인")
         self._apply_input_style(self.reg_pw_confirm)
+        self.reg_pw_confirm.setFixedHeight(50)
         self.reg_pw_confirm.textChanged.connect(self._update_password_match_status)
-        form_layout.addWidget(self.reg_pw_confirm)
+        identity_layout.addWidget(self.reg_pw_confirm)
 
         self.reg_pw_match_status = QLabel("")
-        self.reg_pw_match_status.setFont(QFont(fn, 10))
+        self.reg_pw_match_status.setFont(QFont(fn, 9))
         self.reg_pw_match_status.setStyleSheet(
             f"color: {Colors.TEXT_MUTED}; background: transparent;"
         )
         self.reg_pw_match_status.setWordWrap(True)
-        self.reg_pw_match_status.setMinimumHeight(30)
-        form_layout.addWidget(self.reg_pw_match_status)
+        self.reg_pw_match_status.setFixedHeight(24)
+        identity_layout.addWidget(self.reg_pw_match_status)
 
-        # Contact
-        form_layout.addWidget(_field_label("연락처"))
+        self._register_next_btn = QPushButton("다음")
+        self._register_next_btn.setFixedHeight(48)
+        self._register_next_btn.setFont(QFont(fn, 11, QFont.Weight.Bold))
+        self._register_next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._register_next_btn.setStyleSheet(f"""
+            QPushButton {{ background: {Gradients.ACCENT_BTN}; color: white; border: none;
+                border-radius: 9px; min-height: 48px; }}
+            QPushButton:hover {{ background: {Gradients.ACCENT_BTN_HOVER}; }}
+        """)
+        self._register_next_btn.clicked.connect(self._go_register_step_two)
+        identity_layout.addWidget(self._register_next_btn)
+        self._register_steps.addWidget(identity_page)
+
+        # Step 2: contact and consent.
+        consent_page = QWidget()
+        consent_layout = QVBoxLayout(consent_page)
+        consent_layout.setContentsMargins(0, 0, 0, 0)
+        consent_layout.setSpacing(8)
+        consent_layout.addWidget(_field_label("연락처"))
         self.reg_contact = QLineEdit()
         self.reg_contact.setPlaceholderText("010-1234-5678")
+        self.reg_contact.setAccessibleName("회원가입 연락처")
         self._apply_input_style(self.reg_contact)
-        form_layout.addWidget(self.reg_contact)
+        self.reg_contact.setFixedHeight(50)
+        consent_layout.addWidget(self.reg_contact)
 
-        # Submit
-        self.btn_register = QPushButton("회원가입")
-        self.btn_register.setMinimumHeight(44)
+        consent_title = QLabel("약관 동의")
+        consent_title.setFont(QFont(fn, 10, QFont.Weight.Bold))
+        consent_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+        consent_layout.addWidget(consent_title)
+
+        check_style = f"""
+            QCheckBox {{ color: {Colors.TEXT_SECONDARY}; background: transparent; font-size: 9.5pt; spacing: 9px; }}
+            QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {Colors.BORDER_LIGHT};
+                border-radius: 5px; background: {Colors.BG_INPUT}; }}
+            QCheckBox::indicator:checked {{ background: {Colors.ACCENT}; border-color: {Colors.ACCENT}; }}
+            QCheckBox::indicator:hover {{ border-color: {Colors.ACCENT}; }}
+        """
+        self.reg_legal_consent = QCheckBox("필수   이용약관 및 개인정보처리방침에 동의")
+        self.reg_legal_consent.setFont(QFont(fn, 9, QFont.Weight.DemiBold))
+        self.reg_legal_consent.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reg_legal_consent.setMinimumHeight(44)
+        self.reg_legal_consent.setStyleSheet(check_style)
+        consent_layout.addWidget(self.reg_legal_consent)
+
+        self.reg_news_opt_in = QCheckBox("선택   프로그램 소식과 활용 정보 이메일")
+        self.reg_news_opt_in.setFont(QFont(fn, 9))
+        self.reg_news_opt_in.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reg_news_opt_in.setMinimumHeight(44)
+        self.reg_news_opt_in.setStyleSheet(check_style)
+        consent_layout.addWidget(self.reg_news_opt_in)
+
+        self.reg_legal_links = QLabel(
+            f'<a href="{WEBSITE_BASE_URL}/terms" style="color:{Colors.ACCENT_LIGHT};">이용약관 보기</a>'
+            f' &nbsp;·&nbsp; '
+            f'<a href="{WEBSITE_BASE_URL}/privacy" style="color:{Colors.ACCENT_LIGHT};">개인정보처리방침 보기</a>'
+        )
+        self.reg_legal_links.setFont(QFont(fn, 9))
+        self.reg_legal_links.setOpenExternalLinks(True)
+        self.reg_legal_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        self.reg_legal_links.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
+        self.reg_legal_links.setWordWrap(True)
+        self.reg_legal_links.setToolTip("웹사이트에서 최신 약관과 개인정보처리방침을 확인합니다.")
+        consent_layout.addWidget(self.reg_legal_links)
+
+        ready_card = QFrame()
+        ready_card.setObjectName("registrationReadyCard")
+        ready_card.setMinimumHeight(92)
+        ready_card.setStyleSheet(
+            f"#registrationReadyCard {{ background: {Colors.BG_SURFACE}; border: 1px solid {Colors.BORDER}; border-radius: 10px; }}"
+        )
+        ready_layout = QVBoxLayout(ready_card)
+        ready_layout.setContentsMargins(16, 12, 16, 12)
+        ready_layout.setSpacing(4)
+        ready_title = QLabel("가입 후 바로 할 일")
+        ready_title.setFont(QFont(fn, 10, QFont.Weight.Bold))
+        ready_title.setStyleSheet(f"color: {Colors.TEXT_PRIMARY}; background: transparent;")
+        ready_desc = QLabel("Threads 계정을 연결하고 첫 게시 준비를 시작합니다.\n설정은 시작 준비 마법사가 안내합니다.")
+        ready_desc.setWordWrap(True)
+        ready_desc.setFont(QFont(fn, 9))
+        ready_desc.setStyleSheet(f"color: {Colors.TEXT_MUTED}; background: transparent;")
+        ready_layout.addWidget(ready_title)
+        ready_layout.addWidget(ready_desc)
+        consent_layout.addWidget(ready_card)
+        consent_layout.addStretch(1)
+
+        self.btn_register = QPushButton("가입하고 시작 준비")
+        self.btn_register.setFixedHeight(48)
         self.btn_register.setFont(QFont(fn, 11, QFont.Weight.Bold))
         self.btn_register.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_register.setStyleSheet(f"""
@@ -597,14 +808,83 @@ class LoginWindow(QMainWindow):
             QPushButton:pressed {{ background: {Gradients.ACCENT_BTN_PRESSED}; }}
         """)
         self.btn_register.clicked.connect(self._do_register)
-        form_layout.addWidget(self.btn_register)
+        consent_layout.addWidget(self.btn_register)
+
+        self._register_prev_btn = QPushButton("이전 단계")
+        self._register_prev_btn.setMinimumHeight(38)
+        self._register_prev_btn.setFont(QFont(fn, 10, QFont.Weight.Bold))
+        self._register_prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._register_prev_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {Colors.ACCENT_LIGHT}; border: none;
+                padding: 0; min-height: 38px; }}
+            QPushButton:hover {{ color: {Colors.ACCENT}; text-decoration: underline; }}
+        """)
+        self._register_prev_btn.clicked.connect(lambda: self._show_register_step(0))
+        consent_layout.addWidget(self._register_prev_btn)
+        self._register_steps.addWidget(consent_page)
+        self._register_steps.currentChanged.connect(lambda _index: self._update_register_step_ui())
+        self._register_steps.setCurrentIndex(0)
 
         self.stack.addWidget(page)
+
+    def _register_back(self):
+        if self._register_steps.currentIndex() > 0:
+            self._show_register_step(0)
+        else:
+            self.stack.setCurrentIndex(0)
+
+    def _show_register_step(self, index: int) -> None:
+        self._register_steps.setCurrentIndex(max(0, min(1, int(index))))
+        self._update_register_step_ui()
+
+    def _go_register_step_two(self) -> None:
+        """Validate the local draft before exposing contact and consent."""
+        name = self.reg_name.text().strip()
+        email = self.reg_email.text().strip()
+        username = self.reg_username.text().strip().lower()
+        password = self.reg_pw.text()
+        confirmation = self.reg_pw_confirm.text()
+        if len(name) < 2:
+            self._show_msg("이름을 2자 이상 입력해주세요.")
+            return
+        if not email or "@" not in email or "." not in email:
+            self._show_msg("올바른 이메일 주소를 입력해주세요.")
+            return
+        if len(username) < 4:
+            self._show_msg("아이디를 4자 이상 입력해주세요.")
+            return
+        if not self._username_available or self._username_available_for != username:
+            self._show_msg("아이디 중복확인을 해주세요.")
+            return
+        if len(password) < MIN_REGISTER_PASSWORD_LENGTH:
+            self._show_msg(f"비밀번호는 최소 {MIN_REGISTER_PASSWORD_LENGTH}자 이상이어야 합니다.")
+            return
+        if password != confirmation:
+            self._show_msg("비밀번호가 일치하지 않습니다.")
+            return
+        self._show_register_step(1)
+        self.reg_contact.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _update_register_step_ui(self) -> None:
+        if not hasattr(self, "_register_steps"):
+            return
+        index = self._register_steps.currentIndex()
+        self._register_step_text.setText(f"{index + 1} / 2")
+        self._register_progress.setValue(index + 1)
+        self._register_subtitle.setText(
+            "필요한 정보만 입력하세요."
+            if index == 0
+            else "연락처와 필수 약관을 확인해주세요."
+        )
+        self._register_back_btn.setText("←  돌아가기" if index == 0 else "←  이전 단계")
 
     # ─── Style helpers ──────────────────────────────────────
     def _apply_input_style(self, widget):
         widget.setFont(QFont(_get_font(), 11))
-        widget.setStyleSheet(input_style())
+        widget.setStyleSheet(
+            input_style()
+            + "QLineEdit { min-height: 48px; max-height: 48px; }"
+        )
         widget.setTextMargins(14, 0, 14, 0)
         widget.setMinimumHeight(48)
 
@@ -796,7 +1076,7 @@ class LoginWindow(QMainWindow):
 
     def _on_register_result(self, result: dict):
         self.btn_register.setEnabled(True)
-        self.btn_register.setText("회원가입")
+        self.btn_register.setText("가입하고 시작 준비")
 
         if result.get("success"):
             account = result.get("data") if isinstance(result.get("data"), dict) else {}
@@ -853,6 +1133,17 @@ class LoginWindow(QMainWindow):
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if self.stack.currentIndex() == 0:
                 self._do_login()
+            elif self._register_steps.currentIndex() == 0:
+                self._go_register_step_two()
+            else:
+                self._do_register()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.stack.currentIndex() == 1:
+            self._register_back()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 # ─── Background Workers ────────────────────────────────────
