@@ -102,6 +102,38 @@ def test_automation_footer_shows_only_actions_relevant_to_run_state():
         for button in (window.add_btn, window.stop_btn, window.stop_all_btn):
             assert button.isVisible()
             assert window._automation_footer.rect().contains(button.geometry())
+
+        window._set_run_state(
+            {"phase": "paused", "pending": 2, "total": 3, "completed": 1}
+        )
+        app.processEvents()
+        assert window.start_btn.isVisible()
+        assert window.start_btn.text() == "저장된 작업 이어서 실행"
+        assert window.start_all_btn.isVisible()
+        assert not window.add_btn.isVisible()
+        assert not window.stop_btn.isVisible()
+        assert not window.stop_all_btn.isVisible()
+    finally:
+        _close(window, app)
+
+
+def test_paused_start_resumes_existing_queue_even_when_editor_has_text(monkeypatch):
+    app = _app()
+    window = MainWindow()
+    try:
+        resumed = []
+        monkeypatch.setattr(window, "_ensure_threads_account_allowed", lambda *_args: True)
+        monkeypatch.setattr(
+            window,
+            "_start_existing_selected_queue",
+            lambda: resumed.append(True) or True,
+        )
+        window.links_text.setPlainText("https://link.coupang.com/a/existing")
+        window._latest_run_state = {"phase": "stopped"}
+
+        window.start_upload()
+
+        assert resumed == [True]
     finally:
         _close(window, app)
 

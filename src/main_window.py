@@ -2999,10 +2999,10 @@ class MainWindow(QMainWindow):
             "processing",
             "uploading",
             "waiting",
-            "paused",
             "stopping",
             "offline",
         }
+        resumable = phase in {"paused", "stopped"}
         self.start_btn.setVisible(not live)
         self.start_all_btn.setVisible(not live)
         self.add_btn.setVisible(live)
@@ -3011,6 +3011,9 @@ class MainWindow(QMainWindow):
         if phase == "finished":
             self.start_btn.setText("새 작업 시작")
             footer_text = "완료 결과를 확인하거나 실패한 항목을 다시 실행하세요."
+        elif resumable:
+            self.start_btn.setText("저장된 작업 이어서 실행")
+            footer_text = "대기열과 진행 위치가 보존되었습니다. 중단 지점부터 이어갑니다."
         elif phase in {"blocked", "error", "session_expired"}:
             self.start_btn.setText("문제 해결 후 다시 시작")
             footer_text = "오류 원인을 확인한 뒤 안전하게 다시 시작할 수 있습니다."
@@ -3612,8 +3615,8 @@ class MainWindow(QMainWindow):
             bg = Colors.INFO_BG
             sidebar_status = f"예약 대기 · {pending}개 남음"
             progress_text = f"다음 {self._format_clock(next_allowed_at)}"
-        elif phase == "paused":
-            title = "자동화 일시정지"
+        elif phase in {"paused", "stopped"}:
+            title = "자동화 일시정지" if phase == "paused" else "작업이 안전하게 중지됨"
             main = message or "대기열과 현재 진행 위치를 안전하게 보존했습니다."
             detail = f"남은 작업 {pending}개"
             color = Colors.WARNING
@@ -3686,7 +3689,7 @@ class MainWindow(QMainWindow):
             next_text = f"다음 작업: {self._format_clock(next_allowed_at)} · {_format_interval(remaining)} 남음"
         elif current_item and phase in {"processing", "uploading"}:
             next_text = f"현재 항목: {current_item[:52]}"
-        elif phase == "paused":
+        elif phase in {"paused", "stopped"}:
             next_text = "준비되면 중단 지점부터 이어서 실행합니다."
         elif phase == "offline":
             next_text = "네트워크 연결 복구를 기다리는 중입니다."
@@ -6613,6 +6616,9 @@ class MainWindow(QMainWindow):
         logger.info("업로드 시작 호출")
         self._log_user_activity("batch_start_requested", "source=start_button")
         if not self._ensure_threads_account_allowed():
+            return
+        phase = str(getattr(self, "_latest_run_state", {}).get("phase") or "")
+        if phase in {"paused", "stopped"} and self._start_existing_selected_queue():
             return
         content = self.links_text.toPlainText().strip()
         if not content:
