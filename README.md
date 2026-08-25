@@ -2,7 +2,7 @@
 
 쓰레드(Threads) 플랫폼에 글을 자동으로 업로드하는 Windows용 Python 애플리케이션입니다.
 
-**현재 버전: v3.2.0** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
+**현재 버전: v3.2.1** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
 
 ## 이용권
 
