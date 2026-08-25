@@ -2,6 +2,7 @@ import pytest
 
 from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
 from src.services.cancellation import OperationCancelled
+from src.services.managed_ai_client import ManagedAiClientError
 
 
 class _Parser:
@@ -120,3 +121,37 @@ def test_publish_boundary_repairs_managed_comment_disclosure_and_original_url():
     assert variant["second_post"]["text"].startswith(disclosure)
     assert variant["second_post"]["text"].count(original_url) == 1
     assert "https://wrong.example/item" not in variant["second_post"]["text"]
+
+
+def test_uploader_postprocessing_error_keeps_managed_reservation(monkeypatch):
+    class ReservedAggro:
+        def generate_product_post(self, *_args, **_kwargs):
+            return {
+                "first_post": {"text": "첫 글"},
+                "second_post": {"text": "상품 댓글"},
+                "managed_ai": True,
+                "managed_ai_reservation_id": "reservation-downstream-1",
+                "managed_ai_job_id": "job-downstream-1",
+            }
+
+    pipeline = _pipeline_with_fakes(_Parser())
+    pipeline._aggro_generator = ReservedAggro()
+    monkeypatch.setattr(
+        pipeline,
+        "_normalize_second_post_disclosure",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("private postprocessing detail")
+        ),
+    )
+
+    with pytest.raises(ManagedAiClientError) as exc_info:
+        pipeline.process_link(
+            "https://link.coupang.com/a/example",
+            idempotency_key="durable-key",
+        )
+
+    error = exc_info.value
+    assert error.reservation_release_pending is True
+    assert error.reservation_id == "reservation-downstream-1"
+    assert error.ai_job_id == "job-downstream-1"
+    assert "private postprocessing detail" not in str(error)

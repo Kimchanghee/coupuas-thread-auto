@@ -2,7 +2,10 @@ import time
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from src.coupang_uploader import CancelledException
+from src.services.account_queue import AccountQueueStore
 from src.services.link_history import LinkHistory
 from src.services.multi_account_runtime import MultiAccountRuntime
 
@@ -156,6 +159,8 @@ def test_runtime_processes_independent_account_queues_with_one_browser(tmp_path)
 
     assert runtime.snapshot("id-a")["pending_items"] == []
     assert runtime.snapshot("id-b")["pending_items"] == []
+    assert runtime.snapshot("id-a")["schedule"].enabled is False
+    assert runtime.snapshot("id-b")["schedule"].enabled is False
     assert sorted(pipeline.calls) == [
         "https://example.test/a",
         "https://example.test/b",
@@ -246,6 +251,105 @@ def test_runtime_recovers_an_item_left_current_by_a_crashed_process(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("persisted_stage", ["posting", "posting_unknown"])
+def test_runtime_restart_restores_persisted_ambiguous_post_block(
+    tmp_path,
+    persisted_stage,
+):
+    queue_root = tmp_path / "queues"
+    store = AccountQueueStore("id-a", root=queue_root)
+    store.enqueue("https://example.test/ambiguous")
+    assert store.reserve_next() is not None
+    store.update_current(stage=persisted_stage)
+    store.set_phase("blocked", last_error="upload_failed")
+    observed = []
+
+    runtime = MultiAccountRuntime(
+        config=FakeConfig([_account("a")]),
+        pipeline=FakePipeline(),
+        queue_root=queue_root,
+        history_root=tmp_path / "history",
+        on_state=lambda account_id, state: observed.append((account_id, state)),
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+
+    state = runtime.snapshot("id-a")
+    assert state["phase"] == "blocked"
+    assert state["current_item"]["stage"] == persisted_stage
+    assert state["schedule"].blocked_reason == "uncertain_external_post"
+    assert observed
+    assert all(
+        payload["schedule"].blocked_reason == "uncertain_external_post"
+        for account_id, payload in observed
+        if account_id == "id-a"
+    )
+
+
+@pytest.mark.parametrize("persisted_stage", ["posting", "posting_unknown"])
+def test_refresh_accounts_restores_dynamic_ambiguous_post_block(
+    tmp_path,
+    persisted_stage,
+):
+    config = FakeConfig([])
+    observed = []
+    runtime = MultiAccountRuntime(
+        config=config,
+        pipeline=FakePipeline(),
+        queue_root=tmp_path / "queues",
+        history_root=tmp_path / "history",
+        on_state=lambda account_id, state: observed.append((account_id, state)),
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+    store = runtime.queue_store("id-a")
+    store.enqueue("https://example.test/dynamic-ambiguous")
+    assert store.reserve_next() is not None
+    store.update_current(stage=persisted_stage)
+    store.set_phase("blocked", last_error="upload_failed")
+
+    config.accounts.append(_account("a"))
+    runtime.refresh_accounts()
+
+    state = runtime.snapshot("id-a")
+    assert state["phase"] == "blocked"
+    assert state["current_item"]["stage"] == persisted_stage
+    assert state["schedule"].blocked_reason == "uncertain_external_post"
+    assert observed[-1][0] == "id-a"
+    assert observed[-1][1]["schedule"].blocked_reason == "uncertain_external_post"
+
+
+def test_not_posted_resolution_returns_requeued_snapshot_before_resume(tmp_path):
+    runtime = MultiAccountRuntime(
+        config=FakeConfig([_account("a")]),
+        pipeline=FakePipeline(),
+        queue_root=tmp_path / "queues",
+        history_root=tmp_path / "history",
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+    runtime.enqueue("id-a", ["https://example.test/requeue-before-resume"])
+    store = runtime.queue_store("id-a")
+    original = store.reserve_next()
+    assert original is not None
+    store.update_current(stage="posting_unknown")
+
+    runtime._ensure_worker = lambda: store.reserve_next()
+    resolved = runtime.resolve_posting_unknown("id-a", "not_posted")
+
+    assert resolved["current_item"] is None
+    assert [item["item_id"] for item in resolved["pending_items"]] == [
+        original["item_id"]
+    ]
+    assert store.snapshot()["current_item"]["stage"] == "parsing"
+
+
 def test_stopping_one_account_does_not_cancel_the_next_account(tmp_path):
     config = FakeConfig([_account("a"), _account("b")])
     pipeline = BlockingCancelablePipeline()
@@ -308,3 +412,56 @@ def test_migrated_first_account_imports_legacy_success_history(
     assert runtime.link_history(account.account_id).is_uploaded(
         "https://example.test/already-posted"
     )
+
+
+def test_start_requested_while_worker_retires_launches_one_successor():
+    class RetiringCoordinator:
+        def __init__(self):
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.second_finished = threading.Event()
+            self.run_count = 0
+            self.reset_count = 0
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        def reset_stop(self):
+            self.reset_count += 1
+
+        def run_until_idle(self, *, poll_seconds):
+            del poll_seconds
+            with self.lock:
+                self.run_count += 1
+                run_number = self.run_count
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            try:
+                if run_number == 1:
+                    self.started.set()
+                    assert self.release.wait(2)
+                else:
+                    self.second_finished.set()
+            finally:
+                with self.lock:
+                    self.active -= 1
+
+    runtime = object.__new__(MultiAccountRuntime)
+    runtime._lock = threading.RLock()
+    runtime._worker_thread = None
+    runtime._worker_generation = 0
+    runtime._restart_requested = False
+    runtime._coordinator = RetiringCoordinator()
+
+    runtime._ensure_worker()
+    assert runtime._coordinator.started.wait(2)
+    first_worker = runtime._worker_thread
+    runtime._ensure_worker()
+    assert runtime._worker_thread is first_worker
+    runtime._coordinator.release.set()
+    assert runtime._coordinator.second_finished.wait(2)
+    assert runtime.wait_until_stopped(2)
+
+    assert runtime._coordinator.run_count == 2
+    assert runtime._coordinator.max_active == 1
+    assert runtime._coordinator.reset_count >= 3

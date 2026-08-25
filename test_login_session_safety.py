@@ -1,4 +1,7 @@
 import os
+from types import SimpleNamespace
+
+import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -35,6 +38,41 @@ class _Button:
 
     def setText(self, value):
         self.text = str(value)
+
+
+def test_save_session_reports_encrypted_persistence_failure():
+    agent = object.__new__(computer_use_agent.ComputerUseAgent)
+    agent.context = SimpleNamespace(storage_state=lambda: {"cookies": []})
+    agent._write_storage_state = lambda _state: False
+
+    with pytest.raises(RuntimeError, match="세션을 저장"):
+        agent.save_session()
+
+
+def test_encrypted_session_replace_failure_preserves_previous_file(
+    monkeypatch,
+    tmp_path,
+):
+    agent = object.__new__(computer_use_agent.ComputerUseAgent)
+    agent.profile_name = "test-profile"
+    agent.profile_path = tmp_path
+    agent.legacy_profile_path = None
+    secure_path = tmp_path / "storage_state.sec"
+    secure_path.write_text("previous", encoding="utf-8")
+    monkeypatch.setattr(
+        computer_use_agent,
+        "protect_secret",
+        lambda *_args: "encrypted-new-state",
+    )
+    monkeypatch.setattr(
+        computer_use_agent.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("replace failed")),
+    )
+
+    assert agent._write_storage_state({"cookies": [{"name": "sessionid"}]}) is False
+    assert secure_path.read_text(encoding="utf-8") == "previous"
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_session_expiry_redirects_once_without_a_blocking_popup(monkeypatch):

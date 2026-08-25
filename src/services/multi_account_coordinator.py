@@ -71,6 +71,8 @@ class MultiAccountCoordinator:
         pending_count: int = 0,
         next_allowed_at: float = 0.0,
         enabled: bool = False,
+        blocked_reason: str = "",
+        last_error: str = "",
     ) -> AccountScheduleState:
         account_id = self._normalize_account_id(account_id)
         state = AccountScheduleState(
@@ -79,6 +81,8 @@ class MultiAccountCoordinator:
             pending_count=max(0, int(pending_count or 0)),
             next_allowed_at=max(0.0, float(next_allowed_at or 0.0)),
             enabled=bool(enabled),
+            blocked_reason=str(blocked_reason or ""),
+            last_error=str(last_error or ""),
         )
         with self._lock:
             existing = self._states.get(account_id)
@@ -92,6 +96,8 @@ class MultiAccountCoordinator:
                     pending_count=state.pending_count,
                     next_allowed_at=state.next_allowed_at,
                     enabled=state.enabled,
+                    blocked_reason=state.blocked_reason,
+                    last_error=state.last_error,
                 )
                 self._states[account_id] = state
         self._emit(state)
@@ -281,7 +287,11 @@ class MultiAccountCoordinator:
                 current,
                 pending_count=max(0, int(result.pending_count or 0)),
                 next_allowed_at=max(0.0, float(next_allowed_at or 0.0)),
-                enabled=bool(current.enabled and not block_reason),
+                enabled=bool(
+                    current.enabled
+                    and not block_reason
+                    and int(result.pending_count or 0) > 0
+                ),
                 running=False,
                 blocked_reason=block_reason,
                 last_error=block_reason if block_reason else "",

@@ -2,8 +2,11 @@ import queue
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from src.main_window import MainWindow
 from src.services.link_history import LinkHistory
+from src.services.managed_ai_client import ManagedAiClientError
 
 
 class _Emitter:
@@ -149,3 +152,132 @@ def test_validated_api_key_resolution_does_not_fallback_to_failed_key(monkeypatc
 
     assert MainWindow._resolve_runtime_gemini_api_key(object(), validate=True) == ""
     assert MainWindow._resolve_runtime_gemini_api_key(object(), validate=False) == "expired-key-value"
+
+
+@pytest.mark.parametrize(
+    ("code", "status_code", "expected_attempts", "retry_with_new_key"),
+    [
+        ("AI_TEMPORARILY_UNAVAILABLE", 503, 1, False),
+        ("INVALID_SERVER_RESPONSE", 200, 1, False),
+        ("MANAGED_AI_POSTPROCESSING_FAILED", 0, 1, False),
+        ("AI_TEMPORARILY_UNAVAILABLE", 503, 4, False),
+        ("DUPLICATE_REQUEST", 409, 4, True),
+    ],
+)
+def test_legacy_generation_catch_releases_and_rotates_managed_reservation(
+    monkeypatch,
+    tmp_path,
+    code,
+    status_code,
+    expected_attempts,
+    retry_with_new_key,
+):
+    import src.main_window as main_window
+    from src import auth_client
+
+    url = "https://link.coupang.com/a/managed-boundary"
+    link_queue = queue.Queue()
+    link_queue.put((url, None))
+    stop_event = threading.Event()
+    signals = _Signals()
+    original_key = "legacy-durable-key"
+    pipeline_calls = []
+
+    class ManagedFailurePipeline:
+        link_history = SimpleNamespace(is_uploaded=lambda _url: False)
+
+        def process_link(self, *_args, **kwargs):
+            pipeline_calls.append(kwargs["idempotency_key"])
+            if retry_with_new_key and len(pipeline_calls) >= expected_attempts:
+                stop_event.set()
+            raise ManagedAiClientError(
+                code,
+                "안전한 재시도가 필요합니다.",
+                status_code=status_code,
+                reservation_release_pending=not retry_with_new_key,
+                reservation_id=(
+                    "" if retry_with_new_key else "legacy-managed-reservation"
+                ),
+                ai_job_id="legacy-managed-job",
+                retry_with_new_idempotency_key=retry_with_new_key,
+            )
+
+    fake_self = SimpleNamespace(
+        link_queue=link_queue,
+        _stop_event=stop_event,
+        signals=signals,
+        _log_user_activity=lambda *_args, **_kwargs: None,
+        _is_dev_quota_bypass_enabled=lambda: True,
+        _is_work_allowed=MainWindow._is_work_allowed,
+        _wait_for_resume_interval_if_needed=lambda *_args, **_kwargs: None,
+        _resume_state_path=tmp_path / "upload_resume_queue.json",
+        _resume_state_lock=threading.RLock(),
+        _resume_items=[
+            {
+                "url": url,
+                "keyword": "",
+                "status": "pending",
+                "product_title": "",
+                "idempotency_key": original_key,
+            }
+        ],
+        _resume_interval=60,
+        _resume_next_allowed_at=None,
+        _resume_recovered_idempotency_keys={url: original_key},
+    )
+    fake_self._save_resume_state = MainWindow._save_resume_state.__get__(
+        fake_self,
+        type(fake_self),
+    )
+    fake_self._mark_resume_item = MainWindow._mark_resume_item.__get__(
+        fake_self,
+        type(fake_self),
+    )
+    fake_self._handle_managed_ai_reconciliation_error = (
+        MainWindow._handle_managed_ai_reconciliation_error.__get__(
+            fake_self,
+            type(fake_self),
+        )
+    )
+    fake_self._resume_item_idempotency_key = (
+        MainWindow._resume_item_idempotency_key.__get__(
+            fake_self,
+            type(fake_self),
+        )
+    )
+    fake_self._is_resume_unfinished = MainWindow._is_resume_unfinished
+    fake_self._reserved_replay_id = MainWindow._reserved_replay_id
+
+    observed = []
+
+    def release(reservation_id):
+        payload = __import__("json").loads(
+            fake_self._resume_state_path.read_text(encoding="utf-8")
+        )
+        observed.append((reservation_id, payload["items"][0]["status"]))
+        if len(observed) >= expected_attempts:
+            stop_event.set()
+        return {"success": True}
+
+    monkeypatch.setattr(auth_client, "release_reserved_work", release)
+    monkeypatch.setattr(main_window.time, "sleep", lambda *_args: None)
+    clock = iter(range(0, 1_000_000, 1_000))
+    monkeypatch.setattr(main_window.time, "time", lambda: next(clock))
+
+    MainWindow._run_upload_queue(
+        fake_self,
+        30,
+        {"api_key": "", "profile_dir": "test"},
+        ManagedFailurePipeline(),
+    )
+
+    assert len(pipeline_calls) == expected_attempts
+    assert pipeline_calls[0] == original_key
+    assert len(set(pipeline_calls)) == expected_attempts
+    expected_releases = [] if retry_with_new_key else [
+        ("legacy-managed-reservation", "reservation_release_pending")
+    ] * expected_attempts
+    assert observed == expected_releases
+    expected_status = "failed" if expected_attempts > 1 else "pending"
+    assert fake_self._resume_items[0]["status"] == expected_status
+    assert fake_self._resume_items[0]["idempotency_key"] != original_key

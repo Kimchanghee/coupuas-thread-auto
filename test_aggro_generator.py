@@ -1,5 +1,11 @@
+import pytest
+
 from src.services.aggro_generator import AggroGenerator
-from src.services.managed_ai_client import ManagedGeneration, ManagedVariant
+from src.services.managed_ai_client import (
+    ManagedAiClientError,
+    ManagedGeneration,
+    ManagedVariant,
+)
 from src.services.post_concepts import (
     CONCEPT_BUYING_GUIDE,
     CONCEPT_PROBLEM_SOLUTION,
@@ -18,9 +24,11 @@ from src.services.thread_payload import (
 class _ManagedClientStub:
     def __init__(self):
         self.calls = 0
+        self.idempotency_keys = []
 
-    def generate_variants(self, _product_info):
+    def generate_variants(self, _product_info, *, idempotency_key=""):
         self.calls += 1
+        self.idempotency_keys.append(idempotency_key)
         return ManagedGeneration(
             ai_job_id="job-1",
             reservation_id="res-1",
@@ -72,6 +80,51 @@ def test_managed_provider_generates_four_variants_with_one_server_call():
     assert variants[0]["managed_ai_quota_mode"] == "legacy"
     assert variants[0]["first_post"]["media_path"] is None
     assert variants[0]["second_post"]["media_path"] == "media/product.jpg"
+
+
+def test_managed_provider_forwards_durable_generation_key():
+    managed = _ManagedClientStub()
+    generator = AggroGenerator(ai_provider="managed", managed_client=managed)
+
+    generator.generate_product_variants(
+        {
+            "title": "상품",
+            "original_url": "https://example.test/item",
+            "managed_ai_idempotency_key": "queue-item-key",
+        }
+    )
+
+    assert managed.idempotency_keys == ["queue-item-key"]
+
+
+def test_managed_downstream_postprocessing_error_keeps_reservation_metadata(
+    monkeypatch,
+):
+    generator = AggroGenerator(
+        ai_provider="managed",
+        managed_client=_ManagedClientStub(),
+    )
+    monkeypatch.setattr(
+        generator,
+        "get_hook_variant",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("unsafe downstream detail")
+        ),
+    )
+
+    with pytest.raises(ManagedAiClientError) as exc_info:
+        generator.generate_product_post(
+            {
+                "title": "상품",
+                "original_url": "https://example.test/item",
+            }
+        )
+
+    error = exc_info.value
+    assert error.reservation_release_pending is True
+    assert error.reservation_id == "res-1"
+    assert error.ai_job_id == "job-1"
+    assert "unsafe downstream detail" not in str(error)
 
 
 def test_first_post_fallback_is_product_specific_and_link_free():

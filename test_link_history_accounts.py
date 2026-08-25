@@ -1,5 +1,6 @@
 import pytest
 
+import src.services.link_history as link_history_module
 from src.services.link_history import LinkHistory
 
 
@@ -58,3 +59,24 @@ def test_history_records_are_read_only_copies_for_ui(tmp_path):
     records[0]["title"] = "변경 시도"
 
     assert history.get_records()[0]["title"] == "테스트 상품"
+
+
+def test_save_failure_rolls_back_memory_and_does_not_acknowledge_upload(
+    monkeypatch,
+    tmp_path,
+):
+    history = LinkHistory(account_id="creator", history_root=tmp_path)
+    url = "https://example.test/product/atomic"
+    monkeypatch.setattr(
+        link_history_module.os,
+        "replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        history.add_link(url, "상품", success=True)
+
+    assert history.is_uploaded(url) is False
+    assert history.get_records() == []
+    assert history.get_stats() == {"total": 0, "success": 0, "failed": 0}
+    assert not (tmp_path / "creator.json").exists()

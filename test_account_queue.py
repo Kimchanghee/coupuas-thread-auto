@@ -37,3 +37,20 @@ def test_current_item_is_restored_after_interrupted_work(tmp_path):
 def test_account_id_cannot_escape_queue_root(tmp_path):
     with pytest.raises(ValueError):
         AccountQueueStore("../outside", tmp_path)
+
+
+def test_failed_queue_save_rolls_back_current_stage(monkeypatch, tmp_path):
+    queue = AccountQueueStore("account-a", tmp_path)
+    queue.enqueue("https://example.test/product")
+    queue.reserve_next()
+    before = queue.snapshot()
+    monkeypatch.setattr(
+        queue,
+        "_save",
+        lambda: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        queue.update_current(stage="posting")
+
+    assert queue.snapshot() == before

@@ -138,5 +138,24 @@ test("parses gateway content and quota contracts", () => {
   );
   assert.equal(isAllowedQuotaPayload({ available: true }), true);
   assert.equal(isAllowedQuotaPayload({ success: false }), false);
+  assert.equal(isAllowedQuotaPayload({ available: "false" }), false);
+  assert.equal(isAllowedQuotaPayload({ allowed: 1 }), false);
+  assert.equal(isAllowedQuotaPayload({ success: "true" }), false);
+  assert.equal(isAllowedQuotaPayload({ status: "ok" }), false);
   assert.equal(extractReservationId({ work_token: "res-123" }), "res-123");
+});
+
+test("caps feature work before mapping untrusted array entries", () => {
+  const features = Array.from({ length: 12 }, (_, index) => `특징 ${index + 1}`);
+  features.push({
+    toString() {
+      throw new Error("entries beyond the cap must not be inspected");
+    },
+  });
+  const normalized = normalizeProduct({
+    title: "휴대용 미니 선풍기",
+    url: "https://link.coupang.com/a/example",
+    features,
+  });
+  assert.equal(normalized.features.length, 12);
 });

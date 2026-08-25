@@ -145,52 +145,73 @@ class AggroGenerator:
             from src.services.managed_ai_client import ManagedAiClient
 
             self._managed_client = ManagedAiClient()
+        idempotency_key = str(
+            product_info.get("managed_ai_idempotency_key") or ""
+        ).strip()
+        if idempotency_key:
+            return self._managed_client.generate_variants(
+                product_info,
+                idempotency_key=idempotency_key,
+            )
         return self._managed_client.generate_variants(product_info)
 
     def _managed_product_variants(self, product_info: dict) -> List[Dict[str, object]]:
         generation = self._managed_generation(product_info)
-        title = str(product_info.get("title", "") or product_info.get("product_title", "") or "")
-        original_url = str(product_info.get("original_url", "") or product_info.get("url", "") or "")
-        image_path: Optional[str] = product_info.get("image_path")
-        video_path: Optional[str] = product_info.get("video_path")
-        media_path = video_path if video_path else image_path
-        selected_concept_id = normalize_concept_id(
-            product_info.get("post_concept") or DEFAULT_POST_CONCEPT_ID
-        )
-        results: List[Dict[str, object]] = []
-        for variant in generation.variants:
-            root_post = {
-                "text": variant.root_text,
-                "media_path": None,
-                "media_type": None,
-            }
-            product_comment = {
-                "text": variant.product_comment_text,
-                "media_path": media_path,
-                "media_type": "video" if video_path else "image",
-            }
-            results.append(
-                {
-                    "root_post": root_post,
-                    "product_comment": product_comment,
-                    "first_post": root_post,
-                    "second_post": product_comment,
-                    "product_title": title,
-                    "original_url": original_url,
-                    "marketplace": product_info.get("marketplace"),
-                    "post_concept": selected_concept_id,
-                    "hook_variant": variant.variant_id,
-                    "managed_ai": True,
-                    "managed_ai_job_id": generation.ai_job_id,
-                    "managed_ai_reservation_id": generation.reservation_id,
-                    "managed_ai_quota_mode": generation.quota_mode,
-                    "managed_ai_prompt_version": generation.prompt_version,
-                    "managed_ai_model": generation.model,
-                    "managed_ai_degraded": generation.degraded,
-                    "managed_ai_degraded_reason": generation.degraded_reason,
-                }
+        try:
+            title = str(product_info.get("title", "") or product_info.get("product_title", "") or "")
+            original_url = str(product_info.get("original_url", "") or product_info.get("url", "") or "")
+            image_path: Optional[str] = product_info.get("image_path")
+            video_path: Optional[str] = product_info.get("video_path")
+            media_path = video_path if video_path else image_path
+            selected_concept_id = normalize_concept_id(
+                product_info.get("post_concept") or DEFAULT_POST_CONCEPT_ID
             )
-        return results
+            results: List[Dict[str, object]] = []
+            for variant in generation.variants:
+                root_post = {
+                    "text": variant.root_text,
+                    "media_path": None,
+                    "media_type": None,
+                }
+                product_comment = {
+                    "text": variant.product_comment_text,
+                    "media_path": media_path,
+                    "media_type": "video" if video_path else "image",
+                }
+                results.append(
+                    {
+                        "root_post": root_post,
+                        "product_comment": product_comment,
+                        "first_post": root_post,
+                        "second_post": product_comment,
+                        "product_title": title,
+                        "original_url": original_url,
+                        "marketplace": product_info.get("marketplace"),
+                        "post_concept": selected_concept_id,
+                        "hook_variant": variant.variant_id,
+                        "managed_ai": True,
+                        "managed_ai_job_id": generation.ai_job_id,
+                        "managed_ai_reservation_id": generation.reservation_id,
+                        "managed_ai_quota_mode": generation.quota_mode,
+                        "managed_ai_prompt_version": generation.prompt_version,
+                        "managed_ai_model": generation.model,
+                        "managed_ai_degraded": generation.degraded,
+                        "managed_ai_degraded_reason": generation.degraded_reason,
+                    }
+                )
+            return results
+        except Exception as exc:
+            from src.services.managed_ai_client import ManagedAiClientError
+
+            if isinstance(exc, ManagedAiClientError):
+                raise
+            raise ManagedAiClientError(
+                "MANAGED_AI_POSTPROCESSING_FAILED",
+                "AI 문안 처리 중 문제가 발생했습니다.",
+                reservation_release_pending=True,
+                reservation_id=generation.reservation_id,
+                ai_job_id=generation.ai_job_id,
+            ) from exc
 
     @staticmethod
     def _normalize_text(value: str) -> str:
@@ -550,14 +571,30 @@ class AggroGenerator:
         """Build 3-part post payload with media metadata."""
         if self._ai_provider == AI_PROVIDER_MANAGED:
             variants = self._managed_product_variants(product_info)
-            wanted = self.get_hook_variant(
-                variant_id or product_info.get("hook_variant")
-            )["id"]
-            for result in variants:
-                if result.get("hook_variant") == wanted:
-                    result["all_managed_variants"] = variants
-                    return result
-            raise RuntimeError("managed AI did not return the requested hook variant")
+            try:
+                wanted = self.get_hook_variant(
+                    variant_id or product_info.get("hook_variant")
+                )["id"]
+                for result in variants:
+                    if result.get("hook_variant") == wanted:
+                        result["all_managed_variants"] = variants
+                        return result
+                raise RuntimeError("managed AI did not return the requested hook variant")
+            except Exception as exc:
+                from src.services.managed_ai_client import ManagedAiClientError
+
+                if isinstance(exc, ManagedAiClientError):
+                    raise
+                metadata = variants[0] if variants else {}
+                raise ManagedAiClientError(
+                    "MANAGED_AI_POSTPROCESSING_FAILED",
+                    "AI 문안 처리 중 문제가 발생했습니다.",
+                    reservation_release_pending=True,
+                    reservation_id=str(
+                        metadata.get("managed_ai_reservation_id") or ""
+                    ),
+                    ai_job_id=str(metadata.get("managed_ai_job_id") or ""),
+                ) from exc
 
         title = str(product_info.get("title", "") or "")
         keywords = str(product_info.get("search_keywords", "") or "")

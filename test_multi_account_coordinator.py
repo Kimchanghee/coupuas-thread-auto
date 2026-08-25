@@ -47,6 +47,8 @@ def test_coordinator_runs_accounts_round_robin_with_one_callback_at_a_time():
 
     assert calls == ["a", "b", "a", "b"]
     assert max_active_callbacks == 1
+    assert coordinator.snapshot("a").enabled is False
+    assert coordinator.snapshot("b").enabled is False
 
 
 def test_blocked_account_does_not_stop_other_accounts():

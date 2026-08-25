@@ -540,7 +540,13 @@ class CoupangPartnersPipeline:
                     normalize_comment(variant)
         return post_data
 
-    def process_link(self, product_url: str, user_keywords: str = None) -> Optional[Dict]:
+    def process_link(
+        self,
+        product_url: str,
+        user_keywords: str = None,
+        *,
+        idempotency_key: str = "",
+    ) -> Optional[Dict]:
         """단일 상품 링크 처리
 
         Args:
@@ -605,6 +611,8 @@ class CoupangPartnersPipeline:
 
         product_info.setdefault("original_url", str(product_url or "").strip())
         product_info.setdefault("affiliate_url", product_info.get("original_url"))
+        if idempotency_key:
+            product_info["managed_ai_idempotency_key"] = str(idempotency_key)
 
         # 사용자 키워드가 제공되면 우선 사용
         if user_keywords:
@@ -650,13 +658,34 @@ class CoupangPartnersPipeline:
 
         print("  [2단계] 게시글 문구 생성...")
         post_concept = normalize_concept_id(getattr(config, "post_concept", ""))
-        post_data = self.aggro_generator.generate_product_post(
-            product_info,
-            api_key=self._resolve_google_api_key(),
-            concept_id=post_concept,
-        )
-        post_data = self._normalize_second_post_disclosure(post_data, product_info)
-        print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")
+        post_data = None
+        try:
+            post_data = self.aggro_generator.generate_product_post(
+                product_info,
+                api_key=self._resolve_google_api_key(),
+                concept_id=post_concept,
+            )
+            post_data = self._normalize_second_post_disclosure(post_data, product_info)
+            print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")
+        except Exception as exc:
+            from src.services.managed_ai_client import ManagedAiClientError
+
+            if isinstance(exc, ManagedAiClientError):
+                raise
+            reservation_id = str(
+                (post_data or {}).get("managed_ai_reservation_id") or ""
+            ).strip()
+            if reservation_id:
+                raise ManagedAiClientError(
+                    "MANAGED_AI_POSTPROCESSING_FAILED",
+                    "AI 문안 처리 중 문제가 발생했습니다.",
+                    reservation_release_pending=True,
+                    reservation_id=reservation_id,
+                    ai_job_id=str(
+                        (post_data or {}).get("managed_ai_job_id") or ""
+                    ),
+                ) from exc
+            raise
 
         return post_data
 

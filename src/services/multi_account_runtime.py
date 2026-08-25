@@ -43,6 +43,8 @@ class MultiAccountRuntime:
         self._stores: Dict[str, AccountQueueStore] = {}
         self._histories: Dict[str, LinkHistory] = {}
         self._worker_thread: Optional[threading.Thread] = None
+        self._worker_generation = 0
+        self._restart_requested = False
         self._runner = self._build_runner()
         self._coordinator = MultiAccountCoordinator(
             self._runner.process_one,
@@ -176,13 +178,29 @@ class MultiAccountRuntime:
                 else None
             )
             current_item = snapshot.get("current_item")
+            current_stage = (
+                str(current_item.get("stage") or "")
+                if isinstance(current_item, dict)
+                else ""
+            )
             if (
                 isinstance(current_item, dict)
-                and str(current_item.get("stage") or "") in {"", "parsing"}
+                and current_stage in {"", "parsing"}
                 and not (existing_state is not None and existing_state.running)
             ):
                 store.requeue_current()
                 snapshot = store.snapshot()
+                current_item = snapshot.get("current_item")
+                current_stage = (
+                    str(current_item.get("stage") or "")
+                    if isinstance(current_item, dict)
+                    else ""
+                )
+            persisted_block_reason = (
+                "uncertain_external_post"
+                if current_stage in {"posting", "posting_unknown"}
+                else ""
+            )
             pending_count = len(snapshot.get("pending_items") or []) + (
                 1 if snapshot.get("current_item") else 0
             )
@@ -192,18 +210,26 @@ class MultiAccountRuntime:
             except (TypeError, ValueError):
                 next_allowed_at = 0.0
             if account.account_id in existing:
-                self._coordinator.update_account(
-                    account.account_id,
-                    interval_seconds=account.upload_interval,
-                    pending_count=pending_count,
-                    next_allowed_at=next_allowed_at,
-                )
+                changes = {
+                    "interval_seconds": account.upload_interval,
+                    "pending_count": pending_count,
+                    "next_allowed_at": next_allowed_at,
+                }
+                if persisted_block_reason:
+                    changes.update(
+                        enabled=False,
+                        blocked_reason=persisted_block_reason,
+                        last_error=persisted_block_reason,
+                    )
+                self._coordinator.update_account(account.account_id, **changes)
             else:
                 self._coordinator.register_account(
                     account.account_id,
                     interval_seconds=account.upload_interval,
                     pending_count=pending_count,
                     next_allowed_at=next_allowed_at,
+                    blocked_reason=persisted_block_reason,
+                    last_error=persisted_block_reason,
                 )
 
         for account_id in existing - account_ids:
@@ -304,12 +330,32 @@ class MultiAccountRuntime:
         self._coordinator.start_all()
         self._ensure_worker()
 
+    def resolve_posting_unknown(self, account_id: str, resolution: str) -> dict:
+        """Resolve a durable ambiguous-post item and resume when safe."""
+        result = self._runner.resolve_posting_unknown(account_id, resolution)
+        pending_count = max(0, int(result.pending_count or 0))
+        block_reason = str(result.block_reason or "")
+        self._coordinator.update_account(
+            account_id,
+            pending_count=pending_count,
+            enabled=bool(pending_count > 0 and not block_reason),
+            blocked_reason=block_reason,
+            last_error=block_reason,
+            next_allowed_at=0.0,
+        )
+        resolved_state = self.snapshot(account_id)
+        if pending_count > 0 and not block_reason:
+            self._ensure_worker()
+        return resolved_state
+
     def stop_account(self, account_id: str) -> None:
         self.queue_store(account_id).request_stop(True)
         self._coordinator.stop_account(account_id)
         self._emit_state(account_id)
 
     def stop_all(self) -> None:
+        with self._lock:
+            self._restart_requested = False
         for store in list(self._stores.values()):
             store.request_stop(True)
         self._coordinator.request_stop()
@@ -332,20 +378,36 @@ class MultiAccountRuntime:
 
     def _ensure_worker(self) -> None:
         with self._lock:
-            if self._worker_thread is not None and self._worker_thread.is_alive():
-                return
+            # A Start that arrives while the previous worker is retiring must
+            # clear the cooperative stop and be remembered until finalization.
             self._coordinator.reset_stop()
+            if self._worker_thread is not None and self._worker_thread.is_alive():
+                self._restart_requested = True
+                return
+            self._restart_requested = False
+            self._start_worker_locked()
 
-            def run():
-                try:
-                    self._coordinator.run_until_idle(poll_seconds=0.25)
-                finally:
-                    with self._lock:
+    def _start_worker_locked(self) -> None:
+        """Start exactly one worker. Caller must hold ``self._lock``."""
+        self._worker_generation += 1
+        generation = self._worker_generation
+
+        def run():
+            try:
+                self._coordinator.run_until_idle(poll_seconds=0.25)
+            finally:
+                with self._lock:
+                    if generation == self._worker_generation:
                         self._worker_thread = None
+                        restart = self._restart_requested
+                        self._restart_requested = False
+                        if restart:
+                            self._coordinator.reset_stop()
+                            self._start_worker_locked()
 
-            self._worker_thread = threading.Thread(
-                target=run,
-                daemon=True,
-                name="multi-account-upload-coordinator",
-            )
-            self._worker_thread.start()
+        self._worker_thread = threading.Thread(
+            target=run,
+            daemon=True,
+            name=f"multi-account-upload-coordinator-{generation}",
+        )
+        self._worker_thread.start()

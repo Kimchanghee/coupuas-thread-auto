@@ -5,6 +5,7 @@ import sys
 import time
 
 from src.computer_use_agent import ComputerUseAgent
+from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
 
 if sys.platform == "win32":
@@ -47,25 +48,15 @@ def main() -> None:
         current_url = agent.page.url
         print(f"현재 주소: {current_url}")
 
-        is_logged_in = False
-        try:
-            if agent.page.locator("article").count() > 0:
-                is_logged_in = True
-            if not is_logged_in and agent.page.locator('a[href*="compose"], button[aria-label*="New"]').count() > 0:
-                is_logged_in = True
-            if not is_logged_in and "login" not in current_url.lower():
-                is_logged_in = True
-        except Exception:
-            print("로그인 상태를 자동으로 확인하지 못했습니다.")
-
-        if not is_logged_in:
-            confirm = input("자동 확인에 실패했습니다. 그래도 계속할까요? (y/n): ").strip().lower()
-            if confirm != "y":
-                print("취소했습니다. setup_login.py를 다시 실행해주세요.")
-                return
+        helper = ThreadsPlaywrightHelper(agent.page)
+        if not helper.check_login_status():
+            print("실제 Threads 인증 상태를 확인하지 못했습니다.")
+            print("브라우저에서 로그인을 완료한 뒤 setup_login.py를 다시 실행해주세요.")
+            return
 
         print("암호화된 세션을 저장합니다...")
-        agent.save_session()
+        if not agent.save_session():
+            raise RuntimeError("브라우저 세션 저장 결과를 확인하지 못했습니다.")
 
         storage_path = agent._get_storage_state_path()
         if os.path.exists(storage_path):
@@ -86,7 +77,9 @@ def main() -> None:
     finally:
         print()
         print("브라우저를 닫습니다...")
-        agent.close()
+        # Session setup explicitly persists only after robust authentication.
+        # Never let cleanup overwrite an existing valid session after failure.
+        agent.close(save_session=False)
         print("완료")
 
 

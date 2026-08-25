@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -116,10 +117,12 @@ class LinkHistory:
             secure_file_permissions(self.history_file)
         except Exception:
             logger.exception("링크 이력 저장에 실패했습니다.")
+            raise
+        finally:
             if temp_path:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
-                except Exception:
+                except OSError:
                     pass
 
     def _normalize_url(self, url: str) -> str:
@@ -137,14 +140,17 @@ class LinkHistory:
         with self._lock:
             return normalized in self._uploaded_set
 
-    def add_link(self, url: str, product_title: str = "", success: bool = True) -> None:
+    def add_link(self, url: str, product_title: str = "", success: bool = True) -> bool:
         normalized = self._normalize_url(url)
         if not normalized:
-            return
+            return False
 
         with self._lock:
             if normalized in self._uploaded_set:
-                return
+                return True
+
+            previous_history = copy.deepcopy(self._history)
+            previous_uploaded = set(self._uploaded_set)
 
             record = {
                 "url": str(url or "").strip(),
@@ -163,7 +169,15 @@ class LinkHistory:
                 stats["failed"] = int(stats.get("failed", 0)) + 1
             if success:
                 self._uploaded_set.add(normalized)
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                # Memory must describe the same durable state callers will see
+                # after a restart. Never acknowledge a link that was not saved.
+                self._history = previous_history
+                self._uploaded_set = previous_uploaded
+                raise
+            return True
 
     def get_uploaded_urls(self) -> Set[str]:
         with self._lock:
@@ -194,9 +208,16 @@ class LinkHistory:
 
     def clear_history(self) -> None:
         with self._lock:
+            previous_history = copy.deepcopy(self._history)
+            previous_uploaded = set(self._uploaded_set)
             self._history = self._default_payload()
             self._uploaded_set.clear()
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._history = previous_history
+                self._uploaded_set = previous_uploaded
+                raise
 
 
 _instance: Optional[LinkHistory] = None

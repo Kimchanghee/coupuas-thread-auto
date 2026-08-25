@@ -53,6 +53,7 @@ _INTERNAL_MESSAGE_MAP = {
     "process_error": "작업 처리 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
     "quota_commit_failed": "게시 완료 후 작업량 동기화에 실패했습니다. 잠시 후 다시 확인해주세요.",
     "quota_commit_pending": "게시 완료 후 작업량 확인이 필요합니다.",
+    "history_write_pending": "게시 기록 저장을 완료하지 못했습니다. 저장 공간을 확인한 뒤 다시 시도해주세요.",
     "quota_reservation_unsupported": "작업량을 안전하게 확인할 수 없어 작업을 중단했습니다.",
     "reservation_release_pending": "작업량 예약 해제를 확인하는 중입니다. 잠시 후 다시 시도해주세요.",
     "uncertain_external_post": "게시 결과를 확인하지 못했습니다. Threads에서 게시 여부를 확인해주세요.",

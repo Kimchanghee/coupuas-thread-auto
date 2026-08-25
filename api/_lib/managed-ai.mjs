@@ -145,9 +145,9 @@ export function normalizeProduct(rawProduct) {
   const keywords = sanitizeText(raw.keywords, 500);
   const featureSource = Array.isArray(raw.features) ? raw.features : [];
   const features = featureSource
+    .slice(0, 12)
     .map((item) => sanitizeText(item, 240))
-    .filter(Boolean)
-    .slice(0, 12);
+    .filter(Boolean);
 
   if (title.length < 2) {
     throw new ManagedAiError("INVALID_PRODUCT_FACTS", 422, "상품명이 필요합니다.");
@@ -372,10 +372,10 @@ export function parseGatewayContent(payload) {
 
 export function isAllowedQuotaPayload(payload) {
   if (!payload || typeof payload !== "object") return false;
-  if ("available" in payload) return Boolean(payload.available);
-  if ("allowed" in payload) return Boolean(payload.allowed);
-  if ("success" in payload) return Boolean(payload.success);
-  if ("status" in payload) return Boolean(payload.status);
+  if ("available" in payload) return payload.available === true;
+  if ("allowed" in payload) return payload.allowed === true;
+  if ("success" in payload) return payload.success === true;
+  if ("status" in payload) return payload.status === true;
   return false;
 }
 

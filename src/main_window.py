@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -134,6 +135,10 @@ CONTENT_W = 1000  # WIN_W - SIDEBAR_W
 CONTENT_H = 692   # WIN_H - HEADER_H - STATUSBAR_H
 STATUSBAR_H = 40
 UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
+
+
+class ResumeStatePersistenceError(RuntimeError):
+    """Raised when a legacy upload recovery boundary cannot be persisted."""
 
 LINK_TABLE_NUMBER_COLUMN = 0
 LINK_TABLE_CHANNEL_COLUMN = 1
@@ -3798,7 +3803,26 @@ class MainWindow(QMainWindow):
         self.status_badge.update_style(Colors.SUCCESS, "준비")
         self._relayout_header_account_card()
         self._sidebar_status_label.setText("완료")
-        self._save_resume_state("batch_finished")
+        try:
+            self._save_resume_state("batch_finished")
+        except ResumeStatePersistenceError:
+            logger.exception("완료 시 업로드 복구 상태 저장 실패")
+            message = (
+                "완료 상태를 저장하지 못했습니다. 복구 대기열을 유지하며, "
+                "저장 공간을 확인한 뒤 다시 시도해주세요."
+            )
+            self.status_badge.update_style(Colors.WARNING, "복구 필요")
+            self._sidebar_status_label.setText("복구 필요")
+            self.signals.log.emit(message)
+            self._set_run_state(
+                {
+                    "phase": "blocked",
+                    "message": message,
+                    "pending": self.link_queue.qsize(),
+                }
+            )
+            show_warning(self, "복구 상태 저장 실패", message)
+            return
 
         while not self.link_queue.empty():
             try:
@@ -3993,6 +4017,8 @@ class MainWindow(QMainWindow):
             "posting",
             "posting_unknown",
             "posted_commit_pending",
+            "history_write_pending",
+            "reservation_release_pending",
         }
 
     def _load_resume_state_file(self) -> dict:
@@ -4046,10 +4072,9 @@ class MainWindow(QMainWindow):
                 logger.exception("Posted item quota commit recovery failed")
                 result = {"success": False}
             if isinstance(result, dict) and self._is_work_allowed(result):
-                item["status"] = "completed"
+                item["status"] = "history_write_pending"
                 item["updated_at"] = datetime.now().astimezone().isoformat()
                 item.pop("reservation_id", None)
-                item.pop("idempotency_key", None)
                 item.pop("last_error", None)
                 changed = True
             else:
@@ -4066,6 +4091,266 @@ class MainWindow(QMainWindow):
                 self._resume_next_allowed_at = state.get("next_allowed_at")
             self._save_resume_state("posted_commit_reconcile")
         return state
+
+    def _reconcile_history_write_items(self, state: dict) -> dict:
+        """Finish duplicate-protection persistence without re-posting."""
+        items = state.get("items", []) if isinstance(state, dict) else []
+        changed = False
+        for item in items:
+            if not isinstance(item, dict) or str(item.get("status") or "").lower() != "history_write_pending":
+                continue
+            url = str(item.get("url") or "").strip()
+            title = str(item.get("product_title") or url)
+            try:
+                self.pipeline.link_history.add_link(url, title, success=True)
+            except Exception:
+                logger.exception("Posted item history recovery failed")
+                item["last_error"] = "history_write_retry_pending"
+                continue
+            item["status"] = "completed"
+            item["updated_at"] = datetime.now().astimezone().isoformat()
+            item.pop("idempotency_key", None)
+            item.pop("last_error", None)
+            changed = True
+
+        if changed or any(
+            isinstance(item, dict)
+            and str(item.get("status") or "").lower() == "history_write_pending"
+            for item in items
+        ):
+            with self._resume_state_lock:
+                self._resume_items = [dict(item) for item in items if isinstance(item, dict)]
+                self._resume_interval = max(int(state.get("interval") or 60), 30)
+                self._resume_next_allowed_at = state.get("next_allowed_at")
+            self._save_resume_state("history_write_reconcile")
+        return state
+
+    @staticmethod
+    def _reserved_replay_id(result) -> str:
+        """Return any reservation produced by the reconciliation request.
+
+        ``reserve_work`` may return an existing replay or create a fresh
+        reservation when the original managed-AI request never arrived.  Both
+        must be released before rotating the durable request key.
+        """
+        if not isinstance(result, dict):
+            return ""
+        if result.get("unsupported"):
+            return ""
+        if (
+            str(result.get("code") or "") == "IDEMPOTENCY_REPLAY"
+            and str(result.get("reservation_status") or "").lower() != "reserved"
+        ):
+            return ""
+        reservation_id = str(
+            result.get("reservation_id")
+            or result.get("reserve_id")
+            or result.get("work_token")
+            or ""
+        ).strip()
+        return reservation_id
+
+    def _reconcile_reservation_release_items(self, state: dict) -> dict:
+        """Release an AI reservation before allowing a new generation key."""
+        from src import auth_client
+
+        working = dict(state) if isinstance(state, dict) else {}
+        items = [
+            dict(item)
+            for item in working.get("items", [])
+            if isinstance(item, dict)
+        ]
+        working["items"] = items
+        changed = False
+        for item in items:
+            if str(item.get("status") or "").lower() != "reservation_release_pending":
+                continue
+            reservation_id = str(item.get("reservation_id") or "").strip()
+            if not reservation_id:
+                key = str(item.get("idempotency_key") or "").strip()
+                try:
+                    reservation_id = self._reserved_replay_id(
+                        auth_client.reserve_work(key)
+                    )
+                except Exception:
+                    reservation_id = ""
+                if reservation_id:
+                    item["reservation_id"] = reservation_id
+                    with self._resume_state_lock:
+                        self._resume_items = [dict(value) for value in items]
+                        self._resume_interval = max(
+                            int(working.get("interval") or 60),
+                            30,
+                        )
+                        self._resume_next_allowed_at = working.get("next_allowed_at")
+                    self._save_resume_state("reservation_replay_recovered")
+                else:
+                    item["last_error"] = "reservation_recovery_pending"
+                    changed = True
+                    continue
+            try:
+                released = auth_client.release_reserved_work(reservation_id)
+            except Exception:
+                released = {"success": False}
+            if not self._is_work_allowed(released):
+                item["last_error"] = "reservation_release_pending"
+                changed = True
+                continue
+            retry_count = int(item.get("retry_count", 0) or 0)
+            if retry_count > MAX_TRANSIENT_RETRIES:
+                item["status"] = "failed"
+                item["last_error"] = "managed_ai_retry_exhausted"
+            else:
+                item["status"] = "pending"
+                item["idempotency_key"] = uuid.uuid4().hex
+                item.pop("last_error", None)
+            item["updated_at"] = datetime.now().astimezone().isoformat()
+            item.pop("reservation_id", None)
+            item.pop("ai_job_id", None)
+            item.pop("reconciliation_lookup_pending", None)
+            changed = True
+
+        if changed:
+            with self._resume_state_lock:
+                self._resume_items = [dict(item) for item in items]
+                self._resume_interval = max(
+                    int(working.get("interval") or 60),
+                    30,
+                )
+                self._resume_next_allowed_at = working.get("next_allowed_at")
+                self._resume_recovered_idempotency_keys = {
+                    str(item.get("url") or ""): str(item.get("idempotency_key") or "")
+                    for item in items
+                    if item.get("url") and item.get("idempotency_key")
+                }
+            self._save_resume_state("reservation_release_reconcile")
+        return working
+
+    def _handle_managed_ai_reconciliation_error(
+        self,
+        url: str,
+        product_title: str,
+        exc: BaseException,
+        *,
+        retry_count: int | None = None,
+    ) -> str:
+        """Persist, release, and rotate an unusable managed-AI reservation."""
+        release_pending = bool(getattr(exc, "reservation_release_pending", False))
+        retry_with_new_key = bool(
+            getattr(exc, "retry_with_new_idempotency_key", False)
+            and not release_pending
+            and not str(getattr(exc, "reservation_id", "") or "").strip()
+        )
+        if not release_pending and not retry_with_new_key:
+            return "not_applicable"
+
+        url_text = str(url or "").strip()
+        key = str(
+            getattr(self, "_resume_recovered_idempotency_keys", {}).get(url_text)
+            or ""
+        ).strip()
+        if not key:
+            with self._resume_state_lock:
+                key = next(
+                    (
+                        str(item.get("idempotency_key") or "").strip()
+                        for item in self._resume_items
+                        if str(item.get("url") or "").strip() == url_text
+                    ),
+                    "",
+                )
+        reservation_id = str(getattr(exc, "reservation_id", "") or "").strip()
+        ai_job_id = str(getattr(exc, "ai_job_id", "") or "").strip()
+        if retry_count is None:
+            with self._resume_state_lock:
+                prior_retry_count = next(
+                    (
+                        int(item.get("retry_count", 0) or 0)
+                        for item in self._resume_items
+                        if str(item.get("url") or "").strip() == url_text
+                    ),
+                    0,
+                )
+            retry_count = prior_retry_count + 1
+        retry_count = max(1, int(retry_count))
+        if retry_with_new_key:
+            if retry_count > MAX_TRANSIENT_RETRIES:
+                self._mark_resume_item(
+                    url_text,
+                    "failed",
+                    product_title,
+                    "managed_ai_retry_exhausted",
+                    retry_count=retry_count,
+                    clear_reconciliation=True,
+                )
+                return "exhausted"
+            self._mark_resume_item(
+                url_text,
+                "pending",
+                product_title,
+                idempotency_key=uuid.uuid4().hex,
+                retry_count=retry_count,
+                clear_reconciliation=True,
+            )
+            return "requeued"
+
+        from src import auth_client
+
+        self._mark_resume_item(
+            url_text,
+            "reservation_release_pending",
+            product_title,
+            "reservation_release_pending",
+            reservation_id=reservation_id,
+            idempotency_key=key,
+            ai_job_id=ai_job_id,
+            retry_count=retry_count,
+            reconciliation_lookup_pending=not bool(reservation_id),
+        )
+        if not reservation_id:
+            try:
+                reservation_id = self._reserved_replay_id(
+                    auth_client.reserve_work(key)
+                )
+            except Exception:
+                reservation_id = ""
+            if not reservation_id:
+                return "blocked"
+            self._mark_resume_item(
+                url_text,
+                "reservation_release_pending",
+                product_title,
+                reservation_id=reservation_id,
+                idempotency_key=key,
+                ai_job_id=ai_job_id,
+                retry_count=retry_count,
+                reconciliation_lookup_pending=False,
+            )
+        try:
+            released = auth_client.release_reserved_work(reservation_id)
+        except Exception:
+            released = {"success": False}
+        if not self._is_work_allowed(released):
+            return "blocked"
+        if retry_count > MAX_TRANSIENT_RETRIES:
+            self._mark_resume_item(
+                url_text,
+                "failed",
+                product_title,
+                "managed_ai_retry_exhausted",
+                retry_count=retry_count,
+                clear_reconciliation=True,
+            )
+            return "exhausted"
+        self._mark_resume_item(
+            url_text,
+            "pending",
+            product_title,
+            idempotency_key=uuid.uuid4().hex,
+            retry_count=retry_count,
+            clear_reconciliation=True,
+        )
+        return "requeued"
 
     def _ask_ambiguous_post_result(self, title: str) -> str:
         """Ask for a posting outcome with explicit Korean button labels."""
@@ -4124,10 +4409,9 @@ class MainWindow(QMainWindow):
                     if not isinstance(result, dict) or not self._is_work_allowed(result):
                         item["last_error"] = "quota_commit_retry_pending"
                         continue
-                item["status"] = "completed"
+                item["status"] = "history_write_pending"
                 item["updated_at"] = datetime.now().astimezone().isoformat()
                 item.pop("reservation_id", None)
-                item.pop("idempotency_key", None)
                 item.pop("last_error", None)
                 changed = True
             elif choice == "not_posted":
@@ -4157,16 +4441,19 @@ class MainWindow(QMainWindow):
             self._save_resume_state("ambiguous_post_reconcile")
         return state
 
-    def _save_resume_state(self, reason: str = "") -> None:
+    def _save_resume_state(self, reason: str = "") -> bool:
         with self._resume_state_lock:
             items = [dict(item) for item in self._resume_items]
             unfinished = [item for item in items if self._is_resume_unfinished(item.get("status"))]
             if not unfinished:
                 try:
                     self._resume_state_path.unlink(missing_ok=True)
-                except Exception:
-                    logger.debug("완료된 업로드 대기열 파일 삭제 실패", exc_info=True)
-                return
+                except Exception as exc:
+                    logger.exception("완료된 업로드 대기열 파일 삭제 실패")
+                    raise ResumeStatePersistenceError(
+                        "업로드 대기열 복구 상태를 정리하지 못했습니다."
+                    ) from exc
+                return True
 
             payload = {
                 "version": 1,
@@ -4188,16 +4475,23 @@ class MainWindow(QMainWindow):
                     suffix=".tmp",
                     delete=False,
                 ) as tmp:
-                    json.dump(payload, tmp, ensure_ascii=False, indent=2)
                     temp_path = tmp.name
+                    json.dump(payload, tmp, ensure_ascii=False, indent=2)
+                    tmp.flush()
+                    os.fsync(tmp.fileno())
                 os.replace(temp_path, self._resume_state_path)
-            except Exception:
+            except Exception as exc:
                 logger.exception("업로드 대기열 저장에 실패했습니다.")
+                raise ResumeStatePersistenceError(
+                    "업로드 대기열 복구 상태를 저장하지 못했습니다."
+                ) from exc
+            finally:
                 if temp_path:
                     try:
                         Path(temp_path).unlink(missing_ok=True)
                     except Exception:
                         pass
+            return True
 
     def _initialize_resume_state(
         self,
@@ -4210,6 +4504,9 @@ class MainWindow(QMainWindow):
         normalized = self._normalize_link_data(link_data)
         now_text = datetime.now().astimezone().isoformat()
         with self._resume_state_lock:
+            previous_items = [dict(item) for item in self._resume_items]
+            previous_interval = self._resume_interval
+            previous_next_allowed_at = self._resume_next_allowed_at
             self._resume_interval = max(int(interval or 60), 30)
             self._resume_next_allowed_at = next_allowed_at
             self._resume_items = [
@@ -4222,12 +4519,18 @@ class MainWindow(QMainWindow):
                     "source": source,
                     "idempotency_key": str(
                         getattr(self, "_resume_recovered_idempotency_keys", {}).get(url)
-                        or ""
+                        or uuid.uuid4().hex
                     ),
                 }
                 for url, keyword in normalized
             ]
-        self._save_resume_state(f"{source}_start")
+            try:
+                self._save_resume_state(f"{source}_start")
+            except Exception:
+                self._resume_items = previous_items
+                self._resume_interval = previous_interval
+                self._resume_next_allowed_at = previous_next_allowed_at
+                raise
 
     def _mark_resume_item(
         self,
@@ -4238,11 +4541,18 @@ class MainWindow(QMainWindow):
         *,
         reservation_id: str = "",
         idempotency_key: str = "",
+        ai_job_id: str = "",
+        retry_count: int | None = None,
+        reconciliation_lookup_pending: bool | None = None,
+        clear_reconciliation: bool = False,
     ) -> None:
         url_text = str(url or "").strip()
         if not url_text:
             return
         with self._resume_state_lock:
+            previous_items = [dict(item) for item in self._resume_items]
+            recovered = getattr(self, "_resume_recovered_idempotency_keys", None)
+            previous_recovered = dict(recovered or {})
             for item in self._resume_items:
                 if item.get("url") != url_text:
                     continue
@@ -4254,24 +4564,82 @@ class MainWindow(QMainWindow):
                     item["last_error"] = str(error)[:300]
                 if reservation_id:
                     item["reservation_id"] = str(reservation_id)
+                if ai_job_id:
+                    item["ai_job_id"] = str(ai_job_id)
+                if retry_count is not None:
+                    item["retry_count"] = max(0, int(retry_count))
+                if reconciliation_lookup_pending is not None:
+                    item["reconciliation_lookup_pending"] = bool(
+                        reconciliation_lookup_pending
+                    )
                 if idempotency_key:
                     item["idempotency_key"] = str(idempotency_key)
                     recovered = getattr(self, "_resume_recovered_idempotency_keys", None)
                     if recovered is None:
                         recovered = self._resume_recovered_idempotency_keys = {}
                     recovered[url_text] = str(idempotency_key)
+                if clear_reconciliation:
+                    item.pop("reservation_id", None)
+                    item.pop("ai_job_id", None)
+                    item.pop("reconciliation_lookup_pending", None)
                 if str(status).lower() == "completed":
                     item.pop("reservation_id", None)
                     item.pop("idempotency_key", None)
                     item.pop("last_error", None)
+                    item.pop("ai_job_id", None)
+                    item.pop("reconciliation_lookup_pending", None)
+                    item.pop("retry_count", None)
                     getattr(self, "_resume_recovered_idempotency_keys", {}).pop(url_text, None)
                 break
-        self._save_resume_state(f"item_{status}")
+            try:
+                self._save_resume_state(f"item_{status}")
+            except Exception:
+                self._resume_items = previous_items
+                if recovered is not None:
+                    recovered.clear()
+                    recovered.update(previous_recovered)
+                raise
+
+    def _resume_item_idempotency_key(self, url: str) -> str:
+        """Return the durable key for one logical queued generation request."""
+        url_text = str(url or "").strip()
+        with self._resume_state_lock:
+            previous_items = [dict(item) for item in self._resume_items]
+            recovered = self._resume_recovered_idempotency_keys
+            previous_recovered = dict(recovered)
+            for item in self._resume_items:
+                if str(item.get("url") or "").strip() != url_text:
+                    continue
+                key = str(item.get("idempotency_key") or "").strip()
+                if not key:
+                    key = uuid.uuid4().hex
+                    item["idempotency_key"] = key
+                self._resume_recovered_idempotency_keys[url_text] = key
+                break
+            else:
+                key = str(
+                    self._resume_recovered_idempotency_keys.get(url_text)
+                    or uuid.uuid4().hex
+                )
+                self._resume_recovered_idempotency_keys[url_text] = key
+            try:
+                self._save_resume_state("ensure_idempotency_key")
+            except Exception:
+                self._resume_items = previous_items
+                recovered.clear()
+                recovered.update(previous_recovered)
+                raise
+            return key
 
     def _set_resume_next_allowed_at(self, value) -> None:
         with self._resume_state_lock:
+            previous = self._resume_next_allowed_at
             self._resume_next_allowed_at = value
-        self._save_resume_state("next_allowed_at")
+            try:
+                self._save_resume_state("next_allowed_at")
+            except Exception:
+                self._resume_next_allowed_at = previous
+                raise
 
     def _wait_for_resume_interval_if_needed(self, log, total_links: int | None = None) -> None:
         try:
@@ -4337,8 +4705,19 @@ class MainWindow(QMainWindow):
         if self.is_running:
             return
         state = self._load_resume_state_file()
-        state = self._reconcile_posted_commit_items(state)
-        state = self._reconcile_ambiguous_post_items(state)
+        try:
+            state = self._reconcile_reservation_release_items(state)
+            state = self._reconcile_posted_commit_items(state)
+            state = self._reconcile_ambiguous_post_items(state)
+            state = self._reconcile_history_write_items(state)
+        except ResumeStatePersistenceError:
+            logger.exception("업로드 복구 상태 조정 내용을 저장하지 못했습니다.")
+            show_warning(
+                self,
+                "복구 상태 저장 실패",
+                "저장된 작업을 안전하게 갱신하지 못했습니다. 저장 공간을 확인한 뒤 다시 시도해주세요.",
+            )
+            return
         pending = self._resume_pending_link_data(state)
         if not pending:
             return
@@ -5216,6 +5595,7 @@ class MainWindow(QMainWindow):
             elif pending == 0:
                 phase = "finished"
 
+        account_active = running or (enabled and pending > 0 and not blocked_reason)
         if account_id == self.selected_threads_account_id():
             self._render_account_queue(account_id)
             stats = payload.get("stats") or {}
@@ -5241,9 +5621,9 @@ class MainWindow(QMainWindow):
                     "current_item": str((payload.get("current_item") or {}).get("url", "")),
                 }
             )
-            self.start_btn.setEnabled(not running)
+            self.start_btn.setEnabled(not account_active)
             self.add_btn.setEnabled(True)
-            self.stop_btn.setEnabled(running or enabled)
+            self.stop_btn.setEnabled(account_active)
 
         tabs = getattr(self, "_upload_account_tabs", None)
         if tabs is not None:
@@ -5254,14 +5634,18 @@ class MainWindow(QMainWindow):
             )
             if tab_index >= 0 and account is not None:
                 label = account.display_name or account.expected_username
-                marker = " ●" if running or enabled else (" !" if blocked_reason else "")
+                marker = " ●" if account_active else (" !" if blocked_reason else "")
                 tabs.setTabText(tab_index, label + marker)
 
         runtime = getattr(self, "_multi_account_runtime", None)
         snapshots = runtime.snapshots().values() if runtime is not None else []
         any_active = any(
             bool(getattr(item.get("schedule"), "running", False))
-            or bool(getattr(item.get("schedule"), "enabled", False))
+            or (
+                bool(getattr(item.get("schedule"), "enabled", False))
+                and int(getattr(item.get("schedule"), "pending_count", 0) or 0) > 0
+                and not bool(getattr(item.get("schedule"), "blocked_reason", ""))
+            )
             for item in snapshots
         )
         self.is_running = any_active
@@ -5271,6 +5655,108 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(300, self._maybe_show_update_notice)
         if phase in {"finished", "blocked", "error"}:
             self._refresh_auxiliary_pages()
+
+        prompt_accounts = getattr(self, "_ambiguous_post_prompt_accounts", None)
+        if prompt_accounts is None:
+            prompt_accounts = self._ambiguous_post_prompt_accounts = set()
+        if blocked_reason == "uncertain_external_post":
+            current_stage = str((payload.get("current_item") or {}).get("stage") or "")
+            if (
+                current_stage in {"posting", "posting_unknown"}
+                and account_id not in prompt_accounts
+            ):
+                prompt_accounts.add(account_id)
+                QTimer.singleShot(
+                    0,
+                    lambda selected_id=account_id: self._resolve_multi_account_ambiguous_post(
+                        selected_id
+                    ),
+                )
+        elif account_id in prompt_accounts:
+            prompt_accounts.discard(account_id)
+
+    def _resolve_multi_account_ambiguous_post(self, account_id: str) -> None:
+        """Show the same three-way reconciliation used by the legacy queue."""
+        runtime = getattr(self, "_multi_account_runtime", None)
+        prompt_accounts = getattr(self, "_ambiguous_post_prompt_accounts", set())
+        if runtime is None:
+            prompt_accounts.discard(account_id)
+            return
+        choice = ""
+        try:
+            state = runtime.snapshot(account_id)
+            item = state.get("current_item") or {}
+            if str(item.get("stage") or "") not in {"posting", "posting_unknown"}:
+                prompt_accounts.discard(account_id)
+                return
+            title = str(item.get("product_name") or item.get("url") or "게시글")
+            choice = self._ask_ambiguous_post_result(title)
+            resolved_state = runtime.resolve_posting_unknown(account_id, choice)
+            if not isinstance(resolved_state, dict):
+                resolved_state = runtime.snapshot(account_id)
+
+            schedule = resolved_state.get("schedule")
+            if isinstance(schedule, dict):
+                blocked_reason = str(schedule.get("blocked_reason") or "")
+            else:
+                blocked_reason = str(getattr(schedule, "blocked_reason", "") or "")
+            resolved_current = resolved_state.get("current_item")
+            pending_items = resolved_state.get("pending_items") or []
+            item_id = str(item.get("item_id") or "")
+            item_url = str(item.get("url") or "")
+
+            def is_original(candidate) -> bool:
+                if not isinstance(candidate, dict):
+                    return False
+                if item_id:
+                    return str(candidate.get("item_id") or "") == item_id
+                return bool(
+                    item_url and str(candidate.get("url") or "") == item_url
+                )
+
+            posted_complete = bool(
+                choice == "posted"
+                and not blocked_reason
+                and not is_original(resolved_current)
+                and not any(is_original(candidate) for candidate in pending_items)
+                and item_url in (resolved_state.get("processed_urls") or [])
+            )
+            requeued = bool(
+                choice == "not_posted"
+                and not blocked_reason
+                and resolved_current is None
+                and any(is_original(candidate) for candidate in pending_items)
+            )
+            if posted_complete:
+                self.signals.log.emit("게시됨으로 확인해 작업량과 업로드 기록을 동기화했습니다.")
+            elif requeued:
+                self.signals.log.emit("게시 안 됨으로 확인해 안전하게 대기열에 다시 넣었습니다.")
+            elif choice in {"posted", "not_posted"}:
+                pending_message = user_friendly_message(
+                    blocked_reason,
+                    "게시 결과 처리가 아직 완료되지 않았습니다. 계정 상태를 확인한 뒤 다시 시도해주세요.",
+                )
+                if "아직 완료되지 않았습니다" in pending_message:
+                    self.signals.log.emit(pending_message)
+                else:
+                    self.signals.log.emit(
+                        f"게시 결과 처리가 아직 완료되지 않았습니다. {pending_message}"
+                    )
+        except Exception as exc:
+            logger.exception("다중 계정 게시 결과 복구에 실패했습니다.")
+            show_error(
+                self,
+                "게시 결과 복구 실패",
+                user_friendly_message(
+                    exc,
+                    "복구 상태를 저장하지 못했습니다. 저장 공간과 네트워크를 확인해주세요.",
+                ),
+            )
+        finally:
+            # "later" remains durably blocked but should not immediately open
+            # the same modal again. A future app/session state refresh may ask.
+            if choice != "later":
+                prompt_accounts.discard(account_id)
 
     def _add_threads_account_from_ui(self):
         if len(self._threads_accounts()) >= self._threads_account_limit():
@@ -6475,13 +6961,31 @@ class MainWindow(QMainWindow):
             runtime = self._multi_account_runtime
         runtime.refresh_accounts()
         if next_allowed_at:
-            runtime.queue_store(account.account_id).set_phase(
-                "waiting",
-                next_allowed_at=next_allowed_at,
-            )
-            runtime.refresh_accounts()
+            try:
+                runtime.queue_store(account.account_id).set_phase(
+                    "waiting",
+                    next_allowed_at=next_allowed_at,
+                )
+                runtime.refresh_accounts()
+            except Exception:
+                logger.exception("계정 대기열 예약 상태 저장 실패")
+                show_error(
+                    self,
+                    "대기열 저장 실패",
+                    "대기열을 저장하지 못해 작업을 시작하지 않았습니다. 저장 공간을 확인해주세요.",
+                )
+                return False
         self._configure_multi_account_pipeline(selected_provider, api_key)
-        added = runtime.enqueue(account.account_id, link_data)
+        try:
+            added = runtime.enqueue(account.account_id, link_data)
+        except Exception:
+            logger.exception("계정 대기열 저장 실패")
+            show_error(
+                self,
+                "대기열 저장 실패",
+                "대기열을 저장하지 못해 작업을 시작하지 않았습니다. 저장 공간을 확인해주세요.",
+            )
+            return False
         if added <= 0:
             show_info(self, "대기열", "모든 링크가 이미 이 계정의 대기열 또는 업로드 이력에 있습니다.")
             self._render_account_queue(account.account_id)
@@ -6790,7 +7294,16 @@ class MainWindow(QMainWindow):
         runtime = getattr(self, "_multi_account_runtime", None)
         account = self.selected_threads_account()
         if runtime is not None and account is not None:
-            added = runtime.enqueue(account.account_id, link_data)
+            try:
+                added = runtime.enqueue(account.account_id, link_data)
+            except Exception:
+                logger.exception("추가 대기열 저장 실패")
+                show_error(
+                    self,
+                    "대기열 저장 실패",
+                    "링크를 안전하게 저장하지 못해 대기열에 추가하지 않았습니다. 저장 공간을 확인해주세요.",
+                )
+                return
             self._account_drafts[account.account_id] = "\n".join(item[0] for item in link_data)
             self._render_account_queue(account.account_id)
             if added:
@@ -6807,18 +7320,63 @@ class MainWindow(QMainWindow):
                 show_info(self, "대기열", "새로 추가할 링크가 없습니다.")
             return
 
-        added = 0
         added_items = []
         with self._urls_lock:
+            known_urls = set(self.processed_urls)
             for item in link_data:
                 url = item[0]
-                if url not in self.processed_urls:
+                if url in known_urls:
+                    continue
+                known_urls.add(url)
+                added_items.append(item)
+
+        added = len(added_items)
+
+        if added > 0:
+            if added_items:
+                now_text = datetime.now().astimezone().isoformat()
+                with self._resume_state_lock:
+                    previous_items = [dict(item) for item in self._resume_items]
+                    previous_recovered = dict(
+                        getattr(self, "_resume_recovered_idempotency_keys", {})
+                    )
+                    known_urls = {entry.get("url") for entry in self._resume_items}
+                    for url, keyword in self._normalize_link_data(added_items):
+                        if url in known_urls:
+                            continue
+                        idempotency_key = uuid.uuid4().hex
+                        self._resume_items.append(
+                            {
+                                "url": url,
+                                "keyword": keyword or "",
+                                "status": "pending",
+                                "product_title": "",
+                                "updated_at": now_text,
+                                "source": "manual_add",
+                                "idempotency_key": idempotency_key,
+                            }
+                        )
+                        self._resume_recovered_idempotency_keys[url] = idempotency_key
+                    try:
+                        self._save_resume_state("queue_add")
+                    except ResumeStatePersistenceError:
+                        self._resume_items = previous_items
+                        self._resume_recovered_idempotency_keys.clear()
+                        self._resume_recovered_idempotency_keys.update(
+                            previous_recovered
+                        )
+                        logger.exception("추가 링크 복구 상태 저장 실패")
+                        show_error(
+                            self,
+                            "대기열 저장 실패",
+                            "링크를 안전하게 저장하지 못해 대기열에 추가하지 않았습니다. 저장 공간을 확인해주세요.",
+                        )
+                        return
+            with self._urls_lock:
+                for item in added_items:
+                    url = item[0]
                     self.link_queue.put(item)
                     self.processed_urls.add(url)
-                    added += 1
-                    added_items.append(item)
-
-                    # Add to table
                     row = self.link_table.rowCount()
                     self.link_table.insertRow(row)
                     self._set_link_table_row(
@@ -6829,26 +7387,6 @@ class MainWindow(QMainWindow):
                         marketplace=marketplace_for_url(url),
                     )
                     self._link_url_row_map[url] = row
-
-        if added > 0:
-            if added_items:
-                now_text = datetime.now().astimezone().isoformat()
-                with self._resume_state_lock:
-                    known_urls = {entry.get("url") for entry in self._resume_items}
-                    for url, keyword in self._normalize_link_data(added_items):
-                        if url in known_urls:
-                            continue
-                        self._resume_items.append(
-                            {
-                                "url": url,
-                                "keyword": keyword or "",
-                                "status": "pending",
-                                "product_title": "",
-                                "updated_at": now_text,
-                                "source": "manual_add",
-                            }
-                        )
-                self._save_resume_state("queue_add")
             self._log_user_activity(
                 "queue_add_links_success",
                 f"added={added}; queue_size={self.link_queue.qsize()}",
@@ -6881,7 +7419,15 @@ class MainWindow(QMainWindow):
 
         total_links = self.link_queue.qsize()
         quota_bypass = self._is_dev_quota_bypass_enabled()
-        transient_retry_counts = {}
+        with getattr(self, "_resume_state_lock", threading.RLock()):
+            transient_retry_counts = {
+                str(item.get("url") or ""): max(
+                    0,
+                    int(item.get("retry_count", 0) or 0),
+                )
+                for item in getattr(self, "_resume_items", [])
+                if isinstance(item, dict) and item.get("url")
+            }
         transient_retry_not_before = {}
 
         def log(msg):
@@ -7120,7 +7666,11 @@ class MainWindow(QMainWindow):
                     self.signals.step_update.emit(0, "done")
                     self.signals.step_update.emit(1, "active")
 
-                    post_data = pipeline_ref.process_link(url, user_keywords=keyword)
+                    post_data = pipeline_ref.process_link(
+                        url,
+                        user_keywords=keyword,
+                        idempotency_key=self._resume_item_idempotency_key(url),
+                    )
                     if not post_data:
                         results["parse_failed"] += 1
                         self._mark_resume_item(url, "parse_failed", error="parse_failed")
@@ -7141,11 +7691,65 @@ class MainWindow(QMainWindow):
                     break
                 except Exception as exc:
                     retry_count = int(transient_retry_counts.get(url, 0) or 0) + 1
+                    reconciliation = self._handle_managed_ai_reconciliation_error(
+                        url,
+                        str(keyword or url or ""),
+                        exc,
+                        retry_count=retry_count,
+                    )
+                    if reconciliation == "exhausted":
+                        transient_retry_counts.pop(url, None)
+                        transient_retry_not_before.pop(url, None)
+                        results["parse_failed"] += 1
+                        log(
+                            "관리형 AI 자동 재시도 한도에 도달해 이 항목을 중단했습니다."
+                        )
+                        self.signals.step_update.emit(1, "error")
+                        self.signals.link_status.emit(url, "실패", "재시도 한도 초과")
+                        self.signals.reset_steps.emit()
+                        continue
+                    if reconciliation == "requeued":
+                        delay = retry_delay_seconds(retry_count)
+                        transient_retry_counts[url] = retry_count
+                        transient_retry_not_before[url] = time.time() + delay
+                        self.link_queue.put((url, keyword))
+                        log(
+                            "관리형 AI 작업 예약을 안전하게 해제했습니다. "
+                            f"{delay}초 후 새 요청으로 다시 시도합니다."
+                        )
+                        self.signals.step_update.emit(1, "error")
+                        self.signals.link_status.emit(url, "대기", "안전한 자동 재시도")
+                        self.signals.reset_steps.emit()
+                        continue
+                    if reconciliation == "blocked":
+                        self.link_queue.put((url, keyword))
+                        results["cancelled"] = True
+                        message = (
+                            "관리형 AI 작업 예약 해제를 확인하지 못해 안전상 중단했습니다. "
+                            "복구 상태는 저장되었습니다."
+                        )
+                        log(message)
+                        emit_run_state(
+                            "blocked",
+                            message,
+                            str(keyword or url or ""),
+                            pending=self.link_queue.qsize(),
+                            completed=max(processed_count - 1, 0),
+                        )
+                        self.signals.step_update.emit(1, "error")
+                        self.signals.link_status.emit(url, "대기", "작업 예약 해제 필요")
+                        self.signals.reset_steps.emit()
+                        break
                     if is_transient_error(exc) and retry_count <= MAX_TRANSIENT_RETRIES:
                         delay = retry_delay_seconds(retry_count)
                         transient_retry_counts[url] = retry_count
                         transient_retry_not_before[url] = time.time() + delay
-                        self._mark_resume_item(url, "pending", error="temporary_retry")
+                        self._mark_resume_item(
+                            url,
+                            "pending",
+                            error="temporary_retry",
+                            retry_count=retry_count,
+                        )
                         self.link_queue.put((url, keyword))
                         log(
                             f"일시적인 연결 문제로 {delay}초 후 다시 시도합니다. "
@@ -7345,11 +7949,11 @@ class MainWindow(QMainWindow):
                     success = helper.create_thread_direct(posts_data)
                     recorded_success = bool(success)
                     stop_for_billing_sync = False
+                    stop_for_history_sync = False
                     pause_for_threads_ui = False
                     helper_error = str(getattr(helper, "last_error", "") or "")
                     if success:
                         if quota_bypass:
-                            self._mark_resume_item(url, "completed", product_name)
                             results["uploaded"] += 1
                             log(f"업로드 성공: {product_name}")
                             self.signals.step_update.emit(2, "done")
@@ -7390,7 +7994,6 @@ class MainWindow(QMainWindow):
                                     self.signals.step_update.emit(3, "error")
                                     self.signals.link_status.emit(url, "실패", f"과금 동기화 실패: {billing_msg}")
                                 else:
-                                    self._mark_resume_item(url, "completed", product_name)
                                     results["uploaded"] += 1
                                     log(f"업로드 성공: {product_name}")
                                     self.signals.step_update.emit(2, "done")
@@ -7453,10 +8056,37 @@ class MainWindow(QMainWindow):
                             self.signals.link_status.emit(url, "실패", product_name)
 
                     try:
-                        if success or not pause_for_threads_ui:
-                            pipeline_ref.link_history.add_link(url, product_name, success=bool(success))
+                        if success and recorded_success:
+                            self._mark_resume_item(
+                                url,
+                                "history_write_pending",
+                                product_name,
+                                idempotency_key=reservation_request_id,
+                            )
+                            pipeline_ref.link_history.add_link(
+                                url,
+                                product_name,
+                                success=True,
+                            )
+                            self._mark_resume_item(url, "completed", product_name)
+                        elif not success and not pause_for_threads_ui:
+                            pipeline_ref.link_history.add_link(
+                                url,
+                                product_name,
+                                success=False,
+                            )
                     except Exception:
                         logger.exception("업로드 이력 저장에 실패했습니다.")
+                        if success and recorded_success:
+                            stop_for_history_sync = True
+                            emit_run_state(
+                                "blocked",
+                                "게시 기록 저장에 실패했습니다. 저장 공간을 확인한 뒤 다시 시도해주세요.",
+                                product_name or current_label,
+                                pending=self.link_queue.qsize() + 1,
+                                completed=max(processed_count - 1, 0),
+                            )
+                            self.signals.link_status.emit(url, "대기", "게시 기록 저장 필요")
 
                     results["details"].append(
                         {
@@ -7465,7 +8095,7 @@ class MainWindow(QMainWindow):
                             "success": recorded_success,
                         }
                     )
-                    if stop_for_billing_sync or pause_for_threads_ui:
+                    if stop_for_billing_sync or stop_for_history_sync or pause_for_threads_ui:
                         results["cancelled"] = True
                         break
                 except Exception as exc:
@@ -7648,6 +8278,17 @@ class MainWindow(QMainWindow):
                 )
                 return
         if self.is_running:
+            try:
+                self._save_resume_state("user_stop")
+            except ResumeStatePersistenceError:
+                logger.exception("중지 전 업로드 복구 상태 저장 실패")
+                message = (
+                    "현재 작업 상태를 저장하지 못해 중지하지 않았습니다. "
+                    "저장 공간을 확인한 뒤 다시 시도해주세요."
+                )
+                self.signals.log.emit(message)
+                show_warning(self, "중지 준비 실패", message)
+                return
             self.signals.log.emit("중지 요청됨. 현재 항목 처리 후 중단합니다.")
             self.signals.status.emit("중지중...")
             self.status_badge.update_style(Colors.WARNING, "중지중")
@@ -7659,7 +8300,6 @@ class MainWindow(QMainWindow):
                     "message": "현재 단계가 끝나면 작업을 안전하게 중지합니다.",
                 }
             )
-            self._save_resume_state("user_stop")
             self.is_running = False
             pipeline = self._active_pipeline or self.pipeline
             if pipeline is not None:
@@ -7988,12 +8628,12 @@ class MainWindow(QMainWindow):
     def _prepare_update_resume(self, update_info: dict) -> dict:
         runtime = getattr(self, "_multi_account_runtime", None)
         account_ids = active_account_ids(runtime.snapshots()) if runtime is not None else []
+        self._save_resume_state("app_update")
         marker = self._update_resume_store.save(
             str(update_info.get("version") or ""),
             account_ids,
             legacy_running=bool(self.is_running and not account_ids),
         )
-        self._save_resume_state("app_update")
         if runtime is not None:
             runtime.stop_all()
         try:
@@ -8353,7 +8993,17 @@ class MainWindow(QMainWindow):
             )
             event.ignore()
             return
-        self._save_resume_state("window_close")
+        try:
+            self._save_resume_state("window_close")
+        except ResumeStatePersistenceError:
+            logger.exception("종료 전 업로드 복구 상태 저장 실패")
+            show_warning(
+                self,
+                "종료 준비 실패",
+                "작업 복구 상태를 저장하지 못해 종료하지 않았습니다. 저장 공간을 확인한 뒤 다시 시도해주세요.",
+            )
+            event.ignore()
+            return
         self._closed = True
         self._browser_cancel.set()
         try:

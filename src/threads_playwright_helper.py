@@ -1253,7 +1253,7 @@ class ThreadsPlaywrightHelper:
 
     # ========== 이미지 업로드 ==========
 
-    def upload_image(self, image_path: str) -> bool:
+    def upload_image(self, image_path: str, *, post_index: int = 0) -> bool:
         """
         이미지 파일 업로드
 
@@ -1271,10 +1271,18 @@ class ThreadsPlaywrightHelper:
 
             print(f"  이미지 업로드 중: {image_path}")
 
-            # 파일 입력 요소 찾기
-            file_input = self.page.locator('input[type="file"][accept*="image"]')
+            # Threads renders one file input per composer row on some versions,
+            # and a single input bound to the focused row on others. Prefer the
+            # row-specific input, while retaining the single-input fallback.
+            file_inputs = self.page.locator('input[type="file"]')
+            input_count = file_inputs.count()
 
-            if file_input.count() > 0:
+            if input_count > 0:
+                file_input = (
+                    file_inputs.nth(post_index)
+                    if input_count > post_index
+                    else file_inputs.first
+                )
                 file_input.set_input_files(os.path.abspath(image_path))
                 time.sleep(3)  # 이미지 업로드 대기
                 print("  이미지 업로드 완료")
@@ -1318,11 +1326,11 @@ class ThreadsPlaywrightHelper:
             if posts_data and isinstance(posts_data[0], str):
                 # Legacy callers are supported only when they provide both parts.
                 paragraphs = posts_data
-                first_image = None
+                media_paths = [None for _ in posts_data]
             else:
                 # Canonical payload: root_post + product_comment.
                 paragraphs = [post.get('text', '') for post in posts_data]
-                first_image = posts_data[0].get('image_path') if posts_data else None
+                media_paths = [post.get('image_path') for post in posts_data]
 
             paragraphs = [str(paragraph or "").strip() for paragraph in paragraphs if str(paragraph or "").strip()]
             if len(paragraphs) != 2:
@@ -1332,8 +1340,9 @@ class ThreadsPlaywrightHelper:
 
             total = len(paragraphs)
             print("\n  Playwright로 본문 1개 + 상품 댓글 1개 스레드 작성 시작")
-            if first_image:
-                print(f"  첫 번째 글에 이미지 첨부 예정: {first_image}")
+            for index, media_path in enumerate(media_paths):
+                if media_path:
+                    print(f"  {index + 1}번째 글에 미디어 첨부 예정: {media_path}")
 
             if self._has_login_or_continue_prompt():
                 print("  로그인/계속하기 화면 감지, 게시를 중단합니다")
@@ -1364,9 +1373,11 @@ class ThreadsPlaywrightHelper:
             if not self.type_in_textarea(paragraphs[0], index=0):
                 return False
 
-            # 2-1. 첫 번째 글에 이미지 업로드 (있는 경우)
-            if first_image:
-                self.upload_image(first_image)
+            # 2-1. 첫 번째 글에 미디어 업로드 (있는 경우). A requested
+            # attachment is part of the post contract, so failure must abort.
+            if media_paths[0] and not self.upload_image(media_paths[0], post_index=0):
+                self.last_error = "media_upload_failed:0"
+                return False
 
             # 3. 나머지 문단들 추가
             for i in range(1, total):
@@ -1442,6 +1453,13 @@ class ThreadsPlaywrightHelper:
                     if not typed:
                         print("    빈 textarea에 입력하지 못함 (덮어쓰기를 방지하기 위해 중단)")
                         return False
+
+                if media_paths[i] and not self.upload_image(
+                    media_paths[i],
+                    post_index=target_index,
+                ):
+                    self.last_error = f"media_upload_failed:{i}"
+                    return False
 
             # 4. 최종 검증
             print("\n  최종 검증...")

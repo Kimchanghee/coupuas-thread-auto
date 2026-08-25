@@ -55,10 +55,40 @@ class ManagedGeneration:
 
 
 class ManagedAiClientError(RuntimeError):
-    def __init__(self, code: str, message: str, *, status_code: int = 0):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        status_code: int = 0,
+        reservation_release_pending: bool = False,
+        reservation_id: str = "",
+        ai_job_id: str = "",
+        retry_with_new_idempotency_key: bool = False,
+    ):
         super().__init__(str(message or "AI 서비스 요청에 실패했습니다."))
         self.code = str(code or "MANAGED_AI_ERROR")
         self.status_code = int(status_code or 0)
+        self.reservation_id = self._safe_reconciliation_id(reservation_id)
+        self.ai_job_id = self._safe_reconciliation_id(ai_job_id)
+        self.reservation_release_pending = bool(
+            reservation_release_pending or self.reservation_id
+        )
+        self.retry_with_new_idempotency_key = bool(
+            retry_with_new_idempotency_key
+            and not self.reservation_release_pending
+            and not self.reservation_id
+        )
+
+    @staticmethod
+    def _safe_reconciliation_id(value: object) -> str:
+        """Keep opaque IDs only; never retain arbitrary response payloads."""
+        text = str(value or "").strip()
+        if not text or len(text) > 256:
+            return ""
+        if any(ord(char) < 0x21 or ord(char) > 0x7E for char in text):
+            return ""
+        return text
 
 
 class ManagedAiClient:
@@ -104,7 +134,12 @@ class ManagedAiClient:
                 break
         return normalized
 
-    def generate_variants(self, product_info: Dict[str, Any]) -> ManagedGeneration:
+    def generate_variants(
+        self,
+        product_info: Dict[str, Any],
+        *,
+        idempotency_key: str = "",
+    ) -> ManagedGeneration:
         state = self._auth_state()
         token = str(state.get("token") or "").strip()
         user_id = str(state.get("user_id") or "").strip()
@@ -125,7 +160,7 @@ class ManagedAiClient:
                 status_code=422,
             )
 
-        request_id = str(uuid.uuid4())
+        request_id = str(idempotency_key or uuid.uuid4()).strip()
         body = {
             "user_id": user_id,
             "product": {
@@ -159,6 +194,8 @@ class ManagedAiClient:
             raise ManagedAiClientError(
                 "AI_TEMPORARILY_UNAVAILABLE",
                 "AI 서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.",
+                reservation_release_pending=True,
+                ai_job_id=request_id,
             ) from exc
 
         try:
@@ -168,34 +205,76 @@ class ManagedAiClient:
                 "INVALID_SERVER_RESPONSE",
                 "AI 서버 응답을 확인할 수 없습니다.",
                 status_code=response.status_code,
+                reservation_release_pending=True,
+                ai_job_id=request_id,
             ) from exc
+
+        if not isinstance(payload, dict):
+            raise ManagedAiClientError(
+                "INVALID_SERVER_RESPONSE",
+                "AI 서버 응답을 확인할 수 없습니다.",
+                status_code=response.status_code,
+                reservation_release_pending=True,
+                ai_job_id=request_id,
+            )
+
+        reservation_id = ManagedAiClientError._safe_reconciliation_id(
+            payload.get("reservation_id")
+        )
+        ai_job_id = ManagedAiClientError._safe_reconciliation_id(
+            payload.get("ai_job_id")
+        )
+        retry_with_new_key = bool(
+            payload.get("retry_with_new_idempotency_key") is True
+            and payload.get("reservation_release_pending") is not True
+            and not reservation_id
+        )
+        uncertain_status = response.status_code in {408, 409, 425, 429} or (
+            response.status_code >= 500
+        )
+        release_pending = bool(
+            payload.get("reservation_release_pending")
+            or reservation_id
+            or (uncertain_status and not retry_with_new_key)
+        )
+
+        def invalid_response(message: str) -> ManagedAiClientError:
+            return ManagedAiClientError(
+                "INVALID_SERVER_RESPONSE",
+                message,
+                status_code=response.status_code,
+                reservation_release_pending=True,
+                reservation_id=reservation_id,
+                ai_job_id=ai_job_id or request_id,
+            )
 
         if not response.ok or not payload.get("success"):
             raise ManagedAiClientError(
                 str(payload.get("code") or "MANAGED_AI_ERROR"),
                 str(payload.get("message") or f"AI 서버 오류 ({response.status_code})"),
                 status_code=response.status_code,
+                reservation_release_pending=release_pending,
+                reservation_id=reservation_id,
+                ai_job_id=ai_job_id or (request_id if release_pending else ""),
+                retry_with_new_idempotency_key=retry_with_new_key,
             )
 
-        reservation_id = str(payload.get("reservation_id") or "").strip()
         raw_variants = payload.get("variants")
         if not reservation_id or not isinstance(raw_variants, list) or len(raw_variants) != 4:
-            raise ManagedAiClientError(
-                "INVALID_SERVER_RESPONSE",
-                "AI 서버가 완성된 작업을 반환하지 못했습니다.",
-                status_code=response.status_code,
+            raise invalid_response(
+                "AI 서버가 완성된 작업을 반환하지 못했습니다."
             )
 
         variants: List[ManagedVariant] = []
         seen = set()
         for raw in raw_variants:
             if not isinstance(raw, dict):
-                raise ManagedAiClientError("INVALID_SERVER_RESPONSE", "AI 문안 형식이 올바르지 않습니다.")
+                raise invalid_response("AI 문안 형식이 올바르지 않습니다.")
             variant_id = str(raw.get("variant_id") or "").strip()
             root_text = str(raw.get("root_text") or "").strip()
             comment_text = str(raw.get("product_comment_text") or "").strip()
             if not variant_id or variant_id in seen or not root_text or not comment_text:
-                raise ManagedAiClientError("INVALID_SERVER_RESPONSE", "AI 문안이 누락되었습니다.")
+                raise invalid_response("AI 문안이 누락되었습니다.")
             seen.add(variant_id)
             variants.append(
                 ManagedVariant(

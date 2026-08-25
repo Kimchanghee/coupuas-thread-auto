@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -85,6 +87,31 @@ class AuthQuotaAdapter:
                 "quota_reservation_missing",
                 "작업 예약 ID가 없어 안전상 업로드를 중단합니다.",
             )
+        return QuotaReservation(reservation_id=reservation_id)
+
+    def recover(self, idempotency_key: str) -> Optional[QuotaReservation]:
+        """Return a replayed or freshly created reconciliation reservation.
+
+        The idempotent reserve endpoint is not lookup-only.  If the original
+        request never arrived, this call can create a fresh reservation; the
+        caller must receive it as well so it can be released immediately.
+        """
+        from src import auth_client
+
+        result = auth_client.reserve_work(idempotency_key)
+        if not isinstance(result, dict) or result.get("unsupported"):
+            return None
+        reservation_id = str(
+            result.get("reservation_id")
+            or result.get("reserve_id")
+            or result.get("work_token")
+            or ""
+        ).strip()
+        is_replay = str(result.get("code") or "") == "IDEMPOTENCY_REPLAY"
+        if is_replay and str(result.get("reservation_status") or "").lower() != "reserved":
+            return None
+        if not reservation_id:
+            return None
         return QuotaReservation(reservation_id=reservation_id)
 
     def commit(self, reservation: QuotaReservation) -> bool:
@@ -180,6 +207,27 @@ class MultiAccountUploadRunner:
     def _stop_requested(queue_store) -> bool:
         return bool(queue_store.snapshot().get("stop_requested"))
 
+    def _process_pipeline_link(
+        self,
+        url: str,
+        keyword: Optional[str],
+        idempotency_key: str,
+    ):
+        """Pass the durable key when the pipeline supports the new contract."""
+        kwargs = {"user_keywords": keyword}
+        try:
+            parameters = inspect.signature(self._pipeline.process_link).parameters
+            if "idempotency_key" in parameters or any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            ):
+                kwargs["idempotency_key"] = idempotency_key
+        except (TypeError, ValueError):
+            # Compatibility with opaque/native callables. The built-in
+            # pipeline always exposes the explicit keyword.
+            pass
+        return self._pipeline.process_link(url, **kwargs)
+
     @staticmethod
     def _reservation_from_item(item) -> Optional[QuotaReservation]:
         reservation_id = str(item.get("reservation_id") or "")
@@ -233,6 +281,61 @@ class MultiAccountUploadRunner:
             block_reason="reservation_release_pending",
         )
 
+    def _recover_replayed_reservation(self, item) -> Optional[QuotaReservation]:
+        recover = getattr(self._quota, "recover", None)
+        idempotency_key = str(item.get("idempotency_key") or "").strip()
+        if not callable(recover) or not idempotency_key:
+            return None
+        try:
+            reservation = recover(idempotency_key)
+        except Exception:
+            return None
+        if not isinstance(reservation, QuotaReservation):
+            return None
+        return reservation if reservation.reservation_id else None
+
+    @staticmethod
+    def _rotate_idempotency_and_requeue(queue_store) -> None:
+        """Start a new logical attempt after a conclusive non-post release."""
+        queue_store.update_current(
+            stage="requeue_pending",
+            idempotency_key=uuid.uuid4().hex,
+        )
+        queue_store.requeue_current()
+
+    def _complete_history_pending(
+        self,
+        queue_store,
+        history,
+        item,
+    ) -> AccountRunResult:
+        """Persist duplicate protection before removing the durable queue item."""
+        url = str(item.get("url") or "")
+        product_name = str(item.get("product_name") or url)
+        try:
+            history.add_link(url, product_name, success=True)
+        except Exception:
+            queue_store.set_phase("blocked", last_error="history_write_pending")
+            return AccountRunResult(
+                processed=False,
+                pending_count=self._pending_count(queue_store),
+                block_reason="history_write_pending",
+            )
+        try:
+            queue_store.complete_current("success")
+        except Exception:
+            queue_store.set_phase("blocked", last_error="queue_completion_pending")
+            return AccountRunResult(
+                processed=False,
+                pending_count=self._pending_count(queue_store),
+                block_reason="history_write_pending",
+            )
+        return AccountRunResult(
+            processed=True,
+            pending_count=self._pending_count(queue_store),
+            success=True,
+        )
+
     def _recover_interrupted_current(
         self,
         queue_store,
@@ -241,27 +344,74 @@ class MultiAccountUploadRunner:
     ) -> Optional[AccountRunResult]:
         stage = str(item.get("stage") or "")
         reservation = self._reservation_from_item(item)
-        if stage in {"reserved", "reservation_release_pending"}:
-            if not self._release_reservation(queue_store, reservation):
-                return self._release_pending_result(queue_store)
+        if stage == "requeue_pending":
             queue_store.requeue_current()
             return None
-        if stage == "posted_commit_pending":
-            committed = False
-            try:
-                committed = bool(reservation and self._quota.commit(reservation))
-            except Exception:
-                committed = False
-            if committed:
-                url = str(item.get("url") or "")
-                product_name = str(item.get("product_name") or url)
-                queue_store.complete_current("success")
-                history.add_link(url, product_name, success=True)
+        if stage in {"reserved", "reservation_release_pending"}:
+            if (
+                stage == "reservation_release_pending"
+                and reservation is None
+                and item.get("reconciliation_lookup_pending")
+            ):
+                reservation = self._recover_replayed_reservation(item)
+                if reservation is None:
+                    queue_store.set_phase(
+                        "blocked",
+                        last_error="reservation_release_pending",
+                    )
+                    return self._release_pending_result(queue_store)
+                self._persist_reservation(
+                    queue_store,
+                    reservation,
+                    str(item.get("product_name") or ""),
+                )
+                queue_store.update_current(
+                    stage="reservation_release_pending",
+                    reconciliation_lookup_pending=False,
+                )
+            if not self._release_reservation(queue_store, reservation):
+                return self._release_pending_result(queue_store)
+            retry_count = int(item.get("retry_count", 0) or 0)
+            if retry_count > MAX_TRANSIENT_RETRIES:
+                queue_store.complete_current(
+                    "failed",
+                    "managed_ai_retry_exhausted",
+                )
                 return AccountRunResult(
                     processed=True,
                     pending_count=self._pending_count(queue_store),
-                    success=True,
                 )
+            if str(item.get("resolution") or "") == "not_posted":
+                next_key = str(item.get("next_idempotency_key") or "").strip()
+                if not next_key:
+                    next_key = uuid.uuid4().hex
+                queue_store.update_current(
+                    stage="requeue_pending",
+                    idempotency_key=next_key,
+                    reservation_id="",
+                    reservation_legacy=False,
+                    reservation_bypass=False,
+                )
+                queue_store.requeue_current()
+            else:
+                self._rotate_idempotency_and_requeue(queue_store)
+            return None
+        if stage == "posted_commit_pending":
+            committed = reservation is None
+            try:
+                if reservation is not None:
+                    committed = bool(self._quota.commit(reservation))
+            except Exception:
+                committed = False
+            if committed:
+                queue_store.update_current(
+                    stage="history_write_pending",
+                    reservation_id="",
+                    reservation_legacy=False,
+                    reservation_bypass=False,
+                )
+                current = queue_store.snapshot().get("current_item") or item
+                return self._complete_history_pending(queue_store, history, current)
             queue_store.set_phase(
                 "blocked",
                 last_error="quota_commit_pending_recovery_failed",
@@ -271,6 +421,8 @@ class MultiAccountUploadRunner:
                 pending_count=self._pending_count(queue_store),
                 block_reason="quota_commit_pending",
             )
+        if stage == "history_write_pending":
+            return self._complete_history_pending(queue_store, history, item)
         if stage in {"posting", "posting_unknown"}:
             queue_store.set_phase(
                 "blocked",
@@ -283,6 +435,76 @@ class MultiAccountUploadRunner:
             )
         queue_store.requeue_current()
         return None
+
+    def resolve_posting_unknown(
+        self,
+        account_id: str,
+        resolution: str,
+    ) -> AccountRunResult:
+        """Durably resolve an externally ambiguous Threads post."""
+        choice = str(resolution or "").strip().lower()
+        if choice not in {"posted", "not_posted", "later"}:
+            raise ValueError("resolution must be posted, not_posted, or later")
+
+        queue_store = self._queue_resolver(account_id)
+        history = self._history_resolver(account_id)
+        item = queue_store.snapshot().get("current_item")
+        if not isinstance(item, dict) or str(item.get("stage") or "") not in {
+            "posting",
+            "posting_unknown",
+        }:
+            raise ValueError("account has no ambiguous posting item")
+
+        if choice == "later":
+            queue_store.set_phase(
+                "blocked",
+                last_error="uncertain_external_post_requires_review",
+            )
+            return AccountRunResult(
+                processed=False,
+                pending_count=self._pending_count(queue_store),
+                block_reason="uncertain_external_post",
+            )
+
+        if choice == "posted":
+            queue_store.update_current(
+                stage="posted_commit_pending",
+                resolution="posted",
+            )
+            current = queue_store.snapshot().get("current_item") or item
+            result = self._recover_interrupted_current(
+                queue_store,
+                history,
+                current,
+            )
+            if result is None:
+                raise RuntimeError("posted resolution did not reach a durable state")
+            return result
+
+        next_key = str(item.get("next_idempotency_key") or "").strip()
+        if not next_key:
+            next_key = uuid.uuid4().hex
+        queue_store.update_current(
+            stage="reservation_release_pending",
+            resolution="not_posted",
+            next_idempotency_key=next_key,
+        )
+        current = queue_store.snapshot().get("current_item") or item
+        reservation = self._reservation_from_item(current)
+        if not self._release_reservation(queue_store, reservation):
+            return self._release_pending_result(queue_store)
+        queue_store.update_current(
+            stage="requeue_pending",
+            idempotency_key=next_key,
+            reservation_id="",
+            reservation_legacy=False,
+            reservation_bypass=False,
+        )
+        queue_store.requeue_current()
+        return AccountRunResult(
+            processed=False,
+            pending_count=self._pending_count(queue_store),
+        )
 
     def process_one(self, account_id: str) -> AccountRunResult:
         account = self._account_resolver(account_id)
@@ -302,7 +524,10 @@ class MultiAccountUploadRunner:
                 return recovery
         item = queue_store.reserve_next()
         if item is None:
-            return AccountRunResult(processed=False, pending_count=0)
+            return AccountRunResult(
+                processed=False,
+                pending_count=self._pending_count(queue_store),
+            )
 
         url = str(item.get("url") or "").strip()
         keyword = str(item.get("keyword") or item.get("title") or "").strip() or None
@@ -322,12 +547,24 @@ class MultiAccountUploadRunner:
                 success=True,
             )
 
+        item_id = str(item.get("item_id") or "").strip()
+        idempotency_key = str(item.get("idempotency_key") or "").strip()
+        if not idempotency_key:
+            idempotency_key = hashlib.sha256(
+                f"{account_id}|{item_id}|{url}".encode("utf-8")
+            ).hexdigest()
+            queue_store.update_current(idempotency_key=idempotency_key)
+
         try:
             self._log(account_id, "상품 정보와 게시글을 생성하는 중...")
             reset_cancel = getattr(self._pipeline, "reset_cancel", None)
             if callable(reset_cancel):
                 reset_cancel()
-            post_data = self._pipeline.process_link(url, user_keywords=keyword)
+            post_data = self._process_pipeline_link(
+                url,
+                keyword,
+                idempotency_key,
+            )
         except Exception as exc:
             from src.coupang_uploader import CancelledException
 
@@ -337,6 +574,65 @@ class MultiAccountUploadRunner:
                 return AccountRunResult(
                     processed=False,
                     pending_count=self._pending_count(queue_store),
+                )
+            retry_with_new_key = bool(
+                getattr(exc, "retry_with_new_idempotency_key", False)
+                and not getattr(exc, "reservation_release_pending", False)
+                and not str(getattr(exc, "reservation_id", "") or "").strip()
+            )
+            if retry_with_new_key:
+                retry_count = int(item.get("retry_count", 0) or 0) + 1
+                if retry_count > MAX_TRANSIENT_RETRIES:
+                    queue_store.complete_current(
+                        "failed",
+                        "managed_ai_retry_exhausted",
+                    )
+                    return AccountRunResult(
+                        processed=True,
+                        pending_count=self._pending_count(queue_store),
+                    )
+                queue_store.update_current(
+                    stage="requeue_pending",
+                    idempotency_key=uuid.uuid4().hex,
+                    retry_count=retry_count,
+                )
+                queue_store.requeue_current()
+                return AccountRunResult(
+                    processed=False,
+                    pending_count=self._pending_count(queue_store),
+                    next_allowed_at=time.time() + retry_delay_seconds(retry_count),
+                )
+            if bool(getattr(exc, "reservation_release_pending", False)):
+                retry_count = int(item.get("retry_count", 0) or 0) + 1
+                reservation_id = str(
+                    getattr(exc, "reservation_id", "") or ""
+                ).strip()
+                ai_job_id = str(getattr(exc, "ai_job_id", "") or "").strip()
+                queue_store.update_current(
+                    stage="reservation_release_pending",
+                    reservation_id=reservation_id,
+                    reservation_legacy=False,
+                    reservation_bypass=False,
+                    reconciliation_lookup_pending=not bool(reservation_id),
+                    ai_job_id=ai_job_id,
+                    retry_count=retry_count,
+                )
+                queue_store.set_phase(
+                    "blocked",
+                    last_error="reservation_release_pending",
+                )
+                current = queue_store.snapshot().get("current_item") or item
+                recovery = self._recover_interrupted_current(
+                    queue_store,
+                    history,
+                    current,
+                )
+                if recovery is not None:
+                    return recovery
+                return AccountRunResult(
+                    processed=False,
+                    pending_count=self._pending_count(queue_store),
+                    next_allowed_at=time.time() + retry_delay_seconds(1),
                 )
             retry_count = int(item.get("retry_count", 0) or 0) + 1
             if is_transient_error(exc) and retry_count <= MAX_TRANSIENT_RETRIES:
@@ -391,7 +687,7 @@ class MultiAccountUploadRunner:
         if self._stop_requested(queue_store):
             if not self._release_reservation(queue_store, reservation):
                 return self._release_pending_result(queue_store)
-            queue_store.requeue_current()
+            self._rotate_idempotency_and_requeue(queue_store)
             return AccountRunResult(
                 processed=False,
                 pending_count=self._pending_count(queue_store),
@@ -417,19 +713,12 @@ class MultiAccountUploadRunner:
             if self._stop_requested(queue_store):
                 if not self._release_reservation(queue_store, reservation):
                     return self._release_pending_result(queue_store)
-                queue_store.requeue_current()
+                self._rotate_idempotency_and_requeue(queue_store)
                 return AccountRunResult(
                     processed=False,
                     pending_count=self._pending_count(queue_store),
                 )
             if reservation is None:
-                item_id = str(item.get("item_id") or "").strip()
-                idempotency_key = str(item.get("idempotency_key") or "").strip()
-                if not idempotency_key:
-                    idempotency_key = hashlib.sha256(
-                        f"{account_id}|{item_id}|{url}".encode("utf-8")
-                    ).hexdigest()
-                    queue_store.update_current(idempotency_key=idempotency_key)
                 if isinstance(self._quota, AuthQuotaAdapter):
                     reservation = self._quota.reserve(idempotency_key)
                 else:
@@ -439,7 +728,7 @@ class MultiAccountUploadRunner:
                 if not self._release_reservation(queue_store, reservation):
                     return self._release_pending_result(queue_store)
                 reservation = None
-                queue_store.requeue_current()
+                self._rotate_idempotency_and_requeue(queue_store)
                 return AccountRunResult(
                     processed=False,
                     pending_count=self._pending_count(queue_store),
@@ -458,38 +747,26 @@ class MultiAccountUploadRunner:
                 )
 
             queue_store.update_current(stage="posted_commit_pending")
-            try:
-                quota_committed = self._quota.commit(reservation)
-            except Exception:
-                quota_committed = False
-            if not quota_committed:
-                queue_store.set_phase(
-                    "blocked",
-                    last_error="quota_commit_failed_after_post",
-                )
-                history.add_link(url, product_name, success=True)
+            recovery = self._recover_interrupted_current(
+                queue_store,
+                history,
+                queue_store.snapshot().get("current_item") or item,
+            )
+            if recovery is None:
+                raise RuntimeError("posted item recovery did not complete")
+            if not recovery.success:
                 self._log(
                     account_id,
-                    "게시 성공 후 작업량 동기화에 실패해 이 계정만 중단합니다.",
+                    "게시 성공 후 안전한 상태 동기화에 실패해 이 계정만 중단합니다.",
                 )
-                return AccountRunResult(
-                    processed=False,
-                    pending_count=self._pending_count(queue_store),
-                    block_reason="quota_commit_failed",
-                )
+                return recovery
             reservation = None
-            queue_store.complete_current("success")
-            history.add_link(url, product_name, success=True)
             self._log(account_id, f"업로드 성공: {product_name}")
-            return AccountRunResult(
-                processed=True,
-                pending_count=self._pending_count(queue_store),
-                success=True,
-            )
+            return recovery
         except AccountBlockedError as exc:
             if not self._release_reservation(queue_store, reservation):
                 return self._release_pending_result(queue_store)
-            queue_store.requeue_current()
+            self._rotate_idempotency_and_requeue(queue_store)
             queue_store.set_phase("blocked", last_error=str(exc))
             self._log(
                 account_id,
@@ -503,7 +780,7 @@ class MultiAccountUploadRunner:
         except Exception as exc:
             current = queue_store.snapshot().get("current_item") or {}
             stage = str(current.get("stage") or "")
-            if stage in {"posting", "posting_unknown", "posted_commit_pending"}:
+            if stage in {"posting", "posting_unknown"}:
                 queue_store.set_phase("blocked", last_error=str(exc)[:300])
                 self._log(
                     account_id,
@@ -513,6 +790,20 @@ class MultiAccountUploadRunner:
                     processed=False,
                     pending_count=self._pending_count(queue_store),
                     block_reason="uncertain_external_post",
+                )
+            if stage == "posted_commit_pending":
+                queue_store.set_phase("blocked", last_error=str(exc)[:300])
+                return AccountRunResult(
+                    processed=False,
+                    pending_count=self._pending_count(queue_store),
+                    block_reason="quota_commit_pending",
+                )
+            if stage == "history_write_pending":
+                queue_store.set_phase("blocked", last_error=str(exc)[:300])
+                return AccountRunResult(
+                    processed=False,
+                    pending_count=self._pending_count(queue_store),
+                    block_reason="history_write_pending",
                 )
             if not self._release_reservation(queue_store, reservation):
                 return self._release_pending_result(queue_store)

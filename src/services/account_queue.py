@@ -158,14 +158,25 @@ class AccountQueueStore:
         if not text:
             raise ValueError("url is required")
         with self._lock:
+            previous = copy.deepcopy(self._state)
+            item_id = uuid.uuid4().hex
             item = {
                 **payload,
-                "item_id": uuid.uuid4().hex,
+                "item_id": item_id,
                 "url": text,
                 "created_at": _now(),
+                # Created with the durable queue item so every retry of one
+                # logical generation/reservation request reuses the same key.
+                "idempotency_key": str(
+                    payload.get("idempotency_key") or uuid.uuid4().hex
+                ),
             }
             self._state["pending_items"].append(item)
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise
             return copy.deepcopy(item)
 
     def enqueue_many(self, urls: Iterable[str]) -> list[Dict[str, Any]]:
@@ -176,15 +187,24 @@ class AccountQueueStore:
         with self._lock:
             if self._state["stop_requested"] or self._state["current_item"]:
                 return None
+            previous = copy.deepcopy(self._state)
             if not self._state["pending_items"]:
                 self._state["phase"] = "idle"
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    self._state = previous
+                    raise
                 return None
             item = self._state["pending_items"].pop(0)
             item["stage"] = "parsing"
             self._state["current_item"] = item
             self._state["phase"] = "running"
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise
             return copy.deepcopy(item)
 
     def update_current(self, **changes: Any) -> Optional[Dict[str, Any]]:
@@ -196,8 +216,13 @@ class AccountQueueStore:
             item = self._state["current_item"]
             if item is None:
                 return None
+            previous = copy.deepcopy(self._state)
             item.update(copy.deepcopy(changes))
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise
             return copy.deepcopy(item)
 
     def complete_current(self, outcome: str = "success", error: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -207,13 +232,18 @@ class AccountQueueStore:
             item = self._state["current_item"]
             if item is None:
                 return None
+            previous = copy.deepcopy(self._state)
             self._state["current_item"] = None
             self._state["stats"][outcome] += 1
             if outcome == "success":
                 self._state["processed_urls"].append(item.get("url", ""))
             self._state["last_error"] = str(error) if error else None
             self._state["phase"] = "stopped" if self._state["stop_requested"] else ("idle" if not self._state["pending_items"] else "running")
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise
             return copy.deepcopy(item)
 
     def requeue_current(self) -> Optional[Dict[str, Any]]:
@@ -221,31 +251,50 @@ class AccountQueueStore:
             item = self._state["current_item"]
             if item is None:
                 return None
+            previous = copy.deepcopy(self._state)
             for key in (
                 "stage",
                 "reservation_id",
                 "reservation_legacy",
                 "reservation_bypass",
+                "resolution",
+                "next_idempotency_key",
+                "reconciliation_lookup_pending",
+                "ai_job_id",
             ):
                 item.pop(key, None)
             self._state["pending_items"].insert(0, item)
             self._state["current_item"] = None
             self._state["phase"] = "stopped" if self._state["stop_requested"] else "idle"
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise
             return copy.deepcopy(item)
 
     def set_phase(self, phase: str, *, next_allowed_at: Optional[str] = None, last_error: Optional[str] = None) -> None:
         if phase not in VALID_PHASES:
             raise ValueError("invalid queue phase")
         with self._lock:
+            previous = copy.deepcopy(self._state)
             self._state["phase"] = phase
             self._state["next_allowed_at"] = next_allowed_at
             self._state["last_error"] = last_error
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise
 
     def request_stop(self, requested: bool = True) -> None:
         with self._lock:
+            previous = copy.deepcopy(self._state)
             self._state["stop_requested"] = bool(requested)
             if requested:
                 self._state["phase"] = "stopped"
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                self._state = previous
+                raise

@@ -92,6 +92,22 @@ class _PostingHelper(ThreadsPlaywrightHelper):
         return True
 
 
+class _MediaPostingHelper(_PostingHelper):
+    def __init__(self, page, *, upload_result=True):
+        super().__init__(page)
+        self.upload_result = upload_result
+        self.uploaded: list[tuple[str, int]] = []
+        self.post_clicked = False
+
+    def upload_image(self, image_path, *, post_index=0):
+        self.uploaded.append((image_path, post_index))
+        return self.upload_result
+
+    def click_post_button(self) -> bool:
+        self.post_clicked = True
+        return True
+
+
 def test_create_thread_ignores_hidden_login_text_when_compose_is_open(monkeypatch):
     monkeypatch.setenv("THREAD_AUTO_PLAYWRIGHT_TOTAL_TIMEOUT_SEC", "30")
     monkeypatch.setenv("THREAD_AUTO_FORCE_SINGLE_POST", "1")
@@ -112,3 +128,35 @@ def test_create_thread_rejects_any_payload_except_root_and_comment(monkeypatch):
     assert helper.create_thread_direct(["root only"]) is False
     assert helper.last_error == "invalid_thread_structure"
     assert helper.typed == []
+
+
+def test_create_thread_attaches_media_to_each_matching_payload(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_PLAYWRIGHT_TOTAL_TIMEOUT_SEC", "30")
+    monkeypatch.setattr("src.threads_playwright_helper.time.sleep", lambda *_args: None)
+    helper = _MediaPostingHelper(_FakePage())
+
+    assert helper.create_thread_direct(
+        [
+            {"text": "root", "image_path": "root.jpg"},
+            {"text": "comment", "image_path": "comment.jpg"},
+        ]
+    ) is True
+
+    assert helper.uploaded == [("root.jpg", 0), ("comment.jpg", 1)]
+    assert helper.post_clicked is True
+
+
+def test_create_thread_aborts_when_requested_media_cannot_be_attached(monkeypatch):
+    monkeypatch.setenv("THREAD_AUTO_PLAYWRIGHT_TOTAL_TIMEOUT_SEC", "30")
+    monkeypatch.setattr("src.threads_playwright_helper.time.sleep", lambda *_args: None)
+    helper = _MediaPostingHelper(_FakePage(), upload_result=False)
+
+    assert helper.create_thread_direct(
+        [
+            {"text": "root", "image_path": None},
+            {"text": "comment", "image_path": "missing.jpg"},
+        ]
+    ) is False
+
+    assert helper.last_error == "media_upload_failed:1"
+    assert helper.post_clicked is False

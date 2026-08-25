@@ -17,6 +17,7 @@ import { gatewayToken } from "../_lib/gateway-auth.mjs";
 const AUTH_API_URL = "https://newshopping-shorts-auth.vercel.app";
 const GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
 const PRIMARY_MODEL = process.env.PRIMARY_AI_MODEL || "xai/grok-4.3";
+const MAX_REQUEST_BODY_BYTES = 32 * 1024;
 
 function sendJson(res, status, value) {
   res.statusCode = status;
@@ -31,8 +32,26 @@ function requestIp(req) {
 }
 
 async function readBody(req) {
-  if (req.body && typeof req.body === "object") return req.body;
+  const contentLength = Number(req.headers?.["content-length"] || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
+    throw new ManagedAiError("INVALID_REQUEST", 413, "요청 크기가 너무 큽니다.");
+  }
+  if (req.body && typeof req.body === "object") {
+    let serialized;
+    try {
+      serialized = JSON.stringify(req.body);
+    } catch {
+      throw new ManagedAiError("INVALID_REQUEST", 400, "요청 JSON 형식이 올바르지 않습니다.");
+    }
+    if (Buffer.byteLength(serialized, "utf8") > MAX_REQUEST_BODY_BYTES) {
+      throw new ManagedAiError("INVALID_REQUEST", 413, "요청 크기가 너무 큽니다.");
+    }
+    return req.body;
+  }
   if (typeof req.body === "string") {
+    if (Buffer.byteLength(req.body, "utf8") > MAX_REQUEST_BODY_BYTES) {
+      throw new ManagedAiError("INVALID_REQUEST", 413, "요청 크기가 너무 큽니다.");
+    }
     try {
       return JSON.parse(req.body);
     } catch {
@@ -42,11 +61,12 @@ async function readBody(req) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
-    size += chunk.length;
-    if (size > 32 * 1024) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.byteLength;
+    if (size > MAX_REQUEST_BODY_BYTES) {
       throw new ManagedAiError("INVALID_REQUEST", 413, "요청 크기가 너무 큽니다.");
     }
-    chunks.push(chunk);
+    chunks.push(buffer);
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
@@ -108,18 +128,29 @@ async function reserveWork(userId, token, requestId) {
       sanitizeText(payload?.message, 240) || "무료 사용량 또는 이용권을 확인해주세요.",
     );
   }
+  const reservationId = extractReservationId(payload);
+  if (payload?.code === "IDEMPOTENCY_REPLAY") {
+    const replayStatus = String(payload?.reservation_status || "").toLowerCase();
+    const replayDetails = replayStatus === "reserved" && reservationId
+      ? { reservation_id: reservationId, idempotency_replay: true }
+      : replayStatus === "released"
+        ? { idempotency_replay_released: true }
+        : undefined;
+    throw new ManagedAiError(
+      "DUPLICATE_REQUEST",
+      409,
+      "이미 처리된 요청입니다. 새 작업으로 다시 시도해주세요.",
+      replayDetails,
+    );
+  }
   if (!response.ok) {
     throw new ManagedAiError(
       "QUOTA_RESERVATION_FAILED",
       503,
       sanitizeText(payload?.message, 240) || "작업량을 안전하게 예약하지 못했습니다.",
-    );
-  }
-  if (payload?.code === "IDEMPOTENCY_REPLAY") {
-    throw new ManagedAiError(
-      "DUPLICATE_REQUEST",
-      409,
-      "이미 처리된 요청입니다. 새 작업으로 다시 시도해주세요.",
+      payload?.reservation_release_pending === true && reservationId
+        ? { reservation_id: reservationId }
+        : undefined,
     );
   }
   if (!isAllowedQuotaPayload(payload)) {
@@ -127,9 +158,9 @@ async function reserveWork(userId, token, requestId) {
       "SUBSCRIPTION_REQUIRED",
       403,
       sanitizeText(payload?.message, 240) || "무료 사용량 또는 이용권을 확인해주세요.",
+      reservationId ? { reservation_id: reservationId } : undefined,
     );
   }
-  const reservationId = extractReservationId(payload);
   if (!reservationId) {
     throw new ManagedAiError(
       "RESERVATION_INVALID",
@@ -141,15 +172,25 @@ async function reserveWork(userId, token, requestId) {
 }
 
 async function releaseWork(userId, token, reservationId, requestId) {
-  if (!reservationId) return;
+  if (!reservationId) return { released: true, status: 0 };
   try {
-    await authRequest(
+    const { response, payload } = await authRequest(
       "/user/work/release",
       token,
       reservationBody(userId, token, reservationId, requestId),
     );
+    const logicallyReleased = Boolean(
+      payload?.success === true ||
+      payload?.released === true ||
+      payload?.available === true ||
+      payload?.status === true
+    );
+    return {
+      released: response.ok && logicallyReleased,
+      status: Number(response.status || 0),
+    };
   } catch {
-    // The authentication service owns reservation TTL recovery.
+    return { released: false, status: 0 };
   }
 }
 
@@ -281,8 +322,30 @@ export default async function handler(req, res) {
       request_ip_hash_basis: requestIp(req) ? "present" : "missing",
     });
   } catch (error) {
+    const idempotencyReplay = error?.details?.idempotency_replay === true;
+    const idempotencyReplayReleased =
+      error?.details?.idempotency_replay_released === true;
+    if (!reservationId) {
+      reservationId = extractReservationId(error?.details);
+    }
+    let releasePending = false;
+    let releaseSucceeded = false;
     if (reservationId) {
-      await releaseWork(userId, loginToken, reservationId, requestId);
+      const releaseResult = await releaseWork(
+        userId,
+        loginToken,
+        reservationId,
+        requestId,
+      );
+      releaseSucceeded = releaseResult.released === true;
+      releasePending = releaseResult.released !== true;
+      if (releasePending) {
+        console.error(JSON.stringify({
+          event: "managed_ai_reservation_release_pending",
+          request_id: requestId,
+          release_status: releaseResult.status,
+        }));
+      }
     }
     const managed = error instanceof ManagedAiError;
     const gatewayStatus = Number(error?.status || 0);
@@ -293,7 +356,7 @@ export default async function handler(req, res) {
         (gatewayStatus === 403 && gatewayMessage.includes("credit card")));
     const gatewayAuthFailed =
       !managed && !creditsRequired && [401, 403].includes(gatewayStatus);
-    sendJson(res, managed ? error.status : 503, {
+    const responsePayload = {
       success: false,
       code: managed
         ? error.code
@@ -309,6 +372,17 @@ export default async function handler(req, res) {
           : gatewayAuthFailed
             ? "서비스 운영자의 AI 인증 설정을 확인해주세요."
             : "AI 서비스가 일시적으로 지연되고 있습니다.",
-    });
+    };
+    if (releasePending) {
+      responsePayload.reservation_release_pending = true;
+      responsePayload.reservation_id = reservationId;
+      responsePayload.ai_job_id = requestId;
+    } else if (
+      (idempotencyReplay && releaseSucceeded) || idempotencyReplayReleased
+    ) {
+      responsePayload.retry_with_new_idempotency_key = true;
+      responsePayload.ai_job_id = requestId;
+    }
+    sendJson(res, managed ? error.status : 503, responsePayload);
   }
 }

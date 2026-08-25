@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -250,8 +251,8 @@ class ComputerUseAgent:
                 data = json.loads(legacy_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
                     # Migrate immediately so plaintext session does not linger.
-                    self._write_storage_state(data)
-                    return data
+                    if self._write_storage_state(data):
+                        return data
             except Exception:
                 pass
 
@@ -275,8 +276,32 @@ class ComputerUseAgent:
                     pass
             return False
 
-        secure_path.write_text(protected, encoding="utf-8")
-        secure_file_permissions(secure_path)
+        temp_path: Optional[Path] = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(secure_path.parent),
+                prefix=f"{secure_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                handle.write(protected)
+                handle.flush()
+                os.fsync(handle.fileno())
+                temp_path = Path(handle.name)
+            secure_file_permissions(temp_path)
+            os.replace(temp_path, secure_path)
+            secure_file_permissions(secure_path)
+        except Exception:
+            logger.exception("암호화된 브라우저 세션을 저장하지 못했습니다.")
+            return False
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         # Remove legacy plaintext if present.
         if legacy_path is not None and legacy_path.exists():
@@ -453,16 +478,16 @@ class ComputerUseAgent:
         self.context.route("**/*", _guard_document_navigation)
         self.page = self.context.new_page()
 
-    def save_session(self):
+    def save_session(self) -> bool:
         """Persist storage state encrypted at rest."""
         if not self.context:
-            return
-        try:
-            state = self.context.storage_state()
-            if isinstance(state, dict):
-                self._write_storage_state(state)
-        except Exception:
-            pass
+            return False
+        state = self.context.storage_state()
+        if not isinstance(state, dict):
+            raise RuntimeError("브라우저 세션 형식이 올바르지 않습니다.")
+        if not self._write_storage_state(state):
+            raise RuntimeError("암호화된 브라우저 세션을 저장하지 못했습니다.")
+        return True
 
     def clear_saved_session(self) -> None:
         """Delete persisted browser session state for this profile."""
@@ -481,12 +506,13 @@ class ComputerUseAgent:
             except OSError:
                 pass
 
-    def close(self):
-        """Close browser and persist storage state."""
-        try:
-            self.save_session()
-        except Exception:
-            pass
+    def close(self, *, save_session: bool = True):
+        """Close browser resources, optionally persisting verified state."""
+        if save_session:
+            try:
+                self.save_session()
+            except Exception:
+                pass
 
         try:
             if self.context:
