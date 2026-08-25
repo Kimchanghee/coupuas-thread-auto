@@ -27,7 +27,7 @@ def test_release_requires_timestamped_authenticode_with_an_exact_signer_pin():
     assert "SSLcom/esigner-codesign" not in workflow
     assert "ESIGNER_" not in workflow
     assert workflow.count("assert-public-authenticode.ps1") == 2
-    assert workflow.count("-AllowPinnedSelfSigned") == 4
+    assert workflow.count("-AllowPinnedSelfSigned") == 0
     assert "branches:" not in workflow.split("workflow_dispatch:", 1)[0]
 
     assert "SignatureStatus]::Valid" in verifier
@@ -41,6 +41,8 @@ def test_release_requires_timestamped_authenticode_with_an_exact_signer_pin():
     assert "NotTrusted" not in signer
     assert "UnknownError" not in signer
     assert '-TimestampServer "http://timestamp.digicert.com"' in signer
+    assert '$env:GITHUB_ACTIONS -eq "true"' in verifier
+    assert '$env:GITHUB_ACTIONS -eq "true"' in signer
 
 
 def test_release_smokes_signed_gui_and_gates_live_auth_side_effects():
@@ -102,3 +104,21 @@ def test_free_store_workflow_is_manual_pinned_and_payment_provider_free():
     assert "AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}" in workflow
     assert "STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}" in workflow
     assert "msstore publish" in workflow
+    assert "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020" in workflow
+    assert 'node-version: "22"' in workflow
+    assert "npm ci" in workflow
+    assert workflow.index("npm ci") < workflow.index("node --test tests_js/*.test.mjs")
+
+
+def test_branch_ci_covers_master_and_codex_with_locked_python_and_node_checks():
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "- master" in workflow
+    assert '- "codex/**"' in workflow
+    assert "pip install --require-hashes -r requirements.lock" in workflow
+    assert "npm ci" in workflow
+    assert "python -m pytest -q" in workflow
+    assert "python -m compileall -q main.py login_main.py setup_login.py src" in workflow
+    assert "python tools/sanity_check.py" in workflow
+    assert "npm test" in workflow
+    assert "npm audit --omit=dev" in workflow

@@ -8,6 +8,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ($AllowPinnedSelfSigned -and $env:GITHUB_ACTIONS -eq "true") {
+  throw "AllowPinnedSelfSigned is restricted to explicit local development use."
+}
+
 function Get-RequiredEnv {
   param([Parameter(Mandatory = $true)][string]$Name)
 

@@ -131,8 +131,7 @@ jobs:
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           & ".github/scripts/sign-windows-artifact.ps1" `
-            -Path "dist\CoupangThreadAuto.exe" `
-            -AllowPinnedSelfSigned
+            -Path "dist\CoupangThreadAuto.exe"
 
       - name: Verify executable release signature
         shell: pwsh
@@ -141,8 +140,7 @@ jobs:
         run: |
           & ".github/scripts/assert-public-authenticode.ps1" `
             -Path "dist\CoupangThreadAuto.exe" `
-            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT `
-            -AllowPinnedSelfSigned
+            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
 
       - name: Launch signed packaged login window
         shell: pwsh
@@ -293,8 +291,7 @@ jobs:
           CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
         run: |
           & ".github/scripts/sign-windows-artifact.ps1" `
-            -Path "dist\CoupangThreadAutoSetup.exe" `
-            -AllowPinnedSelfSigned
+            -Path "dist\CoupangThreadAutoSetup.exe"
 
       - name: Verify installer release signature
         shell: pwsh
@@ -303,8 +300,7 @@ jobs:
         run: |
           & ".github/scripts/assert-public-authenticode.ps1" `
             -Path "dist\CoupangThreadAutoSetup.exe" `
-            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT `
-            -AllowPinnedSelfSigned
+            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
 
       - name: Verify installer
         run: |

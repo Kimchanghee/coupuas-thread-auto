@@ -11,6 +11,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ($AllowPinnedSelfSigned -and $env:GITHUB_ACTIONS -eq "true") {
+  throw "AllowPinnedSelfSigned is restricted to explicit local development use."
+}
+
 function Normalize-Thumbprint {
   param([Parameter(Mandatory = $true)][string]$Value)
 

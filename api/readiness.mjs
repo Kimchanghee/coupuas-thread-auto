@@ -1,11 +1,16 @@
 import { hasGatewayCredentials } from "./_lib/gateway-auth.mjs";
+import { isPasswordResetProtectionConfigured } from "./_lib/password-reset-rate-limit.mjs";
 import { loadNoticePayload } from "./notices.mjs";
 
 const AUTH_HEALTH_URL = "https://newshopping-shorts-auth.vercel.app/health";
 
 export async function readinessPayload(
   req,
-  { fetchImpl = globalThis.fetch, noticesLoader = loadNoticePayload } = {},
+  {
+    fetchImpl = globalThis.fetch,
+    noticesLoader = loadNoticePayload,
+    passwordResetProtectionConfigured = isPasswordResetProtectionConfigured(),
+  } = {},
 ) {
   const [authResult, noticeResult] = await Promise.allSettled([
     fetchImpl(AUTH_HEALTH_URL, {
@@ -31,7 +36,11 @@ export async function readinessPayload(
     latest.version && latest.downloadUrl && latest.checksumUrl,
   );
   const gatewayConfigured = hasGatewayCredentials(req);
-  const ok = gatewayConfigured && authServiceReady && releaseReady;
+  const ok =
+    gatewayConfigured &&
+    authServiceReady &&
+    releaseReady &&
+    passwordResetProtectionConfigured;
 
   return {
     ok,
@@ -39,6 +48,7 @@ export async function readinessPayload(
     gatewayConfigured,
     authServiceReady,
     releaseReady,
+    passwordResetProtectionConfigured,
     latestVersion: latest.version ? `v${latest.version}` : null,
   };
 }

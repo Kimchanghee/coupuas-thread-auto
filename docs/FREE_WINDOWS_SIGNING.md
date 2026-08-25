@@ -9,10 +9,15 @@ Authenticode 인증서나 SSL.com eSigner 구독이 필요하지 않다.
 - `.github/workflows/store-release.yml`: 무료 Microsoft Store 경로다. 항상 MSIX를
   빌드·검증하고, `publish` 입력이 켜진 경우에만 Partner Center로 제출한다.
 - `.github/workflows/build-release.yml`: GitHub에서 EXE/설치 프로그램을 직접
-  배포할 때 사용한다. 공개 신뢰 인증서를 우선 사용하며, 준비 전에는 저장소에
-  고정된 동일한 자체서명 인증서만 제한적으로 허용한다. 파일 내용, 인증서 지문,
-  코드 서명 용도와 공개 타임스탬프를 모두 확인한다. 일반 `master` 푸시로는 이
+  배포할 때 사용한다. 공개 신뢰 체인으로 검증되는 Authenticode 인증서만 허용하며,
+  파일 내용, 인증서 지문, 코드 서명 용도와 공개 타임스탬프를 모두 확인한다.
+  자체서명 인증서는 공개 릴리스에서 허용하지 않는다. 일반 `master` 푸시로는 이
   워크플로가 자동 실행되지 않는다.
+
+로컬 개발 중 서명 동작만 확인할 때는 `sign-windows-artifact.ps1`과
+`assert-public-authenticode.ps1`의 `-AllowPinnedSelfSigned`를 명시적으로 사용할 수
+있다. 이 opt-in은 `GITHUB_ACTIONS=true` 환경에서 즉시 실패하므로 CI나 공개
+릴리스의 신뢰 검사를 우회할 수 없다.
 
 ## 최초 1회 Partner Center 설정
 

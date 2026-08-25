@@ -4,12 +4,29 @@ import {
   createPasswordResetQueueMessage,
   enqueuePasswordReset,
 } from "./password-reset-queue.mjs";
+import {
+  consumePasswordResetRateLimit,
+  verifyPasswordResetCaptcha,
+} from "./password-reset-rate-limit.mjs";
 
 const AUTH_BASE_URL = "https://newshopping-shorts-auth.vercel.app";
+const MAX_PASSWORD_RESET_BODY_BYTES = 4 * 1024;
 
 function parseBody(req) {
-  if (req.body && typeof req.body === "object") return req.body;
-  if (typeof req.body === "string" && req.body.length <= 4_096) {
+  if (req.body && typeof req.body === "object") {
+    try {
+      if (Buffer.byteLength(JSON.stringify(req.body), "utf8") > MAX_PASSWORD_RESET_BODY_BYTES) {
+        return null;
+      }
+      return req.body;
+    } catch {
+      return null;
+    }
+  }
+  if (
+    typeof req.body === "string" &&
+    Buffer.byteLength(req.body, "utf8") <= MAX_PASSWORD_RESET_BODY_BYTES
+  ) {
     try {
       return JSON.parse(req.body);
     } catch {
@@ -45,7 +62,12 @@ function canonicalIp(value) {
 export async function proxyPasswordReset(
   req,
   action,
-  { fetchImpl = globalThis.fetch, enqueueImpl = enqueuePasswordReset } = {},
+  {
+    fetchImpl = globalThis.fetch,
+    enqueueImpl = enqueuePasswordReset,
+    rateLimitImpl = consumePasswordResetRateLimit,
+    captchaImpl = verifyPasswordResetCaptcha,
+  } = {},
 ) {
   if (req.method !== "POST") {
     return { status: 405, body: { success: false, message: "허용되지 않은 요청입니다." } };
@@ -55,7 +77,7 @@ export async function proxyPasswordReset(
     return { status: 415, body: { success: false, message: "입력값을 다시 확인해 주세요." } };
   }
   const body = parseBody(req);
-  if (!body || JSON.stringify(body).length > 2_048) {
+  if (!body) {
     return { status: 400, body: { success: false, message: "입력값을 다시 확인해 주세요." } };
   }
   const isRequest = action === "request";
@@ -70,7 +92,9 @@ export async function proxyPasswordReset(
     /^[A-Za-z0-9_-]{32,256}$/.test(body.token) &&
     typeof body.password === "string" &&
     body.password.length >= 8 &&
-    body.password.length <= 128;
+    body.password.length <= 128 &&
+    /[A-Za-z]/.test(body.password) &&
+    /[0-9]/.test(body.password);
   if ((isRequest && !validRequest) || (!isRequest && !validConfirm)) {
     return { status: 400, body: { success: false, message: "입력값을 다시 확인해 주세요." } };
   }
@@ -97,6 +121,32 @@ export async function proxyPasswordReset(
       };
     }
     try {
+      const rateLimit = await rateLimitImpl({
+        ipAddress: clientIp,
+        identifier: outboundBody.identifier,
+      });
+      if (rateLimit?.allowed !== true) {
+        return {
+          status: 202,
+          body: {
+            success: true,
+            message: "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.",
+          },
+        };
+      }
+      const captchaAllowed = await captchaImpl({
+        token: body.captcha_token,
+        ipAddress: clientIp,
+      });
+      if (captchaAllowed !== true) {
+        return {
+          status: 202,
+          body: {
+            success: true,
+            message: "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.",
+          },
+        };
+      }
       await enqueueImpl(
         createPasswordResetQueueMessage({
           identifier: outboundBody.identifier,

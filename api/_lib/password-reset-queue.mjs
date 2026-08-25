@@ -135,10 +135,23 @@ export async function processPasswordResetQueueMessage(
   }
 }
 
-export function passwordResetRetryDirective(error, metadata) {
+export function passwordResetRetryDirective(error, metadata, { logger = console } = {}) {
   if (error instanceof PermanentPasswordResetQueueError) return { acknowledge: true };
+  const rawDeliveryCount = Number(metadata?.deliveryCount || 1);
+  const deliveryCount = Number.isSafeInteger(rawDeliveryCount) && rawDeliveryCount > 0
+    ? rawDeliveryCount
+    : 1;
+  if (deliveryCount >= 5) {
+    logger.error(JSON.stringify({
+      event: "password_reset_queue_retry_exhausted",
+      delivery_count: deliveryCount,
+      message_id: String(metadata?.messageId || "unknown").slice(0, 160),
+      error_type: String(error?.name || "Error").slice(0, 80),
+    }));
+    return { acknowledge: true };
+  }
   return {
-    afterSeconds: Math.min(300, 5 * 2 ** Math.min(metadata.deliveryCount, 6)),
+    afterSeconds: Math.min(300, 5 * 2 ** Math.min(deliveryCount, 6)),
   };
 }
 

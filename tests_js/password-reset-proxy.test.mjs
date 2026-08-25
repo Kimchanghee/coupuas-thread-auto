@@ -4,6 +4,11 @@ import test from "node:test";
 
 import { proxyPasswordReset } from "../api/_lib/password-reset-proxy.mjs";
 import {
+  createPasswordResetRateLimiter,
+  createUpstashFixedWindowStore,
+  passwordResetRateLimitConfiguration,
+} from "../api/_lib/password-reset-rate-limit.mjs";
+import {
   createPasswordResetQueueMessage,
   PermanentPasswordResetQueueError,
   passwordResetRetryDirective,
@@ -11,6 +16,8 @@ import {
 } from "../api/_lib/password-reset-queue.mjs";
 
 process.env.PASSWORD_RESET_PROXY_SECRET = "test-password-reset-proxy-secret-at-least-32-chars";
+
+const allowRateLimit = async () => ({ allowed: true });
 
 const jsonPost = (body, headers = {}) => ({
   method: "POST",
@@ -63,6 +70,7 @@ test("password reset request durably queues only validated data and returns gene
     ),
     "request",
     {
+      rateLimitImpl: allowRateLimit,
       enqueueImpl: async (message) => {
         queued = message;
         return { messageId: "msg_test" };
@@ -123,7 +131,10 @@ test("IPv6 is canonicalized before encryption and worker signing", async () => {
       { "x-forwarded-for": "2001:0DB8:0000:0000:0000:0000:0000:0001" },
     ),
     "request",
-    { enqueueImpl: async (message) => { envelope = message; } },
+    {
+      rateLimitImpl: allowRateLimit,
+      enqueueImpl: async (message) => { envelope = message; },
+    },
   );
   assert.equal(result.status, 202);
   let body;
@@ -152,6 +163,237 @@ test("permanent worker validation errors are acknowledged instead of retried", a
   assert.deepEqual(passwordResetRetryDirective(new Error("temporary"), { deliveryCount: 2 }), {
     afterSeconds: 20,
   });
+});
+
+test("temporary queue delivery is acknowledged after five total attempts", () => {
+  const events = [];
+  assert.deepEqual(
+    passwordResetRetryDirective(
+      new Error("temporary"),
+      { deliveryCount: 4, messageId: "message-1" },
+      { logger: { error: (value) => events.push(JSON.parse(value)) } },
+    ),
+    { afterSeconds: 80 },
+  );
+  assert.deepEqual(
+    passwordResetRetryDirective(
+      new Error("temporary"),
+      { deliveryCount: 5, messageId: "message-1" },
+      { logger: { error: (value) => events.push(JSON.parse(value)) } },
+    ),
+    { acknowledge: true },
+  );
+  assert.deepEqual(events, [{
+    event: "password_reset_queue_retry_exhausted",
+    delivery_count: 5,
+    message_id: "message-1",
+    error_type: "Error",
+  }]);
+});
+
+test("server password policy requires both an ASCII letter and a number", async () => {
+  for (const password of ["aaaaaaaa", "12345678", "한글비밀번호1234"]) {
+    const result = await proxyPasswordReset(
+      jsonPost({ token: "x".repeat(43), password }),
+      "confirm",
+      { fetchImpl: async () => { throw new Error("must not call upstream"); } },
+    );
+    assert.equal(result.status, 400);
+  }
+});
+
+test("rate-limited requests keep the same enumeration-safe accepted response", async () => {
+  let enqueueCalls = 0;
+  const result = await proxyPasswordReset(
+    jsonPost(
+      { identifier: "user@example.com", program_type: "stmaker" },
+      { "x-forwarded-for": "203.0.113.7" },
+    ),
+    "request",
+    {
+      rateLimitImpl: async () => ({ allowed: false, retryAfterSeconds: 600 }),
+      enqueueImpl: async () => { enqueueCalls += 1; },
+    },
+  );
+  assert.deepEqual(result, {
+    status: 202,
+    body: {
+      success: true,
+      message: "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.",
+    },
+  });
+  assert.equal(enqueueCalls, 0);
+});
+
+test("rate-limit backend failures fail closed before enqueue", async () => {
+  let enqueueCalls = 0;
+  const result = await proxyPasswordReset(
+    jsonPost(
+      { identifier: "user@example.com", program_type: "stmaker" },
+      { "x-forwarded-for": "203.0.113.7" },
+    ),
+    "request",
+    {
+      rateLimitImpl: async () => { throw new Error("redis unavailable"); },
+      enqueueImpl: async () => { enqueueCalls += 1; },
+    },
+  );
+  assert.equal(result.status, 503);
+  assert.doesNotMatch(JSON.stringify(result), /redis unavailable/);
+  assert.equal(enqueueCalls, 0);
+});
+
+test("missing durable rate-limit configuration fails closed", async (t) => {
+  const names = [
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "KV_REST_API_URL",
+    "KV_REST_API_TOKEN",
+    "PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET",
+  ];
+  const saved = new Map(names.map((name) => [name, process.env[name]]));
+  for (const name of names) delete process.env[name];
+  t.after(() => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  let enqueueCalls = 0;
+  const result = await proxyPasswordReset(
+    jsonPost(
+      { identifier: "user@example.com", program_type: "stmaker" },
+      { "x-forwarded-for": "203.0.113.7" },
+    ),
+    "request",
+    { enqueueImpl: async () => { enqueueCalls += 1; } },
+  );
+  assert.equal(result.status, 503);
+  assert.equal(enqueueCalls, 0);
+});
+
+test("rate-limit configuration supports Vercel KV aliases with Upstash names preferred", () => {
+  const common = {
+    PASSWORD_RESET_PROXY_SECRET: "proxy-secret-that-is-at-least-32-characters",
+    PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET: "distinct-rate-hmac-secret-at-least-32-characters",
+    KV_REST_API_URL: "https://legacy-kv.example.upstash.io",
+    KV_REST_API_TOKEN: "legacy-kv-token",
+  };
+  const fallback = passwordResetRateLimitConfiguration(common);
+  assert.equal(fallback.url, "https://legacy-kv.example.upstash.io/");
+  assert.equal(fallback.token, "legacy-kv-token");
+
+  const preferred = passwordResetRateLimitConfiguration({
+    ...common,
+    UPSTASH_REDIS_REST_URL: "https://preferred.example.upstash.io",
+    UPSTASH_REDIS_REST_TOKEN: "preferred-token",
+  });
+  assert.equal(preferred.url, "https://preferred.example.upstash.io/");
+  assert.equal(preferred.token, "preferred-token");
+});
+
+test("rate-limit configuration rejects partial or mixed Redis credential pairs", () => {
+  const common = {
+    PASSWORD_RESET_PROXY_SECRET: "proxy-secret-that-is-at-least-32-characters",
+    PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET: "distinct-rate-hmac-secret-at-least-32-characters",
+  };
+  const fullKv = {
+    KV_REST_API_URL: "https://legacy-kv.example.upstash.io",
+    KV_REST_API_TOKEN: "legacy-kv-token",
+  };
+  const partialCases = [
+    { ...common, ...fullKv, UPSTASH_REDIS_REST_URL: "https://partial.example.upstash.io" },
+    { ...common, ...fullKv, UPSTASH_REDIS_REST_TOKEN: "partial-token" },
+    { ...common, KV_REST_API_URL: "https://partial-kv.example.upstash.io" },
+    { ...common, KV_REST_API_TOKEN: "partial-kv-token" },
+  ];
+  for (const env of partialCases) {
+    assert.throws(
+      () => passwordResetRateLimitConfiguration(env),
+      /must be configured together/,
+    );
+  }
+});
+
+test("configured CAPTCHA denial is enumeration-safe and suppresses queueing", async () => {
+  let enqueueCalls = 0;
+  const result = await proxyPasswordReset(
+    jsonPost(
+      {
+        identifier: "user@example.com",
+        program_type: "stmaker",
+        captcha_token: "invalid-token",
+      },
+      { "x-forwarded-for": "203.0.113.7" },
+    ),
+    "request",
+    {
+      rateLimitImpl: allowRateLimit,
+      captchaImpl: async () => false,
+      enqueueImpl: async () => { enqueueCalls += 1; },
+    },
+  );
+  assert.equal(result.status, 202);
+  assert.equal(result.body.success, true);
+  assert.equal(enqueueCalls, 0);
+});
+
+test("shared fixed-window state limits IP and identifier across instances", async () => {
+  const counts = new Map();
+  const sharedStore = {
+    async increment(keys) {
+      return keys.map((key) => {
+        const next = (counts.get(key) || 0) + 1;
+        counts.set(key, next);
+        return next;
+      });
+    },
+  };
+  const options = {
+    store: sharedStore,
+    hmacSecret: "test-rate-limit-hmac-secret-at-least-32-characters",
+    nowImpl: () => 1_700_000_000_000,
+    ipLimit: 2,
+    identifierLimit: 2,
+  };
+  const firstInstance = createPasswordResetRateLimiter(options);
+  const secondInstance = createPasswordResetRateLimiter(options);
+
+  assert.equal((await firstInstance({ ipAddress: "203.0.113.7", identifier: "User@example.com" })).allowed, true);
+  assert.equal((await secondInstance({ ipAddress: "203.0.113.7", identifier: "user@example.com" })).allowed, true);
+  assert.equal((await firstInstance({ ipAddress: "203.0.113.7", identifier: "USER@example.com" })).allowed, false);
+  assert.equal([...counts.keys()].some((key) => /203\.0\.113\.7|user@example\.com/i.test(key)), false);
+});
+
+test("Upstash rate-limit command is atomic and contains only HMAC-derived keys", async () => {
+  let request;
+  const store = createUpstashFixedWindowStore({
+    url: "https://example.upstash.io",
+    token: "test-upstash-token",
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return new Response(JSON.stringify({ result: [1, 1] }), { status: 200 });
+    },
+  });
+  const limiter = createPasswordResetRateLimiter({
+    store,
+    hmacSecret: "test-rate-limit-hmac-secret-at-least-32-characters",
+    nowImpl: () => 1_700_000_000_000,
+  });
+  const outcome = await limiter({
+    ipAddress: "203.0.113.7",
+    identifier: "user@example.com",
+  });
+
+  assert.equal(outcome.allowed, true);
+  assert.equal(request.url, "https://example.upstash.io/");
+  const command = JSON.parse(request.options.body);
+  assert.equal(command[0], "EVAL");
+  assert.equal(command[2], 2);
+  assert.match(command[3], /^password-reset:v1:ip:[a-f0-9]{64}:/);
+  assert.match(command[4], /^password-reset:v1:identifier:[a-f0-9]{64}:/);
+  assert.doesNotMatch(request.options.body, /203\.0\.113\.7|user@example\.com/i);
 });
 
 
