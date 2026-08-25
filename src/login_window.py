@@ -448,17 +448,16 @@ class LoginWindow(QMainWindow):
         layout.addWidget(self.btn_login)
 
         self._password_reset_btn = QPushButton("비밀번호 재설정")
-        self._password_reset_btn.setMinimumHeight(30)
+        self._password_reset_btn.setMinimumHeight(40)
+        self._password_reset_btn.setAccessibleName("비밀번호 재설정 페이지 열기")
         self._password_reset_btn.setFont(QFont(fn, 10, QFont.Weight.DemiBold))
         self._password_reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._password_reset_btn.setStyleSheet(f"""
             QPushButton {{ background: transparent; color: {Colors.ACCENT_LIGHT}; border: none;
-                padding: 0; min-height: 30px; }}
+                padding: 0; min-height: 40px; }}
             QPushButton:hover {{ color: {Colors.ACCENT}; text-decoration: underline; }}
         """)
-        self._password_reset_btn.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl(f"{WEBSITE_BASE_URL}/forgot-password"))
-        )
+        self._password_reset_btn.clicked.connect(self._open_password_reset)
         layout.addWidget(self._password_reset_btn)
 
         divider = QFrame()
@@ -563,6 +562,15 @@ class LoginWindow(QMainWindow):
         self._do_login()
 
     # ─── Register Page ──────────────────────────────────────
+    def _open_password_reset(self) -> None:
+        opened = QDesktopServices.openUrl(QUrl(f"{WEBSITE_BASE_URL}/forgot-password"))
+        if not opened:
+            show_warning(
+                self,
+                "비밀번호 재설정",
+                "브라우저를 열 수 없습니다. 인터넷 연결과 기본 브라우저 설정을 확인해 주세요.",
+            )
+
     def _build_register_page(self):
         page = QWidget()
         page.setObjectName("registerPage")

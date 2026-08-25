@@ -6,5 +6,8 @@
   },
   "scripts": {
     "test": "node --test tests_js/*.test.mjs"
+  },
+  "dependencies": {
+    "@vercel/queue": "0.5.0"
   }
 }

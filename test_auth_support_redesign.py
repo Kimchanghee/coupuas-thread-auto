@@ -7,7 +7,8 @@ from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication, QFrame, QWidget
 
 from src import auth_client
-from src.login_window import LoginWindow
+import src.login_window as login_window_module
+from src.login_window import LoginWindow, WEBSITE_BASE_URL
 from src.tutorial import OVERLAY_STEPS, TutorialOverlay
 from src.update_dialog import UpdateDialog
 
@@ -59,6 +60,37 @@ def test_saved_login_credentials_are_loaded_before_auto_login_is_scheduled(monke
         assert window.auto_login_cb.isChecked()
         assert window._auto_login_pending is True
         assert window.stack.currentIndex() == 0
+    finally:
+        window.close()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_password_reset_opens_live_route_and_reports_browser_failure(monkeypatch):
+    app = _app()
+    monkeypatch.setattr(auth_client, "get_saved_credentials", dict)
+    opened = []
+    warnings = []
+    monkeypatch.setattr(
+        login_window_module.QDesktopServices,
+        "openUrl",
+        lambda url: opened.append(url.toString()) or False,
+    )
+    monkeypatch.setattr(
+        login_window_module,
+        "show_warning",
+        lambda parent, title, message: warnings.append((title, message)),
+    )
+    window = LoginWindow()
+    try:
+        window._password_reset_btn.click()
+        app.processEvents()
+        assert opened == [f"{WEBSITE_BASE_URL}/forgot-password"]
+        assert warnings
+        assert warnings[0][0] == "비밀번호 재설정"
+        assert "브라우저를 열 수 없습니다" in warnings[0][1]
+        assert window._password_reset_btn.height() >= 40
+        assert window._password_reset_btn.accessibleName()
     finally:
         window.close()
         window.deleteLater()
