@@ -182,7 +182,7 @@ def test_main_builds_with_explicit_makeappx_path(monkeypatch, tmp_path, capsys):
 
     assert result == 0
     assert captured["makeappx_path"] == makeappx.resolve()
-    assert captured["version"] == "3.2.1.0"
+    assert captured["version"] == "3.2.2.0"
     assert "package.msix" in capsys.readouterr().out
 
 
