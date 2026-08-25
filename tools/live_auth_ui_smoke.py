@@ -23,10 +23,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src import auth_client  # noqa: E402
 import src.login_window as login_window_module  # noqa: E402
+from src import auth_client  # noqa: E402
 from src.login_window import LoginWindow  # noqa: E402
 from src.main_window import MainWindow  # noqa: E402
+
+
+def _configure_utf8_console() -> None:
+    """Keep Korean failure diagnostics readable on Windows CI consoles."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
 def _wait_for(app: QApplication, predicate, timeout: float = 30.0) -> bool:
@@ -46,6 +54,7 @@ def _suffix(length: int = 8) -> str:
 
 
 def main() -> int:
+    _configure_utf8_console()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--confirm-live-account",
@@ -139,13 +148,21 @@ def main() -> int:
     ):
         print(f"[FAIL] 아이디 중복 확인 실패: {window.reg_user_status.text()}")
         return 1
+    window._register_next_btn.click()
+    if not _wait_for(app, lambda: window._register_steps.currentIndex() == 1, timeout=5):
+        warning_text = warnings[-1][1] if warnings else "응답 없음"
+        print(f"[FAIL] 회원가입 약관 단계 전환 실패: {warning_text}")
+        return 1
     window.grab().save(str(shot_dir / f"{timestamp}-02-register-ready.png"), "PNG")
 
     window.btn_register.click()
     if not _wait_for(
         app,
-        lambda: window.stack.currentIndex() == 0
-        and window.login_id.text().strip().lower() == username,
+        lambda: login_result.get("status") is True
+        or (
+            window.stack.currentIndex() == 0
+            and window.login_id.text().strip().lower() == username
+        ),
         timeout=30,
     ):
         warning_text = warnings[-1][1] if warnings else "응답 없음"
@@ -153,6 +170,14 @@ def main() -> int:
         return 1
 
     window.grab().save(str(shot_dir / f"{timestamp}-03-register-complete.png"), "PNG")
+    if login_result.get("status") is True:
+        if not auth_client.logout():
+            print("[FAIL] 회원가입 직후 발급된 세션을 정상 종료하지 못했습니다.")
+            return 1
+        login_result.clear()
+        window.login_id.setText(username)
+        window.login_pw.setText(password)
+        window.stack.setCurrentIndex(0)
     window.remember_cb.setChecked(True)
     window.auto_login_cb.setChecked(True)
     window.btn_login.click()

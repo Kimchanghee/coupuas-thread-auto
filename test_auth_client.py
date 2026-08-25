@@ -489,6 +489,18 @@ def test_heartbeat_merges_user_type_and_marks_paid(monkeypatch):
     assert state["is_paid"] is True
 
 
+def test_logout_serializes_numeric_user_id_as_string(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = 1001
+    auth_client._auth_state["token"] = "token-1"
+    session = _FakeSession(_FakeResponse(200, {"success": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.setattr(auth_client, "clear_local_session", lambda: None)
+
+    assert auth_client.logout() is True
+    assert session.calls[-1]["json"]["id"] == "1001"
+
+
 def test_heartbeat_payload_includes_ip(monkeypatch):
     _reset_auth_state()
     auth_client._auth_state["user_id"] = 1001
@@ -502,7 +514,7 @@ def test_heartbeat_payload_includes_ip(monkeypatch):
     assert result["status"] is True
     assert session.calls
     payload = session.calls[-1]["json"]
-    assert payload["id"] == 1001
+    assert payload["id"] == "1001"
     assert payload["key"] == "token-1"
     assert payload["ip"] == "10.20.30.40"
     assert payload["current_task"] == "idle"

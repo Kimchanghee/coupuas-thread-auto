@@ -17,7 +17,6 @@ New-Item -ItemType Directory -Force -Path $roamingDir, $localDir | Out-Null
 
 $environmentKeys = @(
     "USERPROFILE",
-    "HOME",
     "APPDATA",
     "LOCALAPPDATA",
     "QT_QPA_PLATFORM",
@@ -33,7 +32,6 @@ foreach ($key in $environmentKeys) {
 
 try {
     $env:USERPROFILE = $smokeHome
-    $env:HOME = $smokeHome
     $env:APPDATA = $roamingDir
     $env:LOCALAPPDATA = $localDir
     $env:QT_QPA_PLATFORM = "offscreen"

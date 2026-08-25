@@ -1,17 +1,17 @@
 # -*- coding: utf-8 -*-
 """Auth client for dashboard API."""
 
+import hashlib
 import json
 import logging
 import os
 import re
 import socket
+import ssl
 import sys
 import tempfile
 import threading
 import time
-import hashlib
-import ssl
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
+
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
 from src.subscription_plans import (
@@ -1785,7 +1786,7 @@ def logout() -> bool:
         try:
             resp = _session.post(
                 f"{API_SERVER_URL}/user/logout/god",
-                json={"id": user_id, "key": token},
+                json={"id": str(user_id), "key": token},
                 headers=_build_auth_headers(token),
                 timeout=10,
             )
@@ -1811,7 +1812,7 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
         resp = _session.post(
             f"{API_SERVER_URL}/user/login/god/check",
             json={
-                "id": user_id,
+                "id": str(user_id),
                 "key": token,
                 "ip": _resolve_client_ip(),
                 "current_task": current_task,
