@@ -21,9 +21,17 @@ production secrets into issues, logs, chat, or source control.
 ## 2. Public recovery site
 
 1. Set `PASSWORD_RESET_PROXY_SECRET` to the exact same value as the auth service.
-2. Create a dedicated Upstash Redis database and configure all of the following
-   server-only variables. Requests fail closed before queueing if any required
-   value is missing or the Redis command fails.
+2. Configure one durable atomic rate-limit backend. Requests fail closed before
+   queueing if any required value is missing or the backend command fails.
+   The existing Supabase auth project is the production path:
+   - Apply every pending migration under `supabase/migrations/` in timestamp order.
+   - `PASSWORD_RESET_SUPABASE_URL` using the project HTTPS API origin
+   - `PASSWORD_RESET_SUPABASE_PUBLISHABLE_KEY` using a low-privilege publishable key
+   - `PASSWORD_RESET_SUPABASE_RPC_SECRET` using the random value whose SHA-256
+     digest is stored by the migration; never reuse another password-reset secret
+   - The RPC accepts only HMAC-derived fixed-window keys, increments both counters
+     in one PostgreSQL transaction, and keeps its tables in the private schema.
+   Upstash Redis remains a supported alternative:
    - `UPSTASH_REDIS_REST_URL` using the database HTTPS REST endpoint
    - `UPSTASH_REDIS_REST_TOKEN` using the standard write token, never the
      read-only or browser-exposed token
@@ -37,8 +45,7 @@ production secrets into issues, logs, chat, or source control.
      `PASSWORD_RESET_RATE_LIMIT_IDENTIFIER_MAX` (default 3)
 3. The limiter stores only context-separated HMAC digests of the canonical IP
    and normalized identifier. It increments both fixed-window counters in one
-   atomic Redis `EVAL` command. Never log or store the raw values in rate-limit
-   keys.
+   atomic backend operation. Never log or store the raw values in rate-limit keys.
 4. Optional: set `TURNSTILE_SECRET_KEY` after adding a Turnstile widget that
    submits its short-lived token as `captcha_token`. When configured, server-side
    Siteverify failure suppresses queue delivery while retaining the same generic
@@ -52,9 +59,9 @@ production secrets into issues, logs, chat, or source control.
    10 minutes per IP, and initially logs excess traffic without blocking it.
 7. Publish the observation rule, review legitimate traffic, then change its
    exceed action to rate-limit/429 before enabling password reset publicly.
-   This is defense in depth and does not replace the repository-level Redis
+   This is defense in depth and does not replace the application-level durable
    limiter. Never skip the observation period or broaden the path condition.
-8. Deploy the site only after the auth migration and environment validation pass.
+8. Deploy the site only after the auth and rate-limit migrations and environment validation pass.
    `/api/readiness` reports `passwordResetProtectionConfigured: true` only when
    the proxy signing secret and all durable limiter settings are valid.
 
@@ -72,7 +79,7 @@ Use a dedicated test account and verify this exact sequence:
 7. Confirm excess requests do not enqueue additional reset work and retain the
    same generic 202 response. Separately confirm the defense-in-depth firewall
    returns 429 at its configured threshold.
-8. Force Redis/network failure in a preview deployment and confirm the endpoint
+8. Force the durable backend/network failure in a preview deployment and confirm the endpoint
    fails closed with the generic service-unavailable response.
 
 If delivery or verification fails, set `PASSWORD_RESET_ENABLED=false` on the auth
