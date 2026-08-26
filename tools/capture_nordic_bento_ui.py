@@ -79,6 +79,9 @@ def main() -> int:
     )
     window._work_label.setText("3 / 20 회")
     window._plan_badge.setText("쇼핑 프로")
+    window._acct_username_label.setText("Nordic Studio")
+    window._acct_plan_badge.setText("쇼핑 프로")
+    window._acct_work_label.setText("3 / 20 회 사용")
     window.links_text.setPlainText(
         "https://link.coupang.com/a/sample\n"
         "https://naver.me/sample\n"
@@ -91,7 +94,9 @@ def main() -> int:
     app.processEvents()
     window.toggle_inline_help(False)
 
-    window.resize(1360, 900)
+    # Microsoft Store desktop screenshots must be at least 1366 x 768.
+    # Capture at 1600 x 900 so the same deterministic images are submission-ready.
+    window.resize(1600, 900)
     window._switch_page(0)
     app.processEvents()
     _capture(window, output_dir, "automation-wide")
