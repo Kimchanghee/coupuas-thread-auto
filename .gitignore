@@ -125,6 +125,7 @@ htmlcov/
 /test_account.json
 /last_gui_user.txt
 .vercel
+/supabase/.temp/
 
 # Local agent/browser state and generated verification artifacts
 .codex/

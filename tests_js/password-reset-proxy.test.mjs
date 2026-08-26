@@ -5,6 +5,7 @@ import test from "node:test";
 import { proxyPasswordReset } from "../api/_lib/password-reset-proxy.mjs";
 import {
   createPasswordResetRateLimiter,
+  createSupabaseFixedWindowStore,
   createUpstashFixedWindowStore,
   passwordResetRateLimitConfiguration,
 } from "../api/_lib/password-reset-rate-limit.mjs";
@@ -249,6 +250,9 @@ test("missing durable rate-limit configuration fails closed", async (t) => {
     "UPSTASH_REDIS_REST_TOKEN",
     "KV_REST_API_URL",
     "KV_REST_API_TOKEN",
+    "PASSWORD_RESET_SUPABASE_URL",
+    "PASSWORD_RESET_SUPABASE_PUBLISHABLE_KEY",
+    "PASSWORD_RESET_SUPABASE_RPC_SECRET",
     "PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET",
   ];
   const saved = new Map(names.map((name) => [name, process.env[name]]));
@@ -281,6 +285,7 @@ test("rate-limit configuration supports Vercel KV aliases with Upstash names pre
     KV_REST_API_TOKEN: "legacy-kv-token",
   };
   const fallback = passwordResetRateLimitConfiguration(common);
+  assert.equal(fallback.backend, "redis");
   assert.equal(fallback.url, "https://legacy-kv.example.upstash.io/");
   assert.equal(fallback.token, "legacy-kv-token");
 
@@ -291,6 +296,53 @@ test("rate-limit configuration supports Vercel KV aliases with Upstash names pre
   });
   assert.equal(preferred.url, "https://preferred.example.upstash.io/");
   assert.equal(preferred.token, "preferred-token");
+});
+
+test("rate-limit configuration supports the existing Supabase backend", () => {
+  const config = passwordResetRateLimitConfiguration({
+    PASSWORD_RESET_PROXY_SECRET: "proxy-secret-that-is-at-least-32-characters",
+    PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET: "distinct-rate-hmac-secret-at-least-32-characters",
+    PASSWORD_RESET_SUPABASE_URL: "https://project-ref.supabase.co",
+    PASSWORD_RESET_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test-value-with-safe-characters",
+    PASSWORD_RESET_SUPABASE_RPC_SECRET: "distinct-supabase-rpc-secret-at-least-32-characters",
+  });
+  assert.equal(config.backend, "supabase");
+  assert.equal(config.url, "https://project-ref.supabase.co/");
+  assert.equal(config.publishableKey, "sb_publishable_test-value-with-safe-characters");
+});
+
+test("Supabase rate-limit configuration rejects unsafe origins and reused secrets", () => {
+  const common = {
+    PASSWORD_RESET_PROXY_SECRET: "proxy-secret-that-is-at-least-32-characters",
+    PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET: "distinct-rate-hmac-secret-at-least-32-characters",
+    PASSWORD_RESET_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test-value-with-safe-characters",
+    PASSWORD_RESET_SUPABASE_RPC_SECRET: "distinct-supabase-rpc-secret-at-least-32-characters",
+  };
+
+  for (const url of [
+    "http://project-ref.supabase.co",
+    "https://project-ref.supabase.co/rest/v1",
+    "https://user:password@project-ref.supabase.co",
+  ]) {
+    assert.throws(
+      () =>
+        passwordResetRateLimitConfiguration({
+          ...common,
+          PASSWORD_RESET_SUPABASE_URL: url,
+        }),
+      /must be an HTTPS origin/,
+    );
+  }
+
+  assert.throws(
+    () =>
+      passwordResetRateLimitConfiguration({
+        ...common,
+        PASSWORD_RESET_SUPABASE_URL: "https://project-ref.supabase.co",
+        PASSWORD_RESET_SUPABASE_RPC_SECRET: common.PASSWORD_RESET_RATE_LIMIT_HMAC_SECRET,
+      }),
+    /must be distinct/,
+  );
 });
 
 test("rate-limit configuration rejects partial or mixed Redis credential pairs", () => {
@@ -309,6 +361,20 @@ test("rate-limit configuration rejects partial or mixed Redis credential pairs",
     { ...common, KV_REST_API_TOKEN: "partial-kv-token" },
   ];
   for (const env of partialCases) {
+    assert.throws(
+      () => passwordResetRateLimitConfiguration(env),
+      /must be configured together/,
+    );
+  }
+
+  for (const env of [
+    { ...common, PASSWORD_RESET_SUPABASE_URL: "https://project-ref.supabase.co" },
+    {
+      ...common,
+      PASSWORD_RESET_SUPABASE_URL: "https://project-ref.supabase.co",
+      PASSWORD_RESET_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test-value",
+    },
+  ]) {
     assert.throws(
       () => passwordResetRateLimitConfiguration(env),
       /must be configured together/,
@@ -393,6 +459,41 @@ test("Upstash rate-limit command is atomic and contains only HMAC-derived keys",
   assert.equal(command[2], 2);
   assert.match(command[3], /^password-reset:v1:ip:[a-f0-9]{64}:/);
   assert.match(command[4], /^password-reset:v1:identifier:[a-f0-9]{64}:/);
+  assert.doesNotMatch(request.options.body, /203\.0\.113\.7|user@example\.com/i);
+});
+
+test("Supabase rate-limit RPC is atomic and contains only HMAC-derived keys", async () => {
+  let request;
+  const store = createSupabaseFixedWindowStore({
+    url: "https://project-ref.supabase.co",
+    publishableKey: "sb_publishable_test-value-with-safe-characters",
+    rpcSecret: "test-supabase-rpc-secret-at-least-32-characters",
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return new Response(JSON.stringify([{ ip_count: 1, identifier_count: 1 }]), {
+        status: 200,
+      });
+    },
+  });
+  const limiter = createPasswordResetRateLimiter({
+    store,
+    hmacSecret: "test-rate-limit-hmac-secret-at-least-32-characters",
+    nowImpl: () => 1_700_000_000_000,
+  });
+  assert.equal(
+    (await limiter({ ipAddress: "203.0.113.7", identifier: "user@example.com" })).allowed,
+    true,
+  );
+
+  assert.equal(
+    request.url,
+    "https://project-ref.supabase.co/rest/v1/rpc/consume_password_reset_rate_limit",
+  );
+  assert.equal(request.options.headers.apikey, "sb_publishable_test-value-with-safe-characters");
+  const payload = JSON.parse(request.options.body);
+  assert.match(payload.p_ip_key, /^password-reset:v1:ip:[a-f0-9]{64}:/);
+  assert.match(payload.p_identifier_key, /^password-reset:v1:identifier:[a-f0-9]{64}:/);
+  assert.equal(payload.p_ttl_seconds, 605);
   assert.doesNotMatch(request.options.body, /203\.0\.113\.7|user@example\.com/i);
 });
 
