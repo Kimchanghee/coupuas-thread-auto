@@ -64,6 +64,7 @@ from src.ai_provider import (
     AI_PROVIDER_MANAGED,
     normalize_ai_provider,
 )
+from src.ai_content_report import build_ai_content_report_url
 from src.autostart import sync_auto_start
 from src.config import config
 from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
@@ -2572,6 +2573,31 @@ class MainWindow(QMainWindow):
         contact_desc.setStyleSheet(_hint_lbl_style)
         self._contact_desc = contact_desc
 
+        # ── Section 9: AI content reporting ───────────────
+        self._settings_ai_report_sec = QFrame(content)
+        self._settings_ai_report_sec.setFrameShape(QFrame.Shape.NoFrame)
+        self._settings_ai_report_sec.setObjectName("settingsSectionCard")
+        self._settings_ai_report_sec.setStyleSheet(_section_style)
+
+        ai_report_title = QLabel("AI 생성 결과 신고", self._settings_ai_report_sec)
+        ai_report_title.setGeometry(24, 14, 240, 22)
+        ai_report_title.setStyleSheet(_section_title_style)
+
+        self._ai_report_btn = QPushButton(
+            "부적절한 AI 결과 신고하기", self._settings_ai_report_sec
+        )
+        self._ai_report_btn.setAccessibleName("부적절한 AI 생성 결과 신고")
+        self._ai_report_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._ai_report_btn.clicked.connect(self._open_ai_content_report)
+
+        self._ai_report_desc = QLabel(
+            "유해하거나 부적절한 문안을 발견하면 신고해 주세요. "
+            "게시물 내용과 개인정보는 자동 전송되지 않습니다.",
+            self._settings_ai_report_sec,
+        )
+        self._ai_report_desc.setWordWrap(True)
+        self._ai_report_desc.setStyleSheet(_hint_lbl_style)
+
         # ── Fixed settings footer ──────────────────────────
         self._settings_footer = QFrame(page)
         self._settings_footer.setObjectName("settingsActionFooter")
@@ -2613,6 +2639,7 @@ class MainWindow(QMainWindow):
         self._add_gemini_key_btn.setStyleSheet(_ghost_btn_style)
         self._tutorial_settings_btn.setStyleSheet(_ghost_btn_style)
         self._contact_btn.setStyleSheet(_contact_btn_style)
+        self._ai_report_btn.setStyleSheet(_ghost_btn_style)
 
         for btn in (
             self.threads_login_btn,
@@ -2625,6 +2652,7 @@ class MainWindow(QMainWindow):
             self._pay_refresh_btn,
             self._tutorial_settings_btn,
             self._contact_btn,
+            self._ai_report_btn,
             self._add_gemini_key_btn,
             self._settings_cancel_btn,
             self._settings_save_btn,
@@ -3143,6 +3171,17 @@ class MainWindow(QMainWindow):
         else:
             self._contact_btn.setGeometry(24, 40, 200, 44)
             self._contact_desc.setGeometry(236, 45, max(160, contact_w - 260), 34)
+
+        ai_report_w = max(280, self._settings_ai_report_sec.width())
+        ai_report_content_w = max(180, ai_report_w - 48)
+        if ai_report_w < 520:
+            self._ai_report_btn.setGeometry(24, 40, ai_report_content_w, 44)
+            self._ai_report_desc.setGeometry(24, 90, ai_report_content_w, 46)
+        else:
+            self._ai_report_btn.setGeometry(24, 40, 236, 44)
+            self._ai_report_desc.setGeometry(
+                276, 42, max(160, ai_report_w - 300), 54
+            )
 
         info_w = max(280, self._settings_info_sec.width())
         self._version_label.setGeometry(24, 44, max(180, info_w - 48), 20)
@@ -5205,6 +5244,7 @@ class MainWindow(QMainWindow):
                 (self._settings_api_sec, api_h),
                 (self._settings_startup_sec, 120),
                 (self._settings_info_sec, 104),
+                (self._settings_ai_report_sec, 148),
             ),
             3: (
                 (self._settings_payment_sec, payment_h),
@@ -5242,13 +5282,17 @@ class MainWindow(QMainWindow):
             self._settings_api_sec.setGeometry(x, sy, primary_w, api_h)
             self._settings_startup_sec.setGeometry(right_x, sy, secondary_w, 120)
             self._settings_info_sec.setGeometry(right_x, sy + 120 + gap, secondary_w, 104)
+            self._settings_ai_report_sec.setGeometry(
+                right_x, sy + 120 + gap + 104 + gap, secondary_w, 148
+            )
             for section in (
                 self._settings_api_sec,
                 self._settings_startup_sec,
                 self._settings_info_sec,
+                self._settings_ai_report_sec,
             ):
                 section.setVisible(True)
-            sy += max(api_h, 240) + gap
+            sy += max(api_h, 404) + gap
         else:
             # Subscription 8 columns + help/contact 4 columns.
             right_x = x + primary_w + gap
@@ -6236,6 +6280,21 @@ class MainWindow(QMainWindow):
             return
         if not self._open_external_link(kakao_url, "settings_kakao_contact"):
             show_error(self, "문의하기", f"카카오톡 문의 페이지를 열지 못했습니다.\n{kakao_url}")
+
+    def _open_ai_content_report(self):
+        """Open a dedicated AI-content report without attaching user content."""
+        provider_index = self._ai_provider_combo.currentIndex()
+        provider_label = self._ai_provider_combo.itemText(provider_index)
+        report_url = build_ai_content_report_url(
+            app_version=self._app_version,
+            provider=provider_label,
+        )
+        if not self._open_external_link(report_url, "settings_ai_content_report"):
+            show_error(
+                self,
+                "AI 생성 결과 신고",
+                "이메일 작성 창을 열지 못했습니다. support@fitshot.ai로 신고해 주세요.",
+            )
 
     def _shopping_pro_month_plan_id(self):
         from src import auth_client

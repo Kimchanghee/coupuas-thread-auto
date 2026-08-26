@@ -137,6 +137,8 @@ def test_editorial_control_room_preserves_the_complete_ui_contract():
             "_tutorial_settings_btn",
             "_settings_contact_sec",
             "_contact_btn",
+            "_settings_ai_report_sec",
+            "_ai_report_btn",
             "_status_bar_frame",
             "_statusbar_dot",
             "status_label",
