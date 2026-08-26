@@ -104,7 +104,7 @@ def test_free_store_workflow_is_manual_pinned_and_payment_provider_free():
     assert "AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}" in workflow
     assert "STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}" in workflow
     assert "msstore publish" in workflow
-    assert "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020" in workflow
+    assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" in workflow
     assert 'node-version: "22"' in workflow
     assert "npm ci" in workflow
     assert workflow.index("npm ci") < workflow.index("node --test tests_js/*.test.mjs")
