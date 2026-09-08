@@ -33,7 +33,7 @@ MFA는 사용자가 등록하면 서버에서 강제된다. 모든 기존 사용
 5. 인증 서버와 새 클라이언트/사이트를 조율하여 배포한다. 서버 우선 적용 시 구버전 stmaker 가입은 업데이트를 요구하게 된다. 기존 비밀번호 로그인은 호환된다. 자동 로그인 저장 정보는 새 토큰 방식으로 다시 설정한다.
 6. 테스트 계정으로 가입→MFA 등록→로그인→자동 로그인→로그아웃→재설정→이전 토큰 거부까지 실제 환경에서 확인한다. 복구 코드는 한 번만 표시하므로 사용자가 별도 보관한다.
 
-서버는 신규 `account_security`, `remember_tokens` 테이블을 초기화하고 PostgreSQL에서 해당 보안 테이블의 RLS/공개 역할 권한을 제한한다. 기존 제한 테이블도 보호한다. 현재 회귀 테스트의 DB 동시성은 SQLite에서 검증했다. PostgreSQL/MySQL 운영 버전에서 로그인/갱신/재설정/폐기를 교차 실행하여 대기 중 생성된 세션까지 폐기되는지 추가 검증해야 한다.
+서버는 신규 `account_security`, `remember_tokens` 테이블을 초기화하고 PostgreSQL에서 해당 보안 테이블의 RLS/공개 역할 권한을 제한한다. 기존 제한 테이블도 보호한다. 격리된 PostgreSQL 16/MySQL 8.4 CI에서 원자적 제한과 동시 회전/폐기를 검증했다. 운영 DB 자체에 대한 부하 테스트는 실행하지 않았다.
 
 신규 가입과 재설정은 HIBP Pwned Passwords 범위 API를 사용한다. 비밀번호 원문 대신 SHA-1 접두사만 전달하며 장애/잘못된 응답은 503으로 차단한다. 외부 HTTPS 연결과 장애 처리를 점검한다. https://haveibeenpwned.com/API/v3#PwnedPasswords
 
@@ -41,12 +41,12 @@ MFA는 사용자가 등록하면 서버에서 강제된다. 모든 기존 사용
 
 ## 검증 범위
 
-- 백엔드 전체 테스트: 89 passed (기존 라이브러리 deprecation 경고 4건).
+- 실제 운영 소스 백엔드 CI: 587 passed, 1 skipped (MySQL에서 PostgreSQL 전용 RLS 검사 제외).
 - 클라이언트 전체 테스트: 465 passed (인증 관련 106개 포함).
 - 사이트 Node 테스트: 71 passed.
 - 한국어 로그인/MFA 설정 화면을 오프스크린 렌더링하여 확인.
 - 독립 보안 검토 후 MySQL snapshot read에서 세션 폐기가 누락될 수 있는 조회에 현재 읽기 잠금 추가.
-- 운영 계정 공격, 운영 환경 변수 변경, 운영 배포는 실행하지 않았다. 코드 푸시만으로 운영 보호 적용이 완료되는 것은 아니다.
+- 운영 계정 공격과 운영 도메인 전환은 실행하지 않았다. MFA 키는 Vercel sensitive 변수로 설정했다. 코드 푸시만으로 운영 보호 적용이 완료되는 것은 아니다.
 
 ## 후속 검증
 
@@ -57,3 +57,9 @@ MFA는 사용자가 등록하면 서버에서 강제된다. 모든 기존 사용
 Vercel 사전 배포 dpl_3ZmQatVuEDLRJVDG4NH5AdwZVmeE는 TEAM_ACCESS_REQUIRED(커밋 작성자 배포 권한 없음)로 차단됐다. 운영 도메인은 전환하지 않았다. Turnstile 위젯/관리 계정도 연결되지 않아 운영 웹을 전환하지 않았다. 현재 필요한 외부 조치는 배포 계정 권한 연결 및 Turnstile 위젯 설정이다.
 
 실제 PostgreSQL 16/MySQL 8.4의 독립 CI 데이터베이스에서 원자적 제한 및 동시 토큰 회전/폐기 테스트가 통과했고, PostgreSQL 재설정 테이블 RLS/공개 역할 권한도 검증했다. 실제 운영 서버 PR: https://github.com/Kimchanghee/NewshoppingShorts/pull/7
+
+## 연결 상태 재확인
+
+2026-09-08 Vercel에 로그인된 계정은 프로젝트 팀의 OWNER이며 현재 계정 차단 상태는 아니다. 사이트 프로젝트에 Git 저장소 연결이 없었던 것을 확인해 기존 접근 권한으로 Kimchanghee/coupuas-thread-auto를 연결했다. 기존 GitHub의 “Account is blocked” 상태만으로 현재 소유자 계정 전체가 차단됐다고 판단할 수 없다. CLI 사전 배포의 TEAM_ACCESS_REQUIRED는 별도 작성자 검증 실패 기록이다. 실제 서버의 GitHub 프리뷰 배포는 성공했다.
+
+Cloudflare 대시보드는 로그인 화면을 표시한다. 따라서 Turnstile 위젯 생성 및 실제 키 설정은 아직 완료되지 않았다. 최신 소스의 Python/JavaScript/Actions CodeQL 분석은 모두 통과했다.
