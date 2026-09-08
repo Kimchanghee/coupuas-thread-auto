@@ -1,8 +1,9 @@
 # 로그인 보안 수정 및 배포 검증 — 2026-09-08
 
-두 저장소의 `codex/login-security-20260908` 브랜치를 함께 적용한다.
+클라이언트와 실제 운영 서버의 `codex/login-security-20260908` 브랜치를 함께 적용한다.
 - 클라이언트/사이트: Kimchanghee/coupuas-thread-auto (기준 8245bad)
-- 인증 서버: Kimchanghee/project-user-dashboard (기준 cf95e67)
+- 실제 운영 인증 서버: Kimchanghee/NewshoppingShorts (기준 96624a29, 보안 수정 a94908e8)
+- project-user-dashboard는 과거 복사본이다. 그 backend를 운영에 덮어쓰면 안 된다.
 
 ## 공격 시나리오, 수정, 회귀 검증
 
@@ -27,7 +28,7 @@ MFA는 사용자가 등록하면 서버에서 강제된다. 모든 기존 사용
 
 1. 운영과 같은 DB의 격리 환경에서 백업 및 아래 동시성 검증을 실시한다. DB 런타임 계정이 테이블 생성/권한 설정에 필요한 권한을 가져야 한다.
 2. 인증 서버에 `AUTH_MFA_ENCRYPTION_KEY`를 안전하게 생성한 Fernet 키로 설정한다. 키를 저장소/로그에 남기지 않고 영속 보관한다. 키 분실은 등록된 인증 앱의 검증 실패를 초래한다.
-3. `TRUSTED_PROXIES`를 실제 역방향 프록시 주소/CIDR로만 설정한다. 기본값은 루프백만 신뢰한다. 프록시가 클라이언트 전달 헤더를 정규화하는지 확인한다.
+3. `TRUSTED_PROXIES`를 실제 역방향 프록시 주소/CIDR로만 설정한다. Vercel에서는 기존 플랫폼 신뢰 헤더 검증을 유지한다. Vercel 밖에서는 실제 프록시 주소만 설정한다.
 4. 사이트에 `TURNSTILE_SECRET_KEY`, `TURNSTILE_SITE_KEY`, `TURNSTILE_EXPECTED_HOSTNAMES`(쉼표 구분)를 설정한다. 위젯 action은 `password_reset`이다. 기존 재설정 토큰/공유 제한 저장소 설정도 유지한다. 설정 누락 시 복구 요청은 안전하게 실패한다.
 5. 인증 서버와 새 클라이언트/사이트를 조율하여 배포한다. 서버 우선 적용 시 구버전 stmaker 가입은 업데이트를 요구하게 된다. 기존 비밀번호 로그인은 호환된다. 자동 로그인 저장 정보는 새 토큰 방식으로 다시 설정한다.
 6. 테스트 계정으로 가입→MFA 등록→로그인→자동 로그인→로그아웃→재설정→이전 토큰 거부까지 실제 환경에서 확인한다. 복구 코드는 한 번만 표시하므로 사용자가 별도 보관한다.
@@ -46,3 +47,7 @@ MFA는 사용자가 등록하면 서버에서 강제된다. 모든 기존 사용
 - 한국어 로그인/MFA 설정 화면을 오프스크린 렌더링하여 확인.
 - 독립 보안 검토 후 MySQL snapshot read에서 세션 폐기가 누락될 수 있는 조회에 현재 읽기 잠금 추가.
 - 운영 계정 공격, 운영 환경 변수 변경, 운영 배포는 실행하지 않았다. 코드 푸시만으로 운영 보호 적용이 완료되는 것은 아니다.
+
+## 후속 검증
+
+설문 간접 의존성 qs를 6.16.0으로 갱신했다. 설문 테스트 32개, lint/build, npm audit(취약점 0건), GitHub Branch CI가 통과했다. 실제 NewshoppingShorts 서버에서도 전체 550 passed/3 skipped 및 별도 재설정·MFA 43 passed(16개 중복)를 검증했다. MFA 키는 Vercel sensitive 변수로 설정했다. Turnstile 계정 연결은 확인되지 않았으며 운영 웹 전환은 아직 완료되지 않았다.
