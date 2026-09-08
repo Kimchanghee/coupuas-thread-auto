@@ -122,9 +122,9 @@ _API_HOST_LOCK_FILE = _CRED_DIR / "api_host.lock"
 _LOCK = threading.RLock()
 _SAVED_PASSWORD_KEY = "saved_password"
 _AUTO_LOGIN_KEY = "auto_login"
-_SENSITIVE_CRED_FIELDS = {"token", _SAVED_PASSWORD_KEY}
+_SENSITIVE_CRED_FIELDS = {"token", "refresh_token"}
 _INVALID_LOCK_SENTINEL = "__invalid_api_host_lock__"
-_MIN_REGISTER_PASSWORD_LENGTH = 8
+_MIN_REGISTER_PASSWORD_LENGTH = 15
 _MIN_LOGIN_PASSWORD_LENGTH = 6
 MIN_REGISTER_PASSWORD_LENGTH = _MIN_REGISTER_PASSWORD_LENGTH
 MIN_LOGIN_PASSWORD_LENGTH = _MIN_LOGIN_PASSWORD_LENGTH
@@ -377,6 +377,7 @@ def _load_cred() -> dict:
 def _save_cred(data: dict) -> bool:
     serialized = dict(data or {})
     serialized.pop("remember_pw", None)
+    serialized.pop(_SAVED_PASSWORD_KEY, None)
     for field in _SENSITIVE_CRED_FIELDS:
         if field in serialized:
             protected = _protect_secret(serialized.get(field, ""))
@@ -447,7 +448,7 @@ def _clear_saved_login_fields() -> bool:
         # An unreadable existing file may still contain a saved password.
         return _clear_cred() if _CRED_FILE.exists() else True
     changed = False
-    for field in ("username", _SAVED_PASSWORD_KEY, "remember_pw", _AUTO_LOGIN_KEY):
+    for field in ("username", _SAVED_PASSWORD_KEY, "remember_pw", _AUTO_LOGIN_KEY, "refresh_token"):
         if field in cred:
             cred.pop(field, None)
             changed = True
@@ -1575,7 +1576,8 @@ def register(
     body = {
         "name": name,
         "username": username,
-        "password": backend_password,
+        "password": password,
+        "password_format": "plaintext-v2",
         "contact": contact_clean,
         "email": email if email else None,
         "ym_news_opt_in": bool(ym_news_opt_in),
@@ -1655,7 +1657,7 @@ def register(
         return {"success": False, "message": "회원가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
 
-def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
+def login(username: str, password: str, force: bool = False, mfa_code: str = "") -> Dict[str, Any]:
     err = _check_api_url()
     if err:
         return {"status": False, "message": err}
@@ -1676,6 +1678,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
     body = {
         "id": username,
         "pw": backend_password,
+        "mfa_code": mfa_code,
         "force": force,
         "ip": _resolve_client_ip(),
         "program_type": PROGRAM_TYPE,
@@ -1772,6 +1775,9 @@ def clear_local_session() -> None:
     if cred:
         cred.pop("token", None)
         cred.pop("user_id", None)
+        cred.pop("refresh_token", None)
+        cred.pop(_AUTO_LOGIN_KEY, None)
+        cred.pop(_SAVED_PASSWORD_KEY, None)
         if not _save_cred(cred):
             _clear_cred()
     elif _CRED_FILE.exists():
@@ -1779,7 +1785,17 @@ def clear_local_session() -> None:
 
 
 def logout() -> bool:
+    saved = _load_cred() or {}
+    refresh = saved.get("refresh_token")
     user_id, token = _get_session_user_and_token()
+    clear_local_session()
+    refresh_revoked = True
+    if refresh and not _check_api_url():
+        try:
+            response = _session.post(f"{API_SERVER_URL}/user/session/revoke", json={"refresh_token": refresh}, timeout=10, allow_redirects=False)
+            refresh_revoked = response.status_code == 200
+        except requests.exceptions.RequestException:
+            refresh_revoked = False
     server_ok = True
 
     if user_id and token:
@@ -1795,9 +1811,7 @@ def logout() -> bool:
             logger.warning("로그아웃 API 호출 중 통신 오류가 발생했습니다.")
             server_ok = False
 
-    clear_local_session()
-
-    return server_ok
+    return server_ok and refresh_revoked
 
 
 def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
@@ -2080,75 +2094,77 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
         )
 
 
-def get_saved_credentials() -> Optional[Dict[str, str]]:
+def get_saved_credentials() -> Optional[Dict[str, Any]]:
     cred = _load_cred()
-    if not isinstance(cred, dict):
+    if not isinstance(cred, dict): return None
+    original = dict(cred)
+    cred.pop(_SAVED_PASSWORD_KEY, None)
+    cred.pop("remember_pw", None)
+    if not cred.get("refresh_token"): cred.pop(_AUTO_LOGIN_KEY, None)
+    name = _normalize_saved_username(cred.get("username"))
+    if not name:
+        _clear_cred()
         return None
-
-    changed = False
-    raw_username = cred.get("username")
-    normalized_username = _normalize_saved_username(raw_username)
-    raw_password = cred.get(_SAVED_PASSWORD_KEY)
-    normalized_password = str(raw_password or "") if isinstance(raw_password, str) else ""
-
-    if normalized_username:
-        if normalized_username != raw_username:
-            cred["username"] = normalized_username
-            changed = True
-        result = {"username": normalized_username}
-        if normalized_password:
-            result["password"] = normalized_password
-            if bool(cred.get(_AUTO_LOGIN_KEY)):
-                result["auto_login"] = True
-        elif _SAVED_PASSWORD_KEY in cred:
-            cred.pop(_SAVED_PASSWORD_KEY, None)
-            changed = True
-        if _AUTO_LOGIN_KEY in cred and not normalized_password:
-            cred.pop(_AUTO_LOGIN_KEY, None)
-            changed = True
-        if changed:
-            _save_cred(cred)
-        return result
-
-    if raw_username:
-        logger.warning("저장된 아이디 형식이 올바르지 않아 자동 정리합니다.")
-        cred.pop("username", None)
-        changed = True
-    if _SAVED_PASSWORD_KEY in cred:
-        cred.pop(_SAVED_PASSWORD_KEY, None)
-        changed = True
-    if _AUTO_LOGIN_KEY in cred:
-        cred.pop(_AUTO_LOGIN_KEY, None)
-        changed = True
-    if changed:
-        if cred:
-            _save_cred(cred)
-        else:
-            _clear_cred()
-    return None
+    cred["username"] = name
+    if original != cred: _save_cred(cred)
+    result = {"username": name}
+    if cred.get(_AUTO_LOGIN_KEY) and cred.get("refresh_token"): result["auto_login"] = True
+    return result
 
 
 def remember_login_credentials(username: str, password: str = "", auto_login: bool = False) -> bool:
     name = _normalize_saved_username(username)
-    if not name:
-        return _clear_saved_login_fields()
-
-    cred = _load_cred()
-    if not isinstance(cred, dict):
-        cred = {}
-
+    if not name: return _clear_saved_login_fields()
+    cred = _load_cred() or {}
+    for field in (_SAVED_PASSWORD_KEY, _AUTO_LOGIN_KEY, "refresh_token", "remember_pw"):
+        cred.pop(field, None)
     cred["username"] = name
-    password_text = str(password or "")
-    if password_text:
-        cred[_SAVED_PASSWORD_KEY] = password_text
-        if auto_login:
+    if auto_login and password:
+        if _check_api_url(): return False
+        _, token = _get_session_user_and_token()
+        if not token: return _save_cred(cred) and False
+        try:
+            response = _session.post(f"{API_SERVER_URL}/user/session/remember",
+                json={"password": _normalize_password_for_backend(password)},
+                headers=_build_auth_headers(token), timeout=12, allow_redirects=False)
+            payload = _safe_json(response)
+            refresh = payload.get("refresh_token", "")
+            if response.status_code != 200 or not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", str(refresh)):
+                _save_cred(cred)
+                return False
+            cred["refresh_token"] = refresh
             cred[_AUTO_LOGIN_KEY] = True
-        else:
-            cred.pop(_AUTO_LOGIN_KEY, None)
-    else:
-        cred.pop(_SAVED_PASSWORD_KEY, None)
-        cred.pop(_AUTO_LOGIN_KEY, None)
+        except requests.exceptions.RequestException:
+            _save_cred(cred)
+            return False
     return _save_cred(cred)
+
+
+def resume_saved_session() -> Dict[str, Any]:
+    failure = {"status": False, "message": "자동 로그인이 만료되었습니다. 비밀번호로 다시 로그인해주세요."}
+    if _check_api_url(): return failure
+    cred = _load_cred() or {}
+    refresh = cred.get("refresh_token")
+    if not refresh or not cred.get(_AUTO_LOGIN_KEY): return failure
+    try:
+        # Never retry a rotating credential after an ambiguous network result.
+        response = _session.post(f"{API_SERVER_URL}/user/session/refresh",
+            json={"refresh_token": refresh}, timeout=12, allow_redirects=False)
+        result = _safe_json(response)
+        replacement = result.pop("refresh_token", "")
+        if response.status_code == 200 and result.get("status") is True and re.fullmatch(r"[A-Za-z0-9_-]{43,128}", str(replacement)):
+            cred["refresh_token"] = replacement
+            if not _save_cred(cred): return failure
+            _clear_auth_state_memory()
+            _merge_account_state(result)
+            _mark_token_issued()
+            if is_logged_in(): return result
+    except requests.exceptions.RequestException:
+        pass
+    cred.pop("refresh_token", None)
+    cred.pop(_AUTO_LOGIN_KEY, None)
+    _save_cred(cred)
+    return failure
 
 
 def remember_username(username: str) -> None:

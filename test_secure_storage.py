@@ -123,3 +123,12 @@ def test_malformed_upload_interval_falls_back_safely(
 
     assert cfg.upload_interval == expected
 
+
+
+@pytest.mark.parametrize("plain", ["dpapi:Example123!", "fernet:Example123!"])
+def test_envelope_prefix_in_plaintext_is_always_encrypted(monkeypatch, tmp_path, plain):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    encrypted = protect_secret(plain)
+    assert encrypted and encrypted != plain
+    assert unprotect_secret(encrypted) == plain

@@ -4,6 +4,28 @@
   const button = document.querySelector("#submit-button");
   const status = document.querySelector("#status");
   let resetToken = "";
+  let captchaToken = "";
+  let captchaWidget;
+  if (page === "request") {
+    button.disabled = true;
+    window.recoveryCaptchaReady = async () => {
+      try {
+        const response = await fetch("/api/password-reset/config", { cache: "no-store", credentials: "omit" });
+        if (!response.ok) throw new Error("계정 복구를 준비할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+        const config = await response.json();
+        captchaWidget = window.turnstile.render("#recovery-captcha", {
+          sitekey: config.siteKey, action: "password_reset",
+          callback: token => { captchaToken = token; button.disabled = false; },
+          "expired-callback": () => { captchaToken = ""; button.disabled = true; },
+          "error-callback": () => { captchaToken = ""; button.disabled = true; showStatus("보안 확인을 다시 시도해 주세요.", "error"); },
+        });
+      } catch (error) { showStatus(error.message, "error"); }
+    };
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?onload=recoveryCaptchaReady&render=explicit";
+    script.onerror = () => showStatus("보안 확인을 불러올 수 없습니다. 새로고침해 주세요.", "error");
+    document.head.appendChild(script);
+  }
 
   const showStatus = (message, kind) => {
     status.textContent = message;
@@ -45,10 +67,12 @@
 
     try {
       if (page === "request") {
+        if (!captchaToken) throw new Error("보안 확인을 완료해 주세요.");
         const identifier = document.querySelector("#identifier").value.trim();
         const { response, data } = await postJson("/api/password-reset/request", {
           identifier,
           program_type: "stmaker",
+          captcha_token: captchaToken,
         });
         if (!response.ok && response.status !== 202) {
           throw new Error(data.message || "지금은 재설정 메일을 보낼 수 없습니다. 잠시 후 다시 시도해 주세요.");
@@ -61,8 +85,8 @@
       } else {
         const password = document.querySelector("#password").value;
         const confirmation = document.querySelector("#password-confirm").value;
-        if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
-          throw new Error("비밀번호에는 영문자와 숫자가 각각 1자 이상 필요합니다.");
+        if (password.length < 15 || password.length > 128) {
+          throw new Error("새 비밀번호는 15~128자로 입력해주세요.");
         }
         if (password !== confirmation) {
           throw new Error("새 비밀번호가 서로 일치하지 않습니다.");
@@ -81,7 +105,11 @@
       }
     } catch (error) {
       showStatus(error?.message || "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.", "error");
-      button.disabled = false;
+      if (page === "request") {
+        captchaToken = "";
+        button.disabled = true;
+        if (captchaWidget !== undefined) window.turnstile.reset(captchaWidget);
+      } else button.disabled = false;
     }
   });
 })();

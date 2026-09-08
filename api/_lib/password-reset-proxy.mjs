@@ -38,10 +38,10 @@ function parseBody(req) {
 
 function safeMessage(status, payload) {
   if (status === 200) {
-    return payload?.message || "비밀번호가 변경되었습니다. 새 비밀번호로 로그인해 주세요.";
+    return "비밀번호가 변경되었습니다. 새 비밀번호로 로그인해 주세요.";
   }
   if (status === 202) {
-    return payload?.message || "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.";
+    return "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.";
   }
   if (status === 400) {
     return "재설정 링크가 올바르지 않거나 만료되었습니다.";
@@ -69,6 +69,7 @@ export async function proxyPasswordReset(
     captchaImpl = verifyPasswordResetCaptcha,
   } = {},
 ) {
+  if (!["request", "confirm"].includes(action)) return { status: 404, body: { success: false } };
   if (req.method !== "POST") {
     return { status: 405, body: { success: false, message: "허용되지 않은 요청입니다." } };
   }
@@ -91,10 +92,8 @@ export async function proxyPasswordReset(
     typeof body.token === "string" &&
     /^[A-Za-z0-9_-]{32,256}$/.test(body.token) &&
     typeof body.password === "string" &&
-    body.password.length >= 8 &&
-    body.password.length <= 128 &&
-    /[A-Za-z]/.test(body.password) &&
-    /[0-9]/.test(body.password);
+    body.password.length >= 15 &&
+    body.password.length <= 128;
   if ((isRequest && !validRequest) || (!isRequest && !validConfirm)) {
     return { status: 400, body: { success: false, message: "입력값을 다시 확인해 주세요." } };
   }
@@ -113,27 +112,17 @@ export async function proxyPasswordReset(
       body: { success: false, message: "비밀번호 재설정 서비스를 잠시 사용할 수 없습니다." },
     };
   }
-  if (isRequest) {
-    if (!clientIp) {
-      return {
-        status: 503,
-        body: { success: false, message: "비밀번호 재설정 서비스를 잠시 사용할 수 없습니다." },
-      };
+  if (!clientIp) return { status: 503, body: { success: false, message: safeMessage(503) } };
+  try {
+    const admission = await rateLimitImpl({ ipAddress: clientIp, phase: isRequest ? "admission" : "confirm" });
+    if (admission?.allowed !== true) {
+      return { status: isRequest ? 202 : 429, body: { success: isRequest, message: safeMessage(isRequest ? 202 : 429) } };
     }
+  } catch {
+    return { status: 503, body: { success: false, message: safeMessage(503) } };
+  }
+  if (isRequest) {
     try {
-      const rateLimit = await rateLimitImpl({
-        ipAddress: clientIp,
-        identifier: outboundBody.identifier,
-      });
-      if (rateLimit?.allowed !== true) {
-        return {
-          status: 202,
-          body: {
-            success: true,
-            message: "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.",
-          },
-        };
-      }
       const captchaAllowed = await captchaImpl({
         token: body.captcha_token,
         ipAddress: clientIp,
@@ -146,6 +135,10 @@ export async function proxyPasswordReset(
             message: "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.",
           },
         };
+      }
+      const deliveryLimit = await rateLimitImpl({ ipAddress: clientIp, identifier: outboundBody.identifier, phase: "delivery" });
+      if (deliveryLimit?.allowed !== true) {
+        return { status: 202, body: { success: true, message: safeMessage(202) } };
       }
       await enqueueImpl(
         createPasswordResetQueueMessage({

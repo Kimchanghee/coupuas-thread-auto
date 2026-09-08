@@ -195,7 +195,8 @@ export function isPasswordResetRateLimitConfigured(env = process.env) {
 export function isPasswordResetProtectionConfigured(env = process.env) {
   return (
     String(env.PASSWORD_RESET_PROXY_SECRET || "").trim().length >= 32 &&
-    isPasswordResetRateLimitConfigured(env)
+    isPasswordResetRateLimitConfigured(env) &&
+    isPasswordResetCaptchaConfigured(env)
   );
 }
 
@@ -379,15 +380,38 @@ export async function consumePasswordResetRateLimit(
     ipLimit: config.ipLimit,
     identifierLimit: config.identifierLimit,
   });
+  // Domain-separate admission/confirmation counters without changing the RPC schema.
+  if (input.phase === "admission" || input.phase === "confirm") {
+    const phase = input.phase;
+    const guard = createPasswordResetRateLimiter({
+      store, hmacSecret: config.hmacSecret, nowImpl,
+      windowSeconds: config.windowSeconds,
+      ipLimit: 30, identifierLimit: 30,
+    });
+    return guard({ ipAddress: `${phase}:${input.ipAddress}`, identifier: `${phase}:source:${input.ipAddress}` });
+  }
   return limiter(input);
+}
+
+export function passwordResetCaptchaConfiguration(env = process.env) {
+  const secret = String(env.TURNSTILE_SECRET_KEY || "").trim();
+  const siteKey = String(env.TURNSTILE_SITE_KEY || "").trim();
+  const hostnames = String(env.TURNSTILE_EXPECTED_HOSTNAMES || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (!secret || !/^[A-Za-z0-9_-]{3,256}$/.test(siteKey) || hostnames.length === 0) {
+    throw new PasswordResetRateLimitConfigurationError("Complete Turnstile configuration is required");
+  }
+  return { secret, siteKey, hostnames };
+}
+
+export function isPasswordResetCaptchaConfigured(env = process.env) {
+  try { passwordResetCaptchaConfiguration(env); return true; } catch { return false; }
 }
 
 export async function verifyPasswordResetCaptcha(
   { token, ipAddress },
   { env = process.env, fetchImpl = globalThis.fetch, requestId = randomUUID() } = {},
 ) {
-  const secret = String(env.TURNSTILE_SECRET_KEY || "").trim();
-  if (!secret) return true;
+  const { secret, hostnames } = passwordResetCaptchaConfiguration(env);
   const responseToken = String(token || "").trim();
   if (!responseToken || responseToken.length > 2_048) return false;
   const response = await fetchImpl(TURNSTILE_VERIFY_URL, {
@@ -409,5 +433,6 @@ export async function verifyPasswordResetCaptcha(
     throw new Error("password reset CAPTCHA returned invalid JSON");
   }
   if (!response.ok) throw new Error("password reset CAPTCHA verification failed");
-  return payload?.success === true;
+  return payload?.success === true && payload.action === "password_reset" &&
+    hostnames.includes(String(payload.hostname || "").toLowerCase());
 }
