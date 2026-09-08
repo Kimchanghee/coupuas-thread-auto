@@ -1792,7 +1792,7 @@ def logout() -> bool:
     refresh_revoked = True
     if refresh and not _check_api_url():
         try:
-            response = _session.post(f"{API_SERVER_URL}/user/session/revoke", json={"refresh_token": refresh}, timeout=10, allow_redirects=False)
+            response = _session.post("https://newshopping-shorts-auth.vercel.app/user/session/revoke", json={"refresh_token": refresh}, timeout=10, allow_redirects=False)
             refresh_revoked = response.status_code == 200
         except requests.exceptions.RequestException:
             refresh_revoked = False
@@ -2124,7 +2124,7 @@ def remember_login_credentials(username: str, password: str = "", auto_login: bo
         _, token = _get_session_user_and_token()
         if not token: return _save_cred(cred) and False
         try:
-            response = _session.post(f"{API_SERVER_URL}/user/session/remember",
+            response = _session.post("https://newshopping-shorts-auth.vercel.app/user/session/remember",
                 json={"password": _normalize_password_for_backend(password)},
                 headers=_build_auth_headers(token), timeout=12, allow_redirects=False)
             payload = _safe_json(response)
@@ -2148,7 +2148,7 @@ def resume_saved_session() -> Dict[str, Any]:
     if not refresh or not cred.get(_AUTO_LOGIN_KEY): return failure
     try:
         # Never retry a rotating credential after an ambiguous network result.
-        response = _session.post(f"{API_SERVER_URL}/user/session/refresh",
+        response = _session.post("https://newshopping-shorts-auth.vercel.app/user/session/refresh",
             json={"refresh_token": refresh}, timeout=12, allow_redirects=False)
         result = _safe_json(response)
         replacement = result.pop("refresh_token", "")

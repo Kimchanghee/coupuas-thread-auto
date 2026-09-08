@@ -531,7 +531,7 @@ test("password reset proxy never reflects upstream secrets or exception text", a
 test("recovery pages use fragment tokens and avoid browser storage", () => {
   const requestHtml = fs.readFileSync(new URL("../public/forgot-password.html", import.meta.url), "utf8");
   const confirmHtml = fs.readFileSync(new URL("../public/reset-password.html", import.meta.url), "utf8");
-  const script = fs.readFileSync(new URL("../public/password-reset.js", import.meta.url), "utf8");
+  const script = fs.readFileSync(new URL("../public/password-reset-controller.mjs", import.meta.url), "utf8");
   const config = fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8");
   assert.match(requestHtml, /아이디 또는 이메일/);
   assert.match(confirmHtml, /autocomplete="new-password"/);

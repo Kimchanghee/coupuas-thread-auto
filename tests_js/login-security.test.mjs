@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import fs from "node:fs";
-import vm from "node:vm";
+import { initializePasswordReset } from "../public/password-reset-controller.mjs";
 import { proxyPasswordReset } from "../api/_lib/password-reset-proxy.mjs";
 import { verifyPasswordResetCaptcha, isPasswordResetCaptchaConfigured } from "../api/_lib/password-reset-rate-limit.mjs";
 process.env.PASSWORD_RESET_PROXY_SECRET = "offline-proxy-test-secret-at-least-32-characters";
@@ -67,7 +66,7 @@ test("recovery browser sends CAPTCHA token and resets it after request failure",
     if(url.endsWith("config")) return {ok:true,json:async()=>({siteKey:"site-test"})};
     submitted=JSON.parse(options.body);return {ok:false,status:503,json:async()=>({message:"temporary"})};
   }};
-  vm.runInNewContext(fs.readFileSync(new URL("../public/password-reset.js",import.meta.url),"utf8"),context);
+  initializePasswordReset(context);
   assert.equal(button.disabled,true);
   await window.recoveryCaptchaReady(); widget.callback("verified-token");
   await submit({preventDefault(){}});
