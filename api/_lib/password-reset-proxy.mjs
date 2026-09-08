@@ -6,7 +6,6 @@ import {
 } from "./password-reset-queue.mjs";
 import {
   consumePasswordResetRateLimit,
-  verifyPasswordResetCaptcha,
 } from "./password-reset-rate-limit.mjs";
 
 const AUTH_BASE_URL = "https://newshopping-shorts-auth.vercel.app";
@@ -66,7 +65,6 @@ export async function proxyPasswordReset(
     fetchImpl = globalThis.fetch,
     enqueueImpl = enqueuePasswordReset,
     rateLimitImpl = consumePasswordResetRateLimit,
-    captchaImpl = verifyPasswordResetCaptcha,
   } = {},
 ) {
   if (!["request", "confirm"].includes(action)) return { status: 404, body: { success: false } };
@@ -76,6 +74,11 @@ export async function proxyPasswordReset(
   const contentType = String(req.headers?.["content-type"] || "").toLowerCase();
   if (!contentType.startsWith("application/json")) {
     return { status: 415, body: { success: false, message: "입력값을 다시 확인해 주세요." } };
+  }
+  // Fetch Metadata prevents cross-site browser abuse; it is not bot authentication.
+  const fetchSite = req.headers?.["sec-fetch-site"];
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return { status: 403, body: { success: false, message: "허용되지 않은 요청입니다." } };
   }
   const body = parseBody(req);
   if (!body) {
@@ -123,21 +126,12 @@ export async function proxyPasswordReset(
   }
   if (isRequest) {
     try {
-      const captchaAllowed = await captchaImpl({
-        token: body.captcha_token,
-        ipAddress: clientIp,
-      });
-      if (captchaAllowed !== true) {
-        return {
-          status: 202,
-          body: {
-            success: true,
-            message: "계정이 확인되면 비밀번호 재설정 메일을 보내드립니다.",
-          },
-        };
-      }
       const deliveryLimit = await rateLimitImpl({ ipAddress: clientIp, identifier: outboundBody.identifier, phase: "delivery" });
       if (deliveryLimit?.allowed !== true) {
+        return { status: 202, body: { success: true, message: safeMessage(202) } };
+      }
+      const globalLimit = await rateLimitImpl({ ipAddress: clientIp, phase: "global" });
+      if (globalLimit?.allowed !== true) {
         return { status: 202, body: { success: true, message: safeMessage(202) } };
       }
       await enqueueImpl(

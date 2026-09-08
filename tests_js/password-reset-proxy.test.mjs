@@ -72,7 +72,6 @@ test("password reset request durably queues only validated data and returns gene
     "request",
     {
       rateLimitImpl: allowRateLimit,
-      captchaImpl: async () => true,
       enqueueImpl: async (message) => {
         queued = message;
         return { messageId: "msg_test" };
@@ -135,7 +134,6 @@ test("IPv6 is canonicalized before encryption and worker signing", async () => {
     "request",
     {
       rateLimitImpl: allowRateLimit,
-      captchaImpl: async () => true,
       enqueueImpl: async (message) => { envelope = message; },
     },
   );
@@ -384,21 +382,19 @@ test("rate-limit configuration rejects partial or mixed Redis credential pairs",
   }
 });
 
-test("configured CAPTCHA denial is enumeration-safe and suppresses queueing", async () => {
+test("global admission denial is enumeration-safe and suppresses queueing", async () => {
   let enqueueCalls = 0;
   const result = await proxyPasswordReset(
     jsonPost(
       {
         identifier: "user@example.com",
         program_type: "stmaker",
-        captcha_token: "invalid-token",
       },
       { "x-forwarded-for": "203.0.113.7" },
     ),
     "request",
     {
-      rateLimitImpl: allowRateLimit,
-      captchaImpl: async () => false,
+      rateLimitImpl: async ({ phase }) => ({ allowed: phase !== "global" }),
       enqueueImpl: async () => { enqueueCalls += 1; },
     },
   );

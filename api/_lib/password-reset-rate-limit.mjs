@@ -1,9 +1,8 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 const DEFAULT_WINDOW_SECONDS = 10 * 60;
 const DEFAULT_IP_LIMIT = 10;
 const DEFAULT_IDENTIFIER_LIMIT = 3;
-const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 // Both counters are updated in one Redis command, so concurrent serverless
 // instances cannot independently admit requests past either threshold.
@@ -195,8 +194,7 @@ export function isPasswordResetRateLimitConfigured(env = process.env) {
 export function isPasswordResetProtectionConfigured(env = process.env) {
   return (
     String(env.PASSWORD_RESET_PROXY_SECRET || "").trim().length >= 32 &&
-    isPasswordResetRateLimitConfigured(env) &&
-    isPasswordResetCaptchaConfigured(env)
+    isPasswordResetRateLimitConfigured(env)
   );
 }
 
@@ -386,53 +384,17 @@ export async function consumePasswordResetRateLimit(
     const guard = createPasswordResetRateLimiter({
       store, hmacSecret: config.hmacSecret, nowImpl,
       windowSeconds: config.windowSeconds,
-      ipLimit: 30, identifierLimit: 30,
+      ipLimit: phase === "admission" ? config.ipLimit : 30,
+      identifierLimit: phase === "admission" ? config.ipLimit : 30,
     });
     return guard({ ipAddress: `${phase}:${input.ipAddress}`, identifier: `${phase}:source:${input.ipAddress}` });
   }
+  if (input.phase === "global") {
+    const guard = createPasswordResetRateLimiter({
+      store, hmacSecret: config.hmacSecret, nowImpl,
+      windowSeconds: config.windowSeconds, ipLimit: 120, identifierLimit: 120,
+    });
+    return guard({ ipAddress: "global:delivery", identifier: "global:delivery" });
+  }
   return limiter(input);
-}
-
-export function passwordResetCaptchaConfiguration(env = process.env) {
-  const secret = String(env.TURNSTILE_SECRET_KEY || "").trim();
-  const siteKey = String(env.TURNSTILE_SITE_KEY || "").trim();
-  const hostnames = String(env.TURNSTILE_EXPECTED_HOSTNAMES || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-  if (!secret || !/^[A-Za-z0-9_-]{3,256}$/.test(siteKey) || hostnames.length === 0) {
-    throw new PasswordResetRateLimitConfigurationError("Complete Turnstile configuration is required");
-  }
-  return { secret, siteKey, hostnames };
-}
-
-export function isPasswordResetCaptchaConfigured(env = process.env) {
-  try { passwordResetCaptchaConfiguration(env); return true; } catch { return false; }
-}
-
-export async function verifyPasswordResetCaptcha(
-  { token, ipAddress },
-  { env = process.env, fetchImpl = globalThis.fetch, requestId = randomUUID() } = {},
-) {
-  const { secret, hostnames } = passwordResetCaptchaConfiguration(env);
-  const responseToken = String(token || "").trim();
-  if (!responseToken || responseToken.length > 2_048) return false;
-  const response = await fetchImpl(TURNSTILE_VERIFY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      secret,
-      response: responseToken,
-      remoteip: ipAddress,
-      idempotency_key: requestId,
-    }),
-    redirect: "error",
-    signal: AbortSignal.timeout(5_000),
-  });
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error("password reset CAPTCHA returned invalid JSON");
-  }
-  if (!response.ok) throw new Error("password reset CAPTCHA verification failed");
-  return payload?.success === true && payload.action === "password_reset" &&
-    hostnames.includes(String(payload.hostname || "").toLowerCase());
 }
