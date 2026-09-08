@@ -51,3 +51,9 @@ MFA는 사용자가 등록하면 서버에서 강제된다. 모든 기존 사용
 ## 후속 검증
 
 설문 간접 의존성 qs를 6.16.0으로 갱신했다. 설문 테스트 32개, lint/build, npm audit(취약점 0건), GitHub Branch CI가 통과했다. 실제 NewshoppingShorts 서버에서도 전체 550 passed/3 skipped 및 별도 재설정·MFA 43 passed(16개 중복)를 검증했다. MFA 키는 Vercel sensitive 변수로 설정했다. Turnstile 계정 연결은 확인되지 않았으며 운영 웹 전환은 아직 완료되지 않았다.
+
+## 운영 적용 차단 사유
+
+Vercel 사전 배포 dpl_3ZmQatVuEDLRJVDG4NH5AdwZVmeE는 TEAM_ACCESS_REQUIRED(커밋 작성자 배포 권한 없음)로 차단됐다. 운영 도메인은 전환하지 않았다. Turnstile 위젯/관리 계정도 연결되지 않아 운영 웹을 전환하지 않았다. 현재 필요한 외부 조치는 배포 계정 권한 연결 및 Turnstile 위젯 설정이다.
+
+실제 PostgreSQL 16/MySQL 8.4의 독립 CI 데이터베이스에서 원자적 제한 및 동시 토큰 회전/폐기 테스트가 통과했고, PostgreSQL 재설정 테이블 RLS/공개 역할 권한도 검증했다. 실제 운영 서버 PR: https://github.com/Kimchanghee/NewshoppingShorts/pull/7
