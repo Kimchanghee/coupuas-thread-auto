@@ -22,7 +22,7 @@ const allowRateLimit = async () => ({ allowed: true });
 
 const jsonPost = (body, headers = {}) => ({
   method: "POST",
-  headers: { "content-type": "application/json", ...headers },
+  headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.7", ...headers },
   body,
 });
 
@@ -34,7 +34,7 @@ test("password reset proxy validates methods and request shape", async () => {
     400,
   );
   assert.equal(
-    (await proxyPasswordReset(jsonPost({ token: "short", password: "Password1" }), "confirm")).status,
+    (await proxyPasswordReset(jsonPost({ token: "short", password: "Correct Horse Battery 72" }), "confirm")).status,
     400,
   );
   assert.equal(
@@ -192,7 +192,7 @@ test("temporary queue delivery is acknowledged after five total attempts", () =>
   }]);
 });
 
-test("server password policy requires both an ASCII letter and a number", async () => {
+test("reset rejects passwords shorter than 15 characters", async () => {
   for (const password of ["aaaaaaaa", "12345678", "한글비밀번호1234"]) {
     const result = await proxyPasswordReset(
       jsonPost({ token: "x".repeat(43), password }),
@@ -382,21 +382,19 @@ test("rate-limit configuration rejects partial or mixed Redis credential pairs",
   }
 });
 
-test("configured CAPTCHA denial is enumeration-safe and suppresses queueing", async () => {
+test("global admission denial is enumeration-safe and suppresses queueing", async () => {
   let enqueueCalls = 0;
   const result = await proxyPasswordReset(
     jsonPost(
       {
         identifier: "user@example.com",
         program_type: "stmaker",
-        captcha_token: "invalid-token",
       },
       { "x-forwarded-for": "203.0.113.7" },
     ),
     "request",
     {
-      rateLimitImpl: allowRateLimit,
-      captchaImpl: async () => false,
+      rateLimitImpl: async ({ phase }) => ({ allowed: phase !== "global" }),
       enqueueImpl: async () => { enqueueCalls += 1; },
     },
   );
@@ -500,9 +498,10 @@ test("Supabase rate-limit RPC is atomic and contains only HMAC-derived keys", as
 
 test("password reset proxy never reflects upstream secrets or exception text", async () => {
   const upstream = await proxyPasswordReset(
-    jsonPost({ token: "x".repeat(43), password: "Password1" }),
+    jsonPost({ token: "x".repeat(43), password: "Correct Horse Battery 72" }),
     "confirm",
     {
+      rateLimitImpl: allowRateLimit,
       fetchImpl: async () => ({
         ok: false,
         status: 500,
@@ -516,9 +515,9 @@ test("password reset proxy never reflects upstream secrets or exception text", a
   assert.doesNotMatch(JSON.stringify(upstream), /DATABASE_URL|raw-token|secret/);
 
   const offline = await proxyPasswordReset(
-    jsonPost({ token: "x".repeat(43), password: "Password1" }),
+    jsonPost({ token: "x".repeat(43), password: "Correct Horse Battery 72" }),
     "confirm",
-    { fetchImpl: async () => { throw new Error("provider secret"); } },
+    { rateLimitImpl: allowRateLimit, fetchImpl: async () => { throw new Error("provider secret"); } },
   );
   assert.equal(offline.status, 503);
   assert.doesNotMatch(JSON.stringify(offline), /provider secret/);
@@ -528,7 +527,7 @@ test("password reset proxy never reflects upstream secrets or exception text", a
 test("recovery pages use fragment tokens and avoid browser storage", () => {
   const requestHtml = fs.readFileSync(new URL("../public/forgot-password.html", import.meta.url), "utf8");
   const confirmHtml = fs.readFileSync(new URL("../public/reset-password.html", import.meta.url), "utf8");
-  const script = fs.readFileSync(new URL("../public/password-reset.js", import.meta.url), "utf8");
+  const script = fs.readFileSync(new URL("../public/password-reset-controller.mjs", import.meta.url), "utf8");
   const config = fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8");
   assert.match(requestHtml, /아이디 또는 이메일/);
   assert.match(confirmHtml, /autocomplete="new-password"/);

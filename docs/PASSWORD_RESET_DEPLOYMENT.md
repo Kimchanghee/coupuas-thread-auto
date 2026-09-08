@@ -46,10 +46,11 @@ production secrets into issues, logs, chat, or source control.
 3. The limiter stores only context-separated HMAC digests of the canonical IP
    and normalized identifier. It increments both fixed-window counters in one
    atomic backend operation. Never log or store the raw values in rate-limit keys.
-4. Optional: set `TURNSTILE_SECRET_KEY` after adding a Turnstile widget that
-   submits its short-lived token as `captcha_token`. When configured, server-side
-   Siteverify failure suppresses queue delivery while retaining the same generic
-   public response.
+4. No Cloudflare account or CAPTCHA key is required. Before queueing, enforce
+   source-IP admission, per-IP/account delivery quotas, and a shared global cap
+   of 120 requests per configured window (default 600 seconds). Storage errors
+   must return 503 without sending mail. Rate limits bound abuse volume; they
+   do not prove a request came from a human.
 5. Confirm the Vercel build contains the private `queue/v2beta` trigger for
    `thread-pilot-password-reset`. Transient delivery failures retry at most five
    total deliveries; the fifth failure is acknowledged with the structured
@@ -57,8 +58,8 @@ production secrets into issues, logs, chat, or source control.
 6. Review the staged Vercel Firewall rule `Password reset request observation`.
    It matches only `POST /api/password-reset/request`, measures 10 requests per
    10 minutes per IP, and initially logs excess traffic without blocking it.
-7. Publish the observation rule, review legitimate traffic, then change its
-   exceed action to rate-limit/429 before enabling password reset publicly.
+7. For optional WAF enforcement, publish observation, review legitimate traffic,
+   then stage and verify a rate-limit/429 action. The current draft is log-only.
    This is defense in depth and does not replace the application-level durable
    limiter. Never skip the observation period or broaden the path condition.
 8. Deploy the site only after the auth and rate-limit migrations and environment validation pass.

@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QInputDialog,
     QMainWindow,
     QProgressBar,
     QPushButton,
@@ -403,7 +404,7 @@ class LoginWindow(QMainWindow):
         option_row = QHBoxLayout()
         option_row.setContentsMargins(0, 0, 0, 0)
         option_row.setSpacing(8)
-        self.remember_cb = QCheckBox("로그인 정보 저장")
+        self.remember_cb = QCheckBox("아이디 저장")
         self.remember_cb.setMinimumHeight(28)
         self.remember_cb.setFont(QFont(fn, 9))
         self.remember_cb.setStyleSheet(f"""
@@ -458,7 +459,14 @@ class LoginWindow(QMainWindow):
             QPushButton:hover {{ color: {Colors.ACCENT}; text-decoration: underline; }}
         """)
         self._password_reset_btn.clicked.connect(self._open_password_reset)
-        layout.addWidget(self._password_reset_btn)
+        recovery_row = QHBoxLayout()
+        recovery_row.addWidget(self._password_reset_btn)
+        self._security_btn = QPushButton("2단계 인증 설정")
+        self._security_btn.setMinimumHeight(40)
+        self._security_btn.setStyleSheet(self._password_reset_btn.styleSheet())
+        self._security_btn.clicked.connect(self._login_for_security)
+        recovery_row.addWidget(self._security_btn)
+        layout.addLayout(recovery_row)
 
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
@@ -531,7 +539,7 @@ class LoginWindow(QMainWindow):
             self.login_id.setText(cred["username"])
             self.login_pw.setText(cred.get("password", ""))
             self.remember_cb.setChecked(True)
-            self.auto_login_cb.setChecked(bool(cred.get("auto_login")) and bool(cred.get("password")))
+            self.auto_login_cb.setChecked(bool(cred.get("auto_login")))
             self._auto_login_pending = self.auto_login_cb.isChecked()
 
     def _on_remember_toggled(self, checked: bool):
@@ -552,16 +560,19 @@ class LoginWindow(QMainWindow):
             return
         if not self.auto_login_cb.isChecked():
             return
-        if not self.login_id.text().strip() or not self.login_pw.text():
-            return
-        if not self.btn_login.isEnabled():
-            return
-
-        self.login_status.setStyleSheet(f"color: {Colors.TEXT_SECONDARY}; background: transparent;")
+        if not self.btn_login.isEnabled(): return
+        self._login_in_flight = True
+        self.btn_login.setEnabled(False)
         self.login_status.setText("자동 로그인 중...")
-        self._do_login()
+        self._login_thread = ResumeWorker()
+        self._login_thread.finished_signal.connect(self._on_login_result)
+        self._login_thread.start()
 
     # ─── Register Page ──────────────────────────────────────
+    def _login_for_security(self):
+        self._open_security_after_login = True
+        self._do_login()
+
     def _open_password_reset(self) -> None:
         opened = QDesktopServices.openUrl(QUrl(f"{WEBSITE_BASE_URL}/forgot-password"))
         if not opened:
@@ -666,7 +677,7 @@ class LoginWindow(QMainWindow):
         self.reg_username.textChanged.connect(self._on_reg_username_changed)
         username_row.addWidget(self.reg_username, 1)
 
-        self.btn_check_user = QPushButton("중복확인")
+        self.btn_check_user = QPushButton("형식 확인")
         self.btn_check_user.setFixedSize(104, 48)
         self.btn_check_user.setFont(QFont(fn, 10))
         self.btn_check_user.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -924,6 +935,7 @@ class LoginWindow(QMainWindow):
             pw,
             remember_credentials=self.remember_cb.isChecked(),
             auto_login=self.auto_login_cb.isChecked(),
+            mfa_code=getattr(self, "_mfa_code", ""),
         )
         self._login_thread.finished_signal.connect(self._on_login_result)
         self._login_thread.start()
@@ -938,7 +950,18 @@ class LoginWindow(QMainWindow):
         self.btn_login.setText("로그인")
 
         status = result.get("status")
+        self._mfa_code = ""
+        if status == "MFA_REQUIRED":
+            code, accepted = QInputDialog.getText(self, "2단계 인증", "인증 앱의 6자리 코드 또는 복구 코드를 입력하세요.")
+            if accepted and code.strip():
+                self._mfa_code = code.strip()
+                self._do_login()
+            return
         if status is True:
+            if getattr(self, "_open_security_after_login", False):
+                self._open_security_after_login = False
+                from src.account_security_dialog import AccountSecurityDialog
+                AccountSecurityDialog(self).exec()
             logger.info("로그인 성공: user_id=%s", result.get("id") or result.get("user_id"))
             self.login_success.emit(result)
         elif status == "EU003":
@@ -1006,7 +1029,7 @@ class LoginWindow(QMainWindow):
 
     def _on_username_checked(self, token: int, username: str, available: bool, message: str):
         self.btn_check_user.setEnabled(True)
-        self.btn_check_user.setText("중복확인")
+        self.btn_check_user.setText("형식 확인")
 
         current_username = self.reg_username.text().strip().lower()
         if token != self._username_check_token or username != current_username:
@@ -1107,7 +1130,7 @@ class LoginWindow(QMainWindow):
                 )
                 return
 
-            show_info(self, "가입 완료", "회원가입이 완료되었습니다!\n바로 로그인해주세요.")
+            show_info(self, "가입 요청", result.get("message", "가입 요청을 처리했습니다. 로그인해주세요."))
             # Auto-fill login
             self.login_id.setText(self.reg_username.text().strip().lower())
             self.login_pw.setText(self.reg_pw.text())
@@ -1166,19 +1189,21 @@ class LoginWorker(QThread):
         *,
         remember_credentials=False,
         auto_login=False,
+        mfa_code="",
     ):
         super().__init__()
         self.username = username
         self._password_bytes = bytearray(str(password or "").encode("utf-8"))
         self.remember_credentials = bool(remember_credentials)
         self.auto_login = bool(auto_login)
+        self.mfa_code = mfa_code
 
     def run(self):
         password = ""
         result = {"status": False, "message": "로그인 처리 중 오류가 발생했습니다."}
         try:
             password = self._password_bytes.decode("utf-8", errors="ignore")
-            result = auth_client.login(self.username, password)
+            result = auth_client.login(self.username, password, mfa_code=self.mfa_code)
             if result.get("status") is True:
                 try:
                     if self.remember_credentials:
@@ -1263,4 +1288,15 @@ class RegisterWorker(QThread):
                 self._password_bytes[i] = 0
             self._password_bytes = bytearray()
             password = None
+        self.finished_signal.emit(result)
+
+
+class ResumeWorker(QThread):
+    finished_signal = pyqtSignal(dict)
+
+    def run(self):
+        try:
+            result = auth_client.resume_saved_session()
+        except Exception:
+            result = {"status": False, "message": "자동 로그인에 실패했습니다. 다시 로그인해주세요."}
         self.finished_signal.emit(result)
