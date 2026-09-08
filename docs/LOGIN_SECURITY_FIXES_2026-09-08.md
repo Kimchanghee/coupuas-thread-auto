@@ -63,3 +63,5 @@ Vercel 사전 배포 dpl_3ZmQatVuEDLRJVDG4NH5AdwZVmeE는 TEAM_ACCESS_REQUIRED(�
 2026-09-08 Vercel에 로그인된 계정은 프로젝트 팀의 OWNER이며 현재 계정 차단 상태는 아니다. 사이트 프로젝트에 Git 저장소 연결이 없었던 것을 확인해 기존 접근 권한으로 Kimchanghee/coupuas-thread-auto를 연결했다. 기존 GitHub의 “Account is blocked” 상태만으로 현재 소유자 계정 전체가 차단됐다고 판단할 수 없다. CLI 사전 배포의 TEAM_ACCESS_REQUIRED는 별도 작성자 검증 실패 기록이다. 실제 서버의 GitHub 프리뷰 배포는 성공했다.
 
 Cloudflare 대시보드는 로그인 화면을 표시한다. 따라서 Turnstile 위젯 생성 및 실제 키 설정은 아직 완료되지 않았다. 최신 소스의 Python/JavaScript/Actions CodeQL 분석은 모두 통과했다.
+
+사이트 Git 연결 복구 후 커밋 57212bb의 프리뷰 배포 dpl_GJitHgzzjUuKLqHSZJHpDoyHrS1z가 READY로 완료됐다. URL: https://coupuas-thread-auto-pdf5zvmno-esk931103.vercel.app . 따라서 현재 사이트의 Git 기반 배포는 가능하다. 과거 CLI 작성자 검증 실패와 GitHub 상태 메시지는 현재 Git 배포 성공과 구분해야 한다. Turnstile 실키가 준비되기 전까지 운영 도메인 전환 및 실제 복구 이메일 검증은 보류한다.
