@@ -159,7 +159,7 @@ class AuthBrandPanel(QFrame):
         painter.drawText(38, 224, width - 68, 48, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "여러 쇼핑 채널의 제휴 링크를 검사하고\nThreads 게시까지 자동화합니다.")
 
         metrics_y = min(326, max(286, height - 380))
-        metrics = (("8", "지원 쇼핑 채널"), ("10", "Threads 계정"), ("4", "자동 복구 단계"))
+        metrics = (("01", "제휴 링크 분석"), ("02", "문안 자동 작성"), ("03", "Threads 게시"))
         for index, (value, label) in enumerate(metrics):
             y = metrics_y + index * 58
             painter.setPen(QColor("#25B9BC"))
@@ -266,6 +266,32 @@ class LoginWindow(QMainWindow):
 
         self._build_login_page()
         self._build_register_page()
+        self._field_feedback = {}
+        for field in (self.login_id, self.login_pw, self.reg_name, self.reg_email,
+                      self.reg_username, self.reg_pw, self.reg_pw_confirm, self.reg_contact):
+            layout = field.parentWidget().layout()
+            if layout is None or layout.indexOf(field) < 0:
+                continue
+            feedback = QLabel()
+            feedback.setWordWrap(True)
+            feedback.setTextFormat(Qt.TextFormat.PlainText)
+            feedback.setStyleSheet(f"color: {Colors.ERROR_TEXT}; background: transparent; font-size: 12px;")
+            feedback.setAccessibleName(f"{field.accessibleName()} 입력 안내")
+            layout.insertWidget(layout.indexOf(field) + 1, feedback)
+            feedback.hide()
+            self._field_feedback[field] = feedback
+            field.textEdited.connect(lambda _text, item=field: self._clear_field_feedback(item))
+
+        self._register_footer = QFrame(self.right_panel)
+        self._register_footer.setObjectName("registerActionFooter")
+        self._register_footer.setStyleSheet(f"QFrame#registerActionFooter {{background: {Colors.BG_CARD}; border-top: 1px solid {Colors.BORDER};}}")
+        footer_layout = QHBoxLayout(self._register_footer)
+        footer_layout.setContentsMargins(24, 10, 24, 10)
+        for button in (self._register_prev_btn, self._register_next_btn, self.btn_register):
+            button.parentWidget().layout().removeWidget(button)
+            button.setStyleSheet(button.styleSheet() + "QPushButton {padding: 0; min-height: 48px; max-height: 48px;}")
+            button.setFixedHeight(48)
+            footer_layout.addWidget(button)
 
         self.stack.currentChanged.connect(self._on_auth_page_changed)
         self.stack.setCurrentIndex(0)
@@ -338,6 +364,12 @@ class LoginWindow(QMainWindow):
         """Size only the active auth flow; the compact login never scrolls."""
         if not hasattr(self, "_form_scroll"):
             return
+        if hasattr(self, "_register_footer"):
+            registering = int(index) == 1
+            footer_h = 72 if registering else 0
+            self._register_footer.setVisible(registering)
+            self._register_footer.setGeometry(0, self.right_panel.height() - footer_h, self.right_panel.width(), footer_h)
+            self._form_scroll.resize(self.right_panel.width(), max(1, self.right_panel.height() - footer_h))
         viewport_h = max(1, self._form_scroll.height())
         if int(index) == 0:
             content_h = viewport_h
@@ -391,7 +423,8 @@ class LoginWindow(QMainWindow):
         layout.addSpacing(5)
 
         layout.addWidget(_field_label("비밀번호"))
-        self.login_pw = QLineEdit()
+        from src.ui_components import PasswordEdit
+        self.login_pw = PasswordEdit()
         self.login_pw.setPlaceholderText("비밀번호를 입력하세요")
         self.login_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.login_pw.setAccessibleName("로그인 비밀번호")
@@ -689,7 +722,8 @@ class LoginWindow(QMainWindow):
         identity_layout.addWidget(self.reg_user_status)
 
         identity_layout.addWidget(_field_label("비밀번호"))
-        self.reg_pw = QLineEdit()
+        from src.ui_components import PasswordEdit
+        self.reg_pw = PasswordEdit()
         self.reg_pw.setPlaceholderText(f"{MIN_REGISTER_PASSWORD_LENGTH}자 이상 입력하세요")
         self.reg_pw.setEchoMode(QLineEdit.EchoMode.Password)
         self.reg_pw.setAccessibleName("회원가입 비밀번호")
@@ -699,7 +733,7 @@ class LoginWindow(QMainWindow):
         identity_layout.addWidget(self.reg_pw)
 
         identity_layout.addWidget(_field_label("비밀번호 확인"))
-        self.reg_pw_confirm = QLineEdit()
+        self.reg_pw_confirm = PasswordEdit()
         self.reg_pw_confirm.setPlaceholderText("비밀번호를 다시 입력")
         self.reg_pw_confirm.setEchoMode(QLineEdit.EchoMode.Password)
         self.reg_pw_confirm.setAccessibleName("회원가입 비밀번호 확인")
@@ -853,21 +887,27 @@ class LoginWindow(QMainWindow):
         password = self.reg_pw.text()
         confirmation = self.reg_pw_confirm.text()
         if len(name) < 2:
+            self.reg_name.setFocus()
             self._show_msg("이름을 2자 이상 입력해주세요.")
             return
         if not email or "@" not in email or "." not in email:
+            self.reg_email.setFocus()
             self._show_msg("올바른 이메일 주소를 입력해주세요.")
             return
         if len(username) < 4:
+            self.reg_username.setFocus()
             self._show_msg("아이디를 4자 이상 입력해주세요.")
             return
         if not self._username_available or self._username_available_for != username:
+            self.reg_username.setFocus()
             self._show_msg("아이디 중복확인을 해주세요.")
             return
         if len(password) < MIN_REGISTER_PASSWORD_LENGTH:
+            self.reg_pw.setFocus()
             self._show_msg(f"비밀번호는 최소 {MIN_REGISTER_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
         if password != confirmation:
+            self.reg_pw_confirm.setFocus()
             self._show_msg("비밀번호가 일치하지 않습니다.")
             return
         self._show_register_step(1)
@@ -885,6 +925,10 @@ class LoginWindow(QMainWindow):
             else "연락처와 필수 약관을 확인해주세요."
         )
         self._register_back_btn.setText("←  돌아가기" if index == 0 else "←  이전 단계")
+        if hasattr(self, "_register_footer"):
+            self._register_next_btn.setVisible(index == 0)
+            self._register_prev_btn.setVisible(index == 1)
+            self.btn_register.setVisible(index == 1)
 
     # ─── Style helpers ──────────────────────────────────────
     def _apply_input_style(self, widget):
@@ -905,10 +949,14 @@ class LoginWindow(QMainWindow):
         pw = self.login_pw.text()
 
         if not uid or not pw:
+            (self.login_id if not uid else self.login_pw).setFocus()
             self.login_status.setText("아이디와 비밀번호를 입력해주세요.")
+            self._show_field_feedback(self.login_id if not uid else self.login_pw, "아이디를 입력해주세요." if not uid else "비밀번호를 입력해주세요.")
             return
         if len(pw) < MIN_LOGIN_PASSWORD_LENGTH:
+            self.login_pw.setFocus()
             self.login_status.setText(f"비밀번호는 최소 {MIN_LOGIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
+            self._show_field_feedback(self.login_pw, f"비밀번호는 최소 {MIN_LOGIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
             return
 
         self._login_in_flight = True
@@ -939,7 +987,7 @@ class LoginWindow(QMainWindow):
 
         status = result.get("status")
         if status is True:
-            logger.info("로그인 성공: user_id=%s", result.get("id") or result.get("user_id"))
+            logger.info("로그인 성공")
             self.login_success.emit(result)
         elif status == "EU003":
             self.login_status.setText(
@@ -1117,7 +1165,26 @@ class LoginWindow(QMainWindow):
 
     # ─── Helpers ────────────────────────────────────────────
     def _show_msg(self, msg):
+        field = QApplication.focusWidget()
+        if field in getattr(self, "_field_feedback", {}):
+            self._show_field_feedback(field, msg)
+            return
         show_warning(self, "알림", msg)
+
+    def _show_field_feedback(self, field, message):
+        feedback = getattr(self, "_field_feedback", {}).get(field)
+        if feedback is not None:
+            feedback.setText(message)
+            feedback.show()
+            field.setAccessibleDescription(message)
+            self._form_scroll.ensureWidgetVisible(feedback, 0, 12)
+
+    def _clear_field_feedback(self, field):
+        feedback = self._field_feedback.get(field)
+        if feedback is not None:
+            feedback.clear()
+            feedback.hide()
+            field.setAccessibleDescription("")
 
     def _close_app(self):
         QApplication.quit()
@@ -1250,7 +1317,7 @@ class RegisterWorker(QThread):
             if result.get("success"):
                 _queue_telemetry(
                     "ui_register_success",
-                    f"username={self.username}",
+                    "registration_completed=true",
                 )
         except Exception:
             logger.exception("회원가입 워커 실행에 실패했습니다.")

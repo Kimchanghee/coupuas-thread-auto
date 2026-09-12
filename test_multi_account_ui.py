@@ -271,12 +271,12 @@ def test_account_switch_renders_the_selected_accounts_login_status(monkeypatch, 
 
     window = main_window.MainWindow()
     try:
-        assert window.login_status_label.text() == "@first_account · 마지막 확인"
+        assert window.login_status_label.text() == "@first_account · 확인 오래됨"
 
         window._upload_account_tabs.setCurrentIndex(1)
 
         assert window.selected_threads_account_id() == second.account_id
-        assert window.login_status_label.text() == "@second_account · 확인 필요"
+        assert window.login_status_label.text() == "@second_account · 연결 확인 필요"
     finally:
         window._closed = True
         window.close()
@@ -310,7 +310,7 @@ def test_stale_login_result_does_not_replace_the_selected_account(monkeypatch, t
         assert window.event(event) is True
 
         assert window.selected_threads_account_id() == second.account_id
-        assert window.login_status_label.text() == "@second_account · 확인 필요"
+        assert window.login_status_label.text() == "@second_account · 연결 확인 필요"
         saved_first = config.get_threads_account(first.account_id)
         assert saved_first.last_verified_username == "first_account"
     finally:
@@ -351,7 +351,7 @@ def test_login_browser_close_checks_the_account_that_opened_it(monkeypatch, tmp_
 
         assert checked_accounts == [first.account_id]
         assert window.selected_threads_account_id() == second.account_id
-        assert window.login_status_label.text() == "@second_account · 확인 필요"
+        assert window.login_status_label.text() == "@second_account · 연결 확인 필요"
     finally:
         window._closed = True
         window.close()

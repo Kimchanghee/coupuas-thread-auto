@@ -2,7 +2,7 @@
 
 쓰레드(Threads) 플랫폼에 글을 자동으로 업로드하는 Windows용 Python 애플리케이션입니다.
 
-**현재 버전: v3.2.2** · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
+[최신 공개 버전 확인](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest) · [Windows 설치 파일 다운로드](https://github.com/Kimchanghee/coupuas-thread-auto/releases/latest/download/CoupangThreadAutoSetup.exe)
 
 ## 이용권
 
@@ -45,7 +45,7 @@ Thread Auto는 아래 프로그램에서 사용자가 **이미 발급받은 제�
 ## 시스템 요구사항
 
 - Windows 10 이상
-- Python 3.9 이상
+- Python 3.11 이상(소스 실행 시)
 
 ## 설치 방법
 
@@ -60,7 +60,7 @@ Thread Auto는 아래 프로그램에서 사용자가 **이미 발급받은 제�
 ### 방법 2: 소스코드 실행
 
 #### 1. Python 설치
-[Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.9 이상을 다운로드하여 설치합니다.
+[Python 공식 웹사이트](https://www.python.org/downloads/)에서 Python 3.11 이상을 다운로드하여 설치합니다.
 
 #### 2. 프로젝트 클론
 ```bash
@@ -80,10 +80,6 @@ pip install -r requirements.txt
 **Threads 로그인 세션 저장**:
 
 ```bash
-# Windows
-setup_login.bat
-
-# 또는
 python setup_login.py
 ```
 
@@ -271,15 +267,20 @@ python build_installer.py
    git push origin master
    ```
 
-2. **자동 버전/릴리즈**
-   - `build-release.yml`을 수동 실행하거나 `vX.Y.Z` 태그를 푸시하면 GitHub Actions가 버전을 동기화하고 릴리즈를 만듭니다.
-   - 수동 실행 시 `version`을 지정하거나, 비워둔 뒤 `bump`으로 patch/minor/major를 선택할 수 있습니다.
+2. **단일 버전 변경**
+   - 버전 값은 `src/version.py`의 `VERSION` 한 곳에서만 관리합니다.
+   - `python .github/scripts/set_version.py vX.Y.Z`로 변경한 뒤 해당 변경을 커밋합니다.
+
+3. **서명·검증·릴리즈**
+   - `src/version.py`와 동일한 `vX.Y.Z` 태그를 푸시하거나 `build-release.yml`을 수동 실행합니다. 태그 또는 수동 입력이 단일 버전과 다르면 workflow가 중단됩니다.
+   - 빌드 산출물은 보호된 `production-code-signing` 환경에서 GitHub OIDC와 Azure Artifact Signing으로 서명됩니다. PFX나 인증서 비밀번호는 사용하지 않습니다.
+   - 서명된 EXE를 설치 파일 안에 포함한 후 설치 파일도 별도의 격리 job에서 서명합니다. 실제 설치·첫 실행·제거 검증을 통과한 artifact만 GitHub Release로 승격됩니다.
    - 릴리즈에는 설치형 `CoupangThreadAutoSetup.exe`, 단독 실행형 `CoupangThreadAuto.exe`, SHA-256 체크섬, `latest.json`이 업로드됩니다.
    - 웹사이트 다운로드 버튼은 `releases/latest/download/CoupangThreadAutoSetup.exe`를 사용하므로 최신 릴리즈로 자동 연결됩니다.
 
 ### GitHub Actions 워크플로우
 
-- `.github/workflows/build-release.yml`: 버전 태그 푸시 또는 수동 실행 시 버전 산출/빌드/릴리즈
+- `.github/workflows/build-release.yml`: 단일 버전 검증, 빌드, 격리 OIDC 서명, 설치 E2E 검증, 릴리즈
 - Windows 환경에서 PyInstaller EXE와 Inno Setup 설치 파일 빌드
 - Authenticode 서명, SHA-256 체크섬 생성 후 GitHub Releases에 업로드
 

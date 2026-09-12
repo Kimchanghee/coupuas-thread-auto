@@ -8,6 +8,11 @@
   const showStatus = (message, kind) => {
     status.textContent = message;
     status.dataset.kind = kind;
+    const next = document.querySelector("#recovery-next");
+    if (next) {
+      next.hidden = kind !== "success";
+      if (kind === "success") next.focus();
+    }
   };
 
   const postJson = async (url, payload) => {

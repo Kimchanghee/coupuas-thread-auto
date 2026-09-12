@@ -78,7 +78,7 @@ class CoupangThreadsUploader:
         agent = self._pop_current_agent()
         if agent:
             try:
-                agent.close()
+                agent.close(save_session=False)
             except Exception:
                 pass
 
@@ -117,7 +117,7 @@ class CoupangThreadsUploader:
                 )
                 time.sleep(2)
             except Exception as e:
-                print(f"  페이지 이동 실패: {e}")
+                print(f"  페이지 이동 실패: error_type={type(e).__name__}")
 
             self._check_cancelled()
 
@@ -128,13 +128,16 @@ class CoupangThreadsUploader:
             if not helper.ensure_login(ig_username, ig_password):
                 raise Exception(f"로그인 실패: {ig_username or '계정 미설정'}")
 
-            print(f"  로그인 완료: @{ig_username}" if ig_username else "  로그인 완료")
+            print("  로그인 완료")
 
             posts_data = build_product_thread_payload(product_post)
 
             self._check_cancelled()
 
-            success = helper.create_thread_direct(posts_data)
+            success = helper.create_thread_direct(
+                posts_data,
+                expected_username=ig_username,
+            )
 
             if success:
                 print("  업로드 성공")
@@ -146,15 +149,14 @@ class CoupangThreadsUploader:
         except CancelledException:
             raise
         except Exception as e:
-            print(f"  업로드 오류: {e}")
+            print(f"  업로드 오류: error_type={type(e).__name__}")
             self.last_error = str(e)
             return False
 
         finally:
             if created_agent and agent:
                 try:
-                    agent.save_session()
-                    agent.close()
+                    agent.close(save_session=False)
                 except Exception:
                     pass
                 self._clear_current_agent(agent)
@@ -181,8 +183,7 @@ class CoupangThreadsUploader:
         """
         def log(step, detail=""):
             """로그 출력 및 콜백 호출"""
-            msg = f"{step}: {detail}" if detail else step
-            print(msg)
+            print(step)
             if progress_callback:
                 progress_callback(step, detail)
         self._cancel_event.clear()
@@ -263,7 +264,10 @@ class CoupangThreadsUploader:
                     posts_data = build_product_thread_payload(product)
 
                     log("스레드 작성 시작", "본문 + 상품 댓글 작성 중...")
-                    success = helper.create_thread_direct(posts_data)
+                    success = helper.create_thread_direct(
+                        posts_data,
+                        expected_username=ig_username,
+                    )
 
                     if not success:
                         log("직접 작성 실패", "AI fallback 기능이 제거되어 재시도하지 않습니다.")
@@ -345,8 +349,7 @@ class CoupangThreadsUploader:
         finally:
             if agent:
                 try:
-                    agent.save_session()
-                    agent.close()
+                    agent.close(save_session=False)
                 except Exception:
                     pass
             self._clear_current_agent(agent)
@@ -618,9 +621,9 @@ class CoupangPartnersPipeline:
         if user_keywords:
             product_info['title'] = user_keywords
             product_info['search_keywords'] = user_keywords
-            print(f"  사용자 키워드: {user_keywords[:40]}...")
+            print("  사용자 키워드를 적용했습니다")
         elif product_info.get('title'):
-            print(f"  상품명: {product_info.get('title', '')[:40]}...")
+            print("  상품명을 확인했습니다")
         else:
             print("  상품명 없음 (상품 번호만 추출됨)")
             marketplace_label = str(product_info.get("marketplace_label") or "쇼핑몰")
@@ -666,7 +669,7 @@ class CoupangPartnersPipeline:
                 concept_id=post_concept,
             )
             post_data = self._normalize_second_post_disclosure(post_data, product_info)
-            print(f"  문구 생성 완료: {post_data['first_post']['text'][:40]}...")
+            print("  문구 생성 완료")
         except Exception as exc:
             from src.services.managed_ai_client import ManagedAiClientError
 
@@ -720,8 +723,7 @@ class CoupangPartnersPipeline:
 
         def log(step, detail=""):
             """로그 출력 및 콜백 호출"""
-            msg = f"{step}: {detail}" if detail else step
-            print(msg)
+            print(step)
             if progress_callback:
                 progress_callback(step, detail)
 
@@ -748,6 +750,10 @@ class CoupangPartnersPipeline:
         # 브라우저 시작 (한 번만)
         # 계정별 별도 프로필 사용 (여러 계정 동시 실행 지원)
         ig_username = config.instagram_username
+        if not str(ig_username or "").strip():
+            log("계정 확인 실패", "게시할 Threads 사용자명이 설정되지 않았습니다.")
+            results['failed'] = total
+            return results
         if ig_username:
             # 이메일 형식이면 @ 앞부분만 사용
             profile_name = ig_username.split('@')[0] if '@' in ig_username else ig_username
@@ -799,7 +805,12 @@ class CoupangPartnersPipeline:
                     results['failed'] = total
                     return results
 
-            log("로그인 확인됨", "Threads 로그인 상태 확인 완료")
+            if not helper.verify_account(ig_username):
+                log("계정 확인 실패", "설정된 Threads 계정과 현재 로그인 계정이 다릅니다.")
+                results['failed'] = total
+                return results
+
+            log("로그인 확인됨", "Threads 로그인 계정 확인 완료")
 
             # 각 상품을 순차적으로 처리
             for i, item in enumerate(link_data, 1):
@@ -873,7 +884,19 @@ class CoupangPartnersPipeline:
 
                     # 스레드 작성
                     log("게시물 작성", "본문과 상품 댓글을 연결 스레드로 작성합니다...")
-                    success = helper.create_thread_direct(posts_data)
+                    if not helper.verify_account(ig_username):
+                        remaining = total - i + 1
+                        results['failed'] += remaining
+                        results['cancelled'] = True
+                        log(
+                            "계정 확인 실패",
+                            "게시 직전 로그인 계정을 확인하지 못해 남은 업로드를 중단합니다.",
+                        )
+                        break
+                    success = helper.create_thread_direct(
+                        posts_data,
+                        expected_username=ig_username,
+                    )
 
                     if success:
                         results['uploaded'] += 1
@@ -890,7 +913,7 @@ class CoupangPartnersPipeline:
                             from src import auth_client
                             auth_client.log_action(
                                 "upload_success",
-                                f"[{i}/{total}] {product_name}",
+                                f"index={i}; total={total}",
                             )
                         except Exception:
                             pass
@@ -909,7 +932,7 @@ class CoupangPartnersPipeline:
                             from src import auth_client
                             auth_client.log_action(
                                 "upload_failed",
-                                f"[{i}/{total}] {product_name}",
+                                f"index={i}; total={total}",
                                 level="WARNING",
                             )
                         except Exception:
@@ -967,14 +990,17 @@ class CoupangPartnersPipeline:
             log("치명적 오류", f"{str(e)}")
             try:
                 from src import auth_client
-                auth_client.log_action("pipeline_error", str(e)[:200], level="ERROR")
+                auth_client.log_action(
+                    "pipeline_error",
+                    "reason=upload_pipeline_exception",
+                    level="ERROR",
+                )
             except Exception:
                 pass
         finally:
             if agent:
                 try:
-                    agent.save_session()
-                    agent.close()
+                    agent.close(save_session=False)
                 except Exception:
                     pass
 

@@ -8,12 +8,17 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 if (-not $Version) {
-    $versionSource = Get-Content -Raw (Join-Path $repoRoot "src\__init__.py")
-    $match = [regex]::Match($versionSource, '__version__\s*=\s*"(?<version>\d+\.\d+\.\d+)"')
-    if (-not $match.Success) {
-        throw "Could not resolve the application version."
+    Push-Location $repoRoot
+    try {
+        $resolvedVersion = (& python -c "from src.version import MSIX_VERSION; print(MSIX_VERSION)").Trim()
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not resolve the canonical application version."
+        }
     }
-    $Version = "$($match.Groups['version'].Value).0"
+    finally {
+        Pop-Location
+    }
+    $Version = $resolvedVersion
 }
 
 if ($Version -notmatch '^\d+\.\d+\.\d+\.\d+$') {

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from src.version import MSIX_VERSION, VERSION
 from tools import build_store_msix
 
 FOUNDATION_NS = "http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -131,10 +132,10 @@ def test_build_store_package_runs_isolated_exe_and_msix_build(monkeypatch, tmp_p
         makeappx_path=makeappx,
         build_root=tmp_path / "build",
         output_dir=tmp_path / "output",
-        version="v3.0.62",
+        version=VERSION,
     )
 
-    assert output.name == "ThreadShoppingAutomation_3.0.62.0_x64.msix"
+    assert output.name == f"ThreadShoppingAutomation_{MSIX_VERSION}_x64.msix"
     assert output.read_bytes() == b"msix"
     pyinstaller_calls = [
         call
@@ -150,11 +151,12 @@ def test_build_store_package_runs_isolated_exe_and_msix_build(monkeypatch, tmp_p
     assert makeappx_calls[0][1]["check"] is True
 
 
-def test_read_app_version_from_login_entrypoint(tmp_path):
-    entrypoint = tmp_path / "login_main.py"
-    entrypoint.write_text('VERSION = "v3.0.62"\n', encoding="utf-8")
+def test_read_app_version_from_canonical_version_file(tmp_path):
+    version_file = tmp_path / "src" / "version.py"
+    version_file.parent.mkdir()
+    version_file.write_text('VERSION = "4.5.6"\n', encoding="utf-8")
 
-    assert build_store_msix.read_app_version(entrypoint) == "3.0.62.0"
+    assert build_store_msix.read_app_version(tmp_path) == "4.5.6.0"
 
 
 def test_main_builds_with_explicit_makeappx_path(monkeypatch, tmp_path, capsys):
@@ -182,7 +184,7 @@ def test_main_builds_with_explicit_makeappx_path(monkeypatch, tmp_path, capsys):
 
     assert result == 0
     assert captured["makeappx_path"] == makeappx.resolve()
-    assert captured["version"] == "3.2.3.0"
+    assert captured["version"] == MSIX_VERSION
     assert "package.msix" in capsys.readouterr().out
 
 
@@ -211,13 +213,29 @@ def test_main_accepts_explicit_store_version(monkeypatch, tmp_path):
             "--output-dir",
             str(tmp_path / "out"),
             "--version",
-            "v3.0.73",
+            f"v{VERSION}.7",
         ],
         repo_root=REPO_ROOT,
     )
 
     assert result == 0
-    assert captured["version"] == "3.0.73.0"
+    assert captured["version"] == f"{VERSION}.7"
+
+
+def test_main_rejects_store_version_that_does_not_match_app(monkeypatch, tmp_path):
+    makeappx = tmp_path / "makeappx.exe"
+    makeappx.write_bytes(b"tool")
+    monkeypatch.setattr(
+        build_store_msix,
+        "build_store_package",
+        lambda **kwargs: pytest.fail("mismatched Store version reached packaging"),
+    )
+
+    with pytest.raises(ValueError, match="major.minor.patch must match"):
+        build_store_msix.main(
+            ["--makeappx", str(makeappx), "--version", "9.9.9.0"],
+            repo_root=REPO_ROOT,
+        )
 
 
 def test_store_build_script_can_be_invoked_directly():

@@ -4,6 +4,10 @@ from pathlib import Path
 from src import auto_updater
 
 
+_PIN = "A" * 40
+_NEXT_PIN = "B" * 40
+
+
 class _Completed:
     def __init__(self, payload):
         self.stdout = json.dumps(payload)
@@ -45,9 +49,9 @@ def test_frozen_build_without_pinned_signer_does_not_offer_updates(monkeypatch):
     assert updater.check_for_updates() is None
 
 
-def test_verify_authenticode_accepts_localized_pinned_self_signed_chain_error(monkeypatch):
+def test_verify_authenticode_rejects_pinned_self_signed_chain_error(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
-    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", _PIN)
 
     def _fake_run(*args, **kwargs):
         return _Completed(
@@ -55,8 +59,12 @@ def test_verify_authenticode_accepts_localized_pinned_self_signed_chain_error(mo
                 "Status": "UnknownError",
                 "StatusMessage": "인증서 체인을 처리했지만 신뢰할 수 없는 루트에서 끝났습니다.",
                 "Subject": "CN=YM, O=YM",
-                "Thumbprint": "ABC123",
+                "Thumbprint": _PIN,
+                "ChainBuilt": False,
                 "ChainStatuses": ["UntrustedRoot"],
+                "HasTimestamp": True,
+                "TimestampChainBuilt": True,
+                "TimestampChainStatuses": [],
             }
         )
 
@@ -64,12 +72,12 @@ def test_verify_authenticode_accepts_localized_pinned_self_signed_chain_error(mo
 
     updater = auto_updater.AutoUpdater("3.0.5")
 
-    assert updater._verify_authenticode_signature("update.exe") is True
+    assert updater._verify_authenticode_signature("update.exe") is False
 
 
 def test_verify_authenticode_explicitly_loads_windows_security_module(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
-    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", _PIN)
     captured = {}
 
     def _fake_run(args, **kwargs):
@@ -79,8 +87,12 @@ def test_verify_authenticode_explicitly_loads_windows_security_module(monkeypatc
                 "Status": "Valid",
                 "StatusMessage": "",
                 "Subject": "CN=YM, O=YM",
-                "Thumbprint": "ABC123",
+                "Thumbprint": _PIN,
+                "ChainBuilt": True,
                 "ChainStatuses": [],
+                "HasTimestamp": True,
+                "TimestampChainBuilt": True,
+                "TimestampChainStatuses": [],
             }
         )
 
@@ -93,11 +105,14 @@ def test_verify_authenticode_explicitly_loads_windows_security_module(monkeypatc
     assert captured["script"].index("Import-Module") < captured["script"].index(
         "Get-AuthenticodeSignature"
     )
+    assert "X509RevocationMode]::Online" in captured["script"]
+    assert "TimeStamperCertificate" in captured["script"]
+    assert "NoCheck" not in captured["script"]
 
 
 def test_verify_authenticode_rejects_hash_mismatch_even_when_thumbprint_matches(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
-    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", _PIN)
 
     def _fake_run(*args, **kwargs):
         return _Completed(
@@ -105,8 +120,12 @@ def test_verify_authenticode_rejects_hash_mismatch_even_when_thumbprint_matches(
                 "Status": "HashMismatch",
                 "StatusMessage": "The hash value is not correct.",
                 "Subject": "CN=YM, O=YM",
-                "Thumbprint": "ABC123",
+                "Thumbprint": _PIN,
+                "ChainBuilt": False,
                 "ChainStatuses": ["UntrustedRoot"],
+                "HasTimestamp": True,
+                "TimestampChainBuilt": True,
+                "TimestampChainStatuses": [],
             }
         )
 
@@ -119,16 +138,20 @@ def test_verify_authenticode_rejects_hash_mismatch_even_when_thumbprint_matches(
 
 def test_verify_authenticode_rejects_other_chain_errors_even_when_pinned(monkeypatch):
     monkeypatch.setattr(auto_updater.os, "name", "nt")
-    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "ABC123")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", _PIN)
 
     def _fake_run(*args, **kwargs):
         return _Completed(
             {
-                "Status": "UnknownError",
+                "Status": "Valid",
                 "StatusMessage": "localized message",
                 "Subject": "CN=YM, O=YM",
-                "Thumbprint": "ABC123",
-                "ChainStatuses": ["UntrustedRoot", "Revoked"],
+                "Thumbprint": _PIN,
+                "ChainBuilt": False,
+                "ChainStatuses": ["Revoked"],
+                "HasTimestamp": True,
+                "TimestampChainBuilt": True,
+                "TimestampChainStatuses": [],
             }
         )
 
@@ -137,6 +160,54 @@ def test_verify_authenticode_rejects_other_chain_errors_even_when_pinned(monkeyp
     updater = auto_updater.AutoUpdater("3.0.5")
 
     assert updater._verify_authenticode_signature("update.exe") is False
+
+
+def test_verify_authenticode_rejects_missing_or_untrusted_timestamp(monkeypatch):
+    monkeypatch.setattr(auto_updater.os, "name", "nt")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", _PIN)
+    monkeypatch.setattr(
+        auto_updater,
+        "run_process",
+        lambda *_args, **_kwargs: _Completed(
+            {
+                "Status": "Valid",
+                "Subject": "CN=YM, O=YM",
+                "Thumbprint": _PIN,
+                "ChainBuilt": True,
+                "ChainStatuses": [],
+                "HasTimestamp": False,
+                "TimestampChainBuilt": False,
+                "TimestampChainStatuses": ["RevocationStatusUnknown"],
+            }
+        ),
+    )
+
+    assert auto_updater.AutoUpdater("3.0.5")._verify_authenticode_signature("update.exe") is False
+
+
+def test_signer_pin_set_supports_current_and_next_rotation_bridge(monkeypatch):
+    monkeypatch.setattr(auto_updater.os, "name", "nt")
+    monkeypatch.setenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", f"{_PIN},{_NEXT_PIN}")
+    monkeypatch.setattr(
+        auto_updater,
+        "run_process",
+        lambda *_args, **_kwargs: _Completed(
+            {
+                "Status": "Valid",
+                "Subject": "CN=YM, O=YM",
+                "Thumbprint": _NEXT_PIN,
+                "ChainBuilt": True,
+                "ChainStatuses": [],
+                "HasTimestamp": True,
+                "TimestampChainBuilt": True,
+                "TimestampChainStatuses": [],
+            }
+        ),
+    )
+
+    updater = auto_updater.AutoUpdater("3.0.5")
+    assert updater.trusted_thumbprints == {_PIN, _NEXT_PIN}
+    assert updater._verify_authenticode_signature("update.exe") is True
 
 
 def test_check_for_updates_prefers_installer_asset(monkeypatch):
@@ -255,6 +326,11 @@ def test_installer_runner_waits_installs_relaunches_and_self_cleans(tmp_path, mo
     assert "Get-AuthenticodeSignature -FilePath $Installer" in content
     assert "ChainStatus" in content
     assert "$statusMessage -match" not in content
+    assert "X509RevocationMode]::Online" in content
+    assert "TimeStamperCertificate" in content
+    assert "NoCheck" not in content
+    assert "NotTrusted" not in content
+    assert "UnknownError" not in content
     assert "Installer signer thumbprint is not trusted" in content
     assert "Start-Process -FilePath $Installer" in content
     assert "Start-Process -FilePath $AppExe" in content
@@ -275,5 +351,12 @@ def test_standalone_runner_locks_update_during_verification(tmp_path, monkeypatc
     assert content.index("Import-Module") < content.index("Get-AuthenticodeSignature")
     assert "ChainStatus" in content
     assert "$status -ne 'Valid'" in content
-    assert "UntrustedRoot" in content
+    assert "X509RevocationMode]::Online" in content
+    assert "TimeStamperCertificate" in content
+    assert "NoCheck" not in content
+    assert "NotTrusted" not in content
+    assert "UnknownError" not in content
     assert "$updateLock.Dispose()" in content
+    assert content.rindex("Remove-Item -LiteralPath $UpdateFile") > content.index(
+        "$updateLock.Dispose()"
+    )

@@ -3,14 +3,25 @@
 설정 다이얼로그 (PyQt6)
 Nordic Bento 디자인 - 반응형 외곽과 레이아웃 기반 카드
 """
+
 import re
 import threading
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QFrame, QSpinBox, QComboBox,
-    QScrollArea, QWidget, QApplication
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QCheckBox,
+    QFrame,
+    QSpinBox,
+    QComboBox,
+    QScrollArea,
+    QWidget,
+    QApplication,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QLinearGradient
 
 from src.config import config
@@ -20,19 +31,29 @@ from src.app_icon import apply_window_icon
 from src.services.post_concepts import POST_CONCEPTS, normalize_concept_id
 from src.theme import (
     Colors,
-    section_title_style, section_icon_style, header_title_style,
-    close_btn_style, hint_text_style,
-    scroll_area_style, global_stylesheet
+    section_title_style,
+    section_icon_style,
+    header_title_style,
+    close_btn_style,
+    hint_text_style,
+    scroll_area_style,
+    global_stylesheet,
 )
 from src.ui_messages import show_error, show_info, show_warning
 from src.events import LoginStatusEvent
-from src.threads_navigation import goto_threads_with_fallback, friendly_threads_navigation_error
+from src.threads_navigation import (
+    goto_threads_with_fallback,
+    friendly_threads_navigation_error,
+)
+from src.threads_login_transaction import commit_threads_login_transaction
 
 
 # ─── Section Card ────────────────────────────────────────────
 
+
 class SectionCard(QFrame):
     """설정 섹션 카드 (아이콘 + 제목 + 내용)"""
+
     def __init__(self, title, icon_char="", parent=None):
         super().__init__(parent)
         self._title = title
@@ -72,15 +93,15 @@ class SectionCard(QFrame):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QColor(Colors.BORDER))
         painter.setBrush(QColor(Colors.BG_CARD))
-        painter.drawRoundedRect(
-            self.rect().adjusted(0, 0, -1, -1), 12, 12
-        )
+        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 12, 12)
 
 
 # ─── Form Field ─────────────────────────────────────────────
 
+
 class FormField(QWidget):
     """레이블 + 입력 위젯 쌍"""
+
     def __init__(self, label_text, input_widget, hint="", parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -104,8 +125,10 @@ class FormField(QWidget):
 
 # ─── Dialog Header ──────────────────────────────────────────
 
+
 class DialogHeader(QFrame):
     """다이얼로그 상단 바 (그라디언트 배경)"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(60)
@@ -123,8 +146,11 @@ class DialogHeader(QFrame):
 
 # ─── Settings Dialog ────────────────────────────────────────
 
+
 class SettingsDialog(QDialog):
     """자동화 설정 다이얼로그 with a monitor-aware outer shell."""
+
+    threads_login_complete = pyqtSignal(object)
 
     DLG_W = 540
     DLG_H = 740
@@ -149,6 +175,7 @@ class SettingsDialog(QDialog):
 
         self._closed = False
         self._browser_cancel = threading.Event()
+        self.threads_login_complete.connect(self._apply_threads_login_result)
 
         self._build_ui()
         self.setStyleSheet(global_stylesheet())
@@ -266,7 +293,11 @@ class SettingsDialog(QDialog):
         self.gemini_key_edit.setMinimumHeight(48)
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.gemini_key_edit.setPlaceholderText("Gemini API 키를 입력하세요")
-        layout.addWidget(FormField("마스터 API 키", self.gemini_key_edit, "Google AI Studio에서 발급"))
+        layout.addWidget(
+            FormField(
+                "마스터 API 키", self.gemini_key_edit, "Google AI Studio에서 발급"
+            )
+        )
 
         self.content_layout.addWidget(section)
 
@@ -408,7 +439,9 @@ class SettingsDialog(QDialog):
         self.sec_spin.setValue(total % 60)
 
         self.video_check.setChecked(config.prefer_video)
-        self.auto_start_check.setChecked(bool(getattr(config, "auto_start_enabled", False)))
+        self.auto_start_check.setChecked(
+            bool(getattr(config, "auto_start_enabled", False))
+        )
         selected_concept = normalize_concept_id(getattr(config, "post_concept", ""))
         index = self.post_concept_combo.findData(selected_concept)
         self.post_concept_combo.setCurrentIndex(max(index, 0))
@@ -416,9 +449,9 @@ class SettingsDialog(QDialog):
 
     def _save_settings(self):
         interval = (
-            self.hour_spin.value() * 3600 +
-            self.min_spin.value() * 60 +
-            self.sec_spin.value()
+            self.hour_spin.value() * 3600
+            + self.min_spin.value() * 60
+            + self.sec_spin.value()
         )
         if interval < 30:
             interval = 30
@@ -436,7 +469,9 @@ class SettingsDialog(QDialog):
         config.upload_interval = interval
         config.prefer_video = self.video_check.isChecked()
         config.auto_start_enabled = self.auto_start_check.isChecked()
-        config.post_concept = normalize_concept_id(self.post_concept_combo.currentData())
+        config.post_concept = normalize_concept_id(
+            self.post_concept_combo.currentData()
+        )
         config.instagram_username = username
 
         if not config.save():
@@ -458,8 +493,8 @@ class SettingsDialog(QDialog):
     @staticmethod
     def _sanitize_profile_name(username):
         """프로필 디렉터리 이름용 사용자명 정리"""
-        name = username.split('@')[0] if '@' in username else username
-        return re.sub(r'[^\w\-.]', '_', name)
+        name = username.split("@")[0] if "@" in username else username
+        return re.sub(r"[^\w\-.]", "_", name)
 
     def _get_profile_dir(self):
         username = self.username_edit.text().strip()
@@ -477,16 +512,6 @@ class SettingsDialog(QDialog):
         except ValueError as exc:
             show_warning(self, "Threads 계정", str(exc))
             return
-        if username:
-            config.instagram_username = username
-            if not config.save():
-                show_error(
-                    self,
-                    "계정 저장 실패",
-                    "Threads 계정을 저장하지 못했습니다. 저장 폴더 권한과 디스크 공간을 확인해주세요.",
-                )
-                return
-
         self.threads_login_btn.setEnabled(False)
         self.threads_login_btn.setText("여는 중...")
         self._update_login_status("pending", "브라우저 여는 중...")
@@ -494,17 +519,26 @@ class SettingsDialog(QDialog):
         self._browser_cancel.clear()
         cancel_event = self._browser_cancel
         profile_dir = self._get_profile_dir()
+        expected_username = (
+            username or str(getattr(config, "instagram_username", "") or "").strip()
+        )
 
         def open_browser():
+            agent = None
+            staged_path = None
+            verified_username = ""
+            reason = "identity_unverified"
             try:
                 from src.computer_use_agent import ComputerUseAgent
+                from src.threads_playwright_helper import ThreadsPlaywrightHelper
 
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=False,
-                    profile_dir=profile_dir
+                    profile_dir=profile_dir,
+                    load_saved_session=False,
                 )
-                agent.start_browser()
+                agent.start_browser(load_saved_session=False)
                 goto_threads_with_fallback(
                     agent.page,
                     path="/login",
@@ -513,29 +547,148 @@ class SettingsDialog(QDialog):
                 )
 
                 import time
+
                 for _ in range(300):
                     if cancel_event.is_set():
+                        reason = "cancelled"
                         break
-                    time.sleep(1)
                     try:
-                        agent.page.url
+                        if agent.page is None or agent.page.is_closed():
+                            reason = "browser_closed_before_verification"
+                            break
+                        helper = ThreadsPlaywrightHelper(agent.page)
+                        if helper.check_login_status():
+                            actual = normalize_threads_username(
+                                helper.get_logged_in_username()
+                            )
+                            expected = normalize_threads_username(expected_username)
+                            if actual and (not expected or actual == expected):
+                                candidate_state = agent.capture_session_state()
+                                if not agent.validate_session_state_identity(
+                                    candidate_state,
+                                    actual,
+                                ):
+                                    reason = "candidate_identity_unverified"
+                                    continue
+                                staged_path = agent.stage_session(candidate_state)
+                                verified_username = actual
+                                reason = "verified"
+                                break
+                            if actual and expected and actual != expected:
+                                reason = "account_mismatch"
                     except Exception:
-                        break
+                        pass
+                    time.sleep(1)
 
+            except Exception:
+                reason = "browser_error"
+                print("브라우저 오류: 로그인 정보를 안전하게 확인하지 못했습니다.")
+            finally:
+                if agent is not None:
+                    try:
+                        agent.close(save_session=False)
+                    except Exception:
+                        pass
                 try:
-                    agent.save_session()
-                    agent.close()
-                except Exception:
-                    pass
+                    self.threads_login_complete.emit(
+                        {
+                            "success": bool(staged_path and verified_username),
+                            "reason": reason,
+                            "verified_username": verified_username,
+                            "staged_path": staged_path,
+                            "agent": agent,
+                        }
+                    )
+                except RuntimeError:
+                    if agent is not None and staged_path:
+                        agent.discard_staged_session(staged_path)
 
-            except Exception as e:
-                print(f"브라우저 오류: {friendly_threads_navigation_error(str(e))}")
-
-        thread = threading.Thread(target=open_browser, daemon=True)
+        thread = threading.Thread(
+            target=open_browser,
+            daemon=True,
+            name="settings-threads-login-worker",
+        )
         thread.start()
 
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(3000, self._restore_login_btn)
+    def _apply_threads_login_result(self, result):
+        self._restore_login_btn()
+        if self._closed:
+            payload = result if isinstance(result, dict) else {}
+            agent = payload.get("agent")
+            staged_path = payload.get("staged_path")
+            if agent is not None and staged_path:
+                try:
+                    agent.discard_staged_session(staged_path)
+                except Exception:
+                    pass
+            return
+
+        payload = result if isinstance(result, dict) else {}
+        agent = payload.get("agent")
+        staged_path = payload.get("staged_path")
+        verified_username = normalize_threads_username(payload.get("verified_username"))
+        if not (
+            payload.get("success")
+            and agent is not None
+            and staged_path
+            and verified_username
+        ):
+            if agent is not None and staged_path:
+                agent.discard_staged_session(staged_path)
+            message = (
+                "다른 계정으로 확인되어 기존 로그인을 유지했습니다."
+                if payload.get("reason") == "account_mismatch"
+                else "로그인을 검증하지 못해 기존 로그인을 유지했습니다."
+            )
+            self._update_login_status("error", message)
+            return
+
+        active_account_id = str(getattr(config, "active_threads_account_id", "") or "")
+        active_account = (
+            config.get_threads_account(active_account_id)
+            if active_account_id and hasattr(config, "get_threads_account")
+            else None
+        )
+        transaction_result = (
+            commit_threads_login_transaction(
+                config,
+                agent,
+                staged_path,
+                account_id=active_account_id,
+                verified_username=verified_username,
+            )
+            if active_account is not None
+            else False
+        )
+        if not transaction_result:
+            recovery_required = bool(
+                getattr(transaction_result, "recovery_required", False)
+            )
+            failure_message = (
+                "로그인 저장 상태 복구가 필요합니다. 앱을 재시작해 복구를 완료해 주세요."
+                if recovery_required
+                else "로그인 정보를 안전하게 저장하지 못해 기존 로그인을 유지했습니다."
+            )
+            agent.discard_staged_session(staged_path)
+            self._update_login_status(
+                "error",
+                failure_message,
+            )
+            show_error(
+                self,
+                "Threads 로그인 저장 실패",
+                failure_message,
+            )
+            if recovery_required:
+                self.setEnabled(False)
+                app = QApplication.instance()
+                if app is not None:
+                    QTimer.singleShot(0, app.quit)
+            return
+
+        agent.discard_staged_session(staged_path)
+        self.username_edit.setText(verified_username)
+        self._update_login_status("success", f"@{verified_username} 로그인 저장 완료")
 
     def _restore_login_btn(self):
         if self._closed:
@@ -557,7 +710,7 @@ class SettingsDialog(QDialog):
                 agent = ComputerUseAgent(
                     api_key=config.gemini_api_key,
                     headless=True,
-                    profile_dir=profile_dir
+                    profile_dir=profile_dir,
                 )
                 agent.start_browser()
 
@@ -569,16 +722,19 @@ class SettingsDialog(QDialog):
                         retries_per_url=1,
                     )
                     import time
+
                     time.sleep(2)
 
                     helper = ThreadsPlaywrightHelper(agent.page)
                     is_logged_in = helper.check_login_status()
-                    logged_user = helper.get_logged_in_username() if is_logged_in else None
+                    logged_user = (
+                        helper.get_logged_in_username() if is_logged_in else None
+                    )
 
                     return is_logged_in, logged_user
                 finally:
                     try:
-                        agent.close()
+                        agent.close(save_session=False)
                     except Exception:
                         pass
 
@@ -591,6 +747,7 @@ class SettingsDialog(QDialog):
             if self._closed:
                 return
             from PyQt6.QtWidgets import QApplication
+
             app = QApplication.instance()
             if app:
                 app.postEvent(self, LoginStatusEvent(result))
@@ -606,9 +763,13 @@ class SettingsDialog(QDialog):
             "unknown": Colors.TEXT_MUTED,
         }
         color = color_map.get(state, Colors.TEXT_MUTED)
-        self._status_dot.setStyleSheet(f"background-color: {color}; border-radius: 5px;")
+        self._status_dot.setStyleSheet(
+            f"background-color: {color}; border-radius: 5px;"
+        )
         self.login_status_label.setText(text)
-        self.login_status_label.setStyleSheet(f"color: {color}; font-size: 9.5pt; font-weight: 600;")
+        self.login_status_label.setStyleSheet(
+            f"color: {color}; font-size: 9.5pt; font-weight: 600;"
+        )
 
     def event(self, event):
         if event.type() == LoginStatusEvent.EventType:

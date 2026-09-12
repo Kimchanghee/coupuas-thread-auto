@@ -32,7 +32,7 @@ Thread Auto
 
 Thread Auto는 쇼핑 제휴 콘텐츠 운영자가 상품 링크 확인부터 문안 생성, Threads 게시 준비까지 반복되는 작업을 한곳에서 관리하도록 돕는 Windows 앱입니다.
 
-쿠팡뿐 아니라 네이버 쇼핑커넥트, AliExpress, Temu, 오늘의집, 무신사, 컬리 등 지원 채널의 링크를 분류하고 상품 정보를 확인합니다. 사용자가 선택한 AI 방식으로 여러 문안 후보를 만들고, 계정별 대기열과 작업 기록을 통해 게시 흐름을 정리할 수 있습니다.
+쿠팡, 네이버 쇼핑커넥트, 토스쇼핑 쉐어링크, 오늘의집, 무신사, 컬리, 올리브영과 AliExpress 등 앱에 등록된 지원 채널의 링크를 분류하고 상품 정보를 확인합니다. 사용자가 선택한 AI 방식으로 여러 문안 후보를 만들고, 계정별 대기열과 작업 기록을 통해 게시 흐름을 정리할 수 있습니다.
 
 브라우저 로그인 세션과 앱 설정은 사용자 PC를 중심으로 저장합니다. 서버 요청은 로그인 토큰으로 인증하며 작업량은 예약, 확정, 해제 흐름으로 안전하게 처리합니다.
 
@@ -46,7 +46,7 @@ AI가 생성한 문안이 유해하거나 부적절하거나 사실과 다를 �
 
 Enter each line as a separate feature. Partner Center adds bullets automatically.
 
-1. 7개 쇼핑 제휴 채널 링크 자동 분류
+1. 앱에 등록된 국내 쇼핑 제휴 채널과 AliExpress 링크 분류
 2. 상품 정보 확인과 AI 문안 후보 생성
 3. 여러 Threads 계정과 계정별 게시 대기열 관리
 4. 예약·확정·해제 방식의 안전한 작업량 처리
@@ -99,13 +99,19 @@ rating.
 
 1. Pricing and availability
 2. Properties and IARC questionnaire
-3. Upload `ThreadShoppingAutomation_3.2.2.0_x64.msix`
+3. Upload the single `ThreadShoppingAutomation_<major>.<minor>.<patch>.<revision>_x64.msix`
+   produced by the workflow. Its first three version components must match
+   `src/version.py`; only the fourth Store revision may differ.
 4. Add the Korean listing above
 5. Upload the four desktop screenshots produced by
    `tools/build_store_submission_pack.ps1`
 6. Add the certification notes
 7. Submit for certification
 
-After the first version becomes live, configure the four Partner Center secrets
-documented in `docs/FREE_WINDOWS_SIGNING.md` and run `store-release.yml` with
-`publish=true` for subsequent updates.
+After the first version becomes live, configure the Partner Center publishing
+credentials in the required-reviewer `production-store-publishing` environment
+documented for `store-release.yml`, select a protected branch or tag, and run it
+with `publish=true` for subsequent updates. The clean publishing job does not
+check out repository code and revalidates the package downloaded from the build
+job. GitHub desktop releases use the separate managed OIDC signing procedure in
+`docs/FREE_WINDOWS_SIGNING.md`.

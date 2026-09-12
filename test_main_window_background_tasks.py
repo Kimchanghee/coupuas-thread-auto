@@ -8,10 +8,12 @@ def test_periodic_network_tasks_run_outside_the_qt_event_loop():
 
     assert 'name="server-heartbeat-worker"' in source
     assert 'name="update-check-worker"' in source
+    assert 'name=f"payment-{operation}-worker"' in source
     assert "def _heartbeat_worker" in source
     assert "def _update_check_worker" in source
     assert "heartbeat_complete = pyqtSignal(object)" in source
     assert "update_check_complete = pyqtSignal(object)" in source
+    assert "payment_complete = pyqtSignal(int, str, object, object)" in source
 
 
 def test_normal_close_quits_but_update_close_preserves_login():

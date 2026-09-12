@@ -1,11 +1,14 @@
-import time
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
 
 from src.coupang_uploader import CancelledException
-from src.services.account_queue import AccountQueueStore
+from src.services.account_queue import (
+    AccountQueueStore,
+    QueueStateRecoveryRequired,
+)
 from src.services.link_history import LinkHistory
 from src.services.multi_account_runtime import MultiAccountRuntime
 
@@ -87,9 +90,10 @@ class FakeAgent:
         type(self).max_active = max(type(self).max_active, type(self).active)
 
     def save_session(self):
-        return None
+        raise AssertionError("upload runtime must not overwrite verified sessions")
 
-    def close(self):
+    def close(self, *, save_session=True):
+        assert save_session is False
         type(self).active -= 1
 
 
@@ -98,6 +102,7 @@ class FakeHelper:
         self.page = page
         self.mismatch_profile = mismatch_profile
         self.last_error = ""
+        self.external_post_attempted = True
 
     def check_login_status(self):
         return True
@@ -105,7 +110,8 @@ class FakeHelper:
     def verify_account(self, _expected_username):
         return self.page != self.mismatch_profile
 
-    def create_thread_direct(self, _payload):
+    def create_thread_direct(self, _payload, *, expected_username):
+        assert expected_username
         return True
 
 
@@ -465,3 +471,215 @@ def test_start_requested_while_worker_retires_launches_one_successor():
     assert runtime._coordinator.run_count == 2
     assert runtime._coordinator.max_active == 1
     assert runtime._coordinator.reset_count >= 3
+
+
+def test_runtime_surfaces_and_blocks_phase_persistence_failure(tmp_path):
+    observed = []
+    logs = []
+    pipeline = FakePipeline()
+    runtime = MultiAccountRuntime(
+        config=FakeConfig([_account("a")]),
+        pipeline=pipeline,
+        queue_root=tmp_path / "queues",
+        history_root=tmp_path / "history",
+        on_state=lambda account_id, state: observed.append((account_id, state)),
+        on_log=lambda account_id, message: logs.append((account_id, message)),
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+    runtime.enqueue("id-a", ["https://example.test/a"])
+    store = runtime.queue_store("id-a")
+    original_set_phase = store.set_phase
+
+    def fail_running_phase(phase, **kwargs):
+        if phase == "running":
+            raise OSError("disk full")
+        return original_set_phase(phase, **kwargs)
+
+    store.set_phase = fail_running_phase
+
+    runtime.start_account("id-a")
+    _wait_for_runtime(runtime)
+
+    state = runtime.snapshot("id-a")
+    assert pipeline.calls == []
+    assert state["schedule"].blocked_reason == "state_persistence_failed"
+    assert "disk full" in state["persistence_error"]
+    assert any("저장하지 못했습니다" in message for _, message in logs)
+    assert observed[-1][1]["schedule"].blocked_reason == "state_persistence_failed"
+
+
+def test_runtime_quarantines_corrupt_queue_without_rewriting_or_starting(
+    tmp_path,
+):
+    queue_root = tmp_path / "queues"
+    queue_root.mkdir()
+    queue_path = queue_root / "id-a.json"
+    original_bytes = b'{"version":2,"account_id":"id-a","pending_items":['
+    queue_path.write_bytes(original_bytes)
+    observed = []
+    pipeline = FakePipeline()
+
+    runtime = MultiAccountRuntime(
+        config=FakeConfig([_account("a")]),
+        pipeline=pipeline,
+        queue_root=queue_root,
+        history_root=tmp_path / "history",
+        on_state=lambda account_id, state: observed.append((account_id, state)),
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+
+    state = runtime.snapshot("id-a")
+    assert state["recovery_required"] is True
+    assert state["phase"] == "blocked"
+    assert state["schedule"].enabled is False
+    assert state["schedule"].blocked_reason == "state_recovery_required"
+    assert state["schedule"].pending_count == 1
+    assert state["persistence_error"]
+    assert queue_path.read_bytes() == original_bytes
+
+    with pytest.raises(QueueStateRecoveryRequired):
+        runtime.enqueue("id-a", ["https://example.test/new"])
+    with pytest.raises(QueueStateRecoveryRequired):
+        runtime.start_account("id-a")
+    assert pipeline.calls == []
+    assert queue_path.read_bytes() == original_bytes
+    assert observed[-1][1]["schedule"].blocked_reason == "state_recovery_required"
+
+
+def test_refresh_does_not_requeue_or_rewrite_recovery_required_store(tmp_path):
+    config = FakeConfig([])
+    runtime = MultiAccountRuntime(
+        config=config,
+        pipeline=FakePipeline(),
+        queue_root=tmp_path / "queues",
+        history_root=tmp_path / "history",
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+    store = runtime.queue_store("id-a")
+    store.enqueue("https://example.test/current")
+    assert store.reserve_next() is not None
+    original_bytes = store.path.read_bytes()
+    store._enter_recovery_required("simulated_uncertain_state")
+
+    def must_not_requeue():
+        raise AssertionError("refresh must not mutate a quarantined queue")
+
+    store.requeue_current = must_not_requeue
+    config.accounts.append(_account("a"))
+    runtime.refresh_accounts()
+
+    state = runtime.snapshot("id-a")
+    assert state["current_item"] is not None
+    assert state["schedule"].blocked_reason == "state_recovery_required"
+    assert store.path.read_bytes() == original_bytes
+
+
+def test_start_all_skips_recovery_account_and_runs_healthy_account(tmp_path):
+    config = FakeConfig([_account("a"), _account("b")])
+    pipeline = FakePipeline()
+    runtime = MultiAccountRuntime(
+        config=config,
+        pipeline=pipeline,
+        queue_root=tmp_path / "queues",
+        history_root=tmp_path / "history",
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+    runtime.enqueue("id-a", ["https://example.test/a"])
+    runtime.enqueue("id-b", ["https://example.test/b"])
+    runtime.queue_store("id-a")._enter_recovery_required("simulated_corruption")
+    runtime.refresh_accounts()
+
+    runtime.start_all()
+    _wait_for_runtime(runtime)
+
+    assert pipeline.calls == ["https://example.test/b"]
+    assert runtime.snapshot("id-a")["schedule"].blocked_reason == (
+        "state_recovery_required"
+    )
+
+
+def test_stop_and_join_skips_quarantined_store_and_stops_active_worker():
+    stop_signal = threading.Event()
+    healthy_stop_calls = []
+
+    class QuarantinedStore:
+        recovery_required = True
+
+        def request_stop(self, _requested):
+            raise AssertionError("quarantined journal must not be mutated")
+
+    class HealthyStore:
+        recovery_required = False
+
+        def request_stop(self, requested):
+            healthy_stop_calls.append(requested)
+
+    class StopCoordinator:
+        def request_stop(self):
+            stop_signal.set()
+
+    runtime = object.__new__(MultiAccountRuntime)
+    runtime._lock = threading.RLock()
+    runtime._restart_requested = True
+    runtime._stores = {
+        "quarantined": QuarantinedStore(),
+        "healthy": HealthyStore(),
+    }
+    runtime._persistence_errors = {}
+    runtime._on_log = None
+    runtime._coordinator = StopCoordinator()
+    worker = threading.Thread(target=stop_signal.wait, daemon=True)
+    runtime._worker_thread = worker
+    worker.start()
+
+    assert runtime.stop_and_join(1) is True
+    assert healthy_stop_calls == [True]
+    assert stop_signal.is_set()
+    assert runtime.is_running is False
+
+
+def test_stop_between_thread_start_and_worker_entry_is_not_cleared(tmp_path):
+    pipeline = FakePipeline()
+    runtime = MultiAccountRuntime(
+        config=FakeConfig([_account("a")]),
+        pipeline=pipeline,
+        queue_root=tmp_path / "queues",
+        history_root=tmp_path / "history",
+        browser_factory=lambda profile_id: FakeAgent(profile_id),
+        helper_factory=lambda page: FakeHelper(page),
+        navigator=lambda _page: None,
+        quota_adapter=FakeQuota(),
+    )
+    runtime.enqueue("id-a", ["https://example.test/a"])
+    entered = threading.Event()
+    release_entry = threading.Event()
+    coordinator = runtime._coordinator
+    real_run_until_idle = coordinator.run_until_idle
+
+    def delayed_worker_entry(*, poll_seconds):
+        entered.set()
+        assert release_entry.wait(2)
+        real_run_until_idle(poll_seconds=poll_seconds)
+
+    coordinator.run_until_idle = delayed_worker_entry
+    runtime.start_account("id-a")
+    assert entered.wait(2)
+
+    runtime.stop_all()
+    release_entry.set()
+
+    assert runtime.wait_until_stopped(2) is True
+    assert pipeline.calls == []
+    assert len(runtime.snapshot("id-a")["pending_items"]) == 1

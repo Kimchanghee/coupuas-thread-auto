@@ -55,7 +55,7 @@ def test_main_window_reflows_at_compact_and_wide_sizes():
         )
         assert window._link_scroll.horizontalScrollBar().maximum() == 0
         compact_table = window._page_stack.width() < 900
-        assert window.link_table.isColumnHidden(2) is compact_table
+        assert not window.link_table.isColumnHidden(2), "작은 창에서도 원본 URL을 식별할 수 있어야 합니다"
         assert window.link_table.isColumnHidden(4) is compact_table
         assert window._settings_tab_bar.geometry().right() < settings_page.width()
         assert window._settings_scroll.geometry().right() < settings_page.width()

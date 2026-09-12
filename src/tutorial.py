@@ -8,6 +8,7 @@
 from PyQt6.QtCore import QPoint, QRect, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDialog,
     QFrame,
@@ -433,6 +434,7 @@ class _LegacyTutorialOverlay(QWidget):
         self._update_step()
 
     def show_overlay(self):
+        self._return_focus = QApplication.focusWidget()
         if self.parent():
             self.setGeometry(0, 0, self.parent().width(), self.parent().height())
         self.raise_()
@@ -772,6 +774,12 @@ class _LegacyTutorialOverlay(QWidget):
             if not config.save():
                 config.load()
         self.hide()
+        try:
+            previous = getattr(self, "_return_focus", None)
+            if previous is not None and previous.isVisible():
+                previous.setFocus(Qt.FocusReason.OtherFocusReason)
+        except RuntimeError:
+            pass
 
     def mousePressEvent(self, event):
         event.accept()
@@ -803,6 +811,7 @@ class TutorialOverlay(QWidget):
         self._update_step()
 
     def show_overlay(self):
+        self._return_focus = QApplication.focusWidget()
         if self.parent():
             self.setGeometry(self.parent().rect())
         self.raise_()
@@ -1078,6 +1087,12 @@ class TutorialOverlay(QWidget):
             if not config.save():
                 config.load()
         self.hide()
+        try:
+            previous = getattr(self, "_return_focus", None)
+            if previous is not None and previous.isVisible():
+                previous.setFocus(Qt.FocusReason.OtherFocusReason)
+        except RuntimeError:
+            pass
 
     def mousePressEvent(self, event):
         event.accept()

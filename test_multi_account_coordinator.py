@@ -147,3 +147,106 @@ def test_callback_exception_blocks_only_failing_account():
     assert calls == ["a", "b"]
     assert coordinator.snapshot("a").blocked_reason == "process_error"
     assert "browser failed" in coordinator.snapshot("a").last_error
+
+
+def test_callback_error_state_persistence_failure_is_reported_and_fails_closed():
+    state_errors = []
+
+    def process_one(_account_id):
+        raise RuntimeError("browser failed")
+
+    def persist_state(state):
+        if not state.running and state.blocked_reason == "process_error":
+            raise OSError("failed-state write denied")
+
+    coordinator = MultiAccountCoordinator(
+        process_one,
+        on_state=persist_state,
+        on_state_error=lambda state, exc: state_errors.append((state, exc)),
+    )
+    coordinator.register_account("a", pending_count=1, enabled=True)
+
+    assert coordinator.run_once() is True
+    state = coordinator.snapshot("a")
+    assert state.enabled is False
+    assert state.running is False
+    assert state.blocked_reason == "state_persistence_failed"
+    assert "failed-state write denied" in state.last_error
+    assert len(state_errors) == 1
+
+
+def test_state_persistence_failure_blocks_before_process_callback():
+    process_calls = []
+    state_errors = []
+
+    def persist_state(state):
+        if state.account_id == "a" and state.running:
+            raise OSError("disk full")
+
+    coordinator = MultiAccountCoordinator(
+        lambda account_id: process_calls.append(account_id),
+        on_state=persist_state,
+        on_state_error=lambda state, exc: state_errors.append((state, exc)),
+    )
+    coordinator.register_account("a", pending_count=1, enabled=True)
+
+    assert coordinator.run_once() is True
+    assert process_calls == []
+    state = coordinator.snapshot("a")
+    assert state.enabled is False
+    assert state.running is False
+    assert state.blocked_reason == "state_persistence_failed"
+    assert "disk full" in state.last_error
+    assert len(state_errors) == 1
+
+
+def test_result_persistence_failure_blocks_future_items():
+    process_calls = []
+    state_errors = []
+
+    def process_one(account_id):
+        process_calls.append(account_id)
+        return AccountRunResult(processed=True, pending_count=1)
+
+    def persist_state(state):
+        if not state.running and process_calls:
+            raise PermissionError("write denied")
+
+    coordinator = MultiAccountCoordinator(
+        process_one,
+        on_state=persist_state,
+        on_state_error=lambda state, exc: state_errors.append((state, exc)),
+    )
+    coordinator.register_account("a", pending_count=2, enabled=True)
+
+    assert coordinator.run_once() is True
+    assert process_calls == ["a"]
+    assert coordinator.run_once() is False
+    state = coordinator.snapshot("a")
+    assert state.blocked_reason == "state_persistence_failed"
+    assert state.pending_count == 1
+    assert len(state_errors) == 1
+
+
+def test_update_persistence_failure_is_returned_as_blocked_state():
+    errors = []
+    fail_updates = False
+
+    def persist_state(_state):
+        if fail_updates:
+            raise OSError("read only")
+
+    coordinator = MultiAccountCoordinator(
+        lambda _account_id: AccountRunResult(processed=False, pending_count=0),
+        on_state=persist_state,
+        on_state_error=lambda state, exc: errors.append((state, exc)),
+    )
+    coordinator.register_account("a", pending_count=1)
+    fail_updates = True
+
+    updated = coordinator.update_account("a", enabled=True)
+
+    assert updated.enabled is False
+    assert updated.blocked_reason == "state_persistence_failed"
+    assert coordinator.snapshot("a") == updated
+    assert len(errors) == 1

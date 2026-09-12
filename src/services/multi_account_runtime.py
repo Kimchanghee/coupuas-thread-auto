@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Optional
 
@@ -10,6 +11,10 @@ from src.services.account_queue import AccountQueueStore
 from src.services.link_history import LinkHistory, normalize_history_url
 from src.services.multi_account_coordinator import MultiAccountCoordinator
 from src.services.multi_account_upload_runner import MultiAccountUploadRunner
+
+
+class StatePersistenceError(RuntimeError):
+    """Raised when an account scheduling transition cannot be made durable."""
 
 
 class MultiAccountRuntime:
@@ -42,6 +47,7 @@ class MultiAccountRuntime:
         self._lock = threading.RLock()
         self._stores: Dict[str, AccountQueueStore] = {}
         self._histories: Dict[str, LinkHistory] = {}
+        self._persistence_errors: Dict[str, str] = {}
         self._worker_thread: Optional[threading.Thread] = None
         self._worker_generation = 0
         self._restart_requested = False
@@ -49,6 +55,7 @@ class MultiAccountRuntime:
         self._coordinator = MultiAccountCoordinator(
             self._runner.process_one,
             on_state=self._handle_schedule_state,
+            on_state_error=self._handle_schedule_state_error,
         )
         self.refresh_accounts()
 
@@ -94,6 +101,11 @@ class MultiAccountRuntime:
     def _handle_schedule_state(self, state) -> None:
         store = self._stores.get(state.account_id)
         if store is not None:
+            if store.recovery_required:
+                message = "대기열 원본을 확인할 수 없어 수동 복구가 필요합니다."
+                self._persistence_errors[state.account_id] = message
+                self._emit_state(state.account_id)
+                return
             phase = "blocked" if state.blocked else (
                 "running" if state.running else (
                     "waiting"
@@ -107,8 +119,19 @@ class MultiAccountRuntime:
                     next_allowed_at=state.next_allowed_at or None,
                     last_error=state.last_error or state.blocked_reason or None,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                message = f"스케줄 상태를 저장하지 못했습니다: {exc}"
+                self._persistence_errors[state.account_id] = message
+                raise StatePersistenceError(message) from exc
+        self._persistence_errors.pop(state.account_id, None)
+        self._emit_state(state.account_id)
+
+    def _handle_schedule_state_error(self, state, exc: Exception) -> None:
+        message = self._persistence_errors.get(state.account_id) or (
+            f"스케줄 상태를 저장하지 못했습니다: {exc}"
+        )
+        self._persistence_errors[state.account_id] = message
+        self._emit_log(state.account_id, message)
         self._emit_state(state.account_id)
 
     def queue_store(self, account_id: str) -> AccountQueueStore:
@@ -177,6 +200,7 @@ class MultiAccountRuntime:
                 if account.account_id in existing
                 else None
             )
+            recovery_required = bool(snapshot.get("recovery_required"))
             current_item = snapshot.get("current_item")
             current_stage = (
                 str(current_item.get("stage") or "")
@@ -184,7 +208,8 @@ class MultiAccountRuntime:
                 else ""
             )
             if (
-                isinstance(current_item, dict)
+                not recovery_required
+                and isinstance(current_item, dict)
                 and current_stage in {"", "parsing"}
                 and not (existing_state is not None and existing_state.running)
             ):
@@ -197,12 +222,25 @@ class MultiAccountRuntime:
                     else ""
                 )
             persisted_block_reason = (
-                "uncertain_external_post"
+                "state_recovery_required"
+                if recovery_required
+                else "uncertain_external_post"
                 if current_stage in {"posting", "posting_unknown"}
                 else ""
             )
-            pending_count = len(snapshot.get("pending_items") or []) + (
+            known_pending_count = len(snapshot.get("pending_items") or []) + (
                 1 if snapshot.get("current_item") else 0
+            )
+            pending_count = (
+                max(
+                    1,
+                    known_pending_count,
+                    int(existing_state.pending_count or 0)
+                    if existing_state is not None
+                    else 0,
+                )
+                if recovery_required
+                else known_pending_count
             )
             next_allowed_at = snapshot.get("next_allowed_at")
             try:
@@ -242,6 +280,7 @@ class MultiAccountRuntime:
 
     def enqueue(self, account_id: str, items: Iterable) -> int:
         store = self.queue_store(account_id)
+        store.assert_mutable()
         history = self.link_history(account_id)
         initial_state = store.snapshot()
         known_urls = {
@@ -299,7 +338,18 @@ class MultiAccountRuntime:
             schedule = self._coordinator.snapshot(account_id)
         except KeyError:
             schedule = None
+        if store_state.get("recovery_required") and schedule is not None:
+            schedule = replace(
+                schedule,
+                enabled=False,
+                running=False,
+                blocked_reason="state_recovery_required",
+                last_error="state_recovery_required",
+            )
         store_state["schedule"] = schedule
+        persistence_error = self._persistence_errors.get(str(account_id or ""))
+        if persistence_error:
+            store_state["persistence_error"] = persistence_error
         return store_state
 
     def snapshots(self) -> Dict[str, dict]:
@@ -310,6 +360,7 @@ class MultiAccountRuntime:
 
     def start_account(self, account_id: str) -> None:
         store = self.queue_store(account_id)
+        store.assert_mutable()
         store.request_stop(False)
         state = store.snapshot()
         pending_count = len(state.get("pending_items") or []) + (
@@ -326,7 +377,19 @@ class MultiAccountRuntime:
 
     def start_all(self) -> None:
         for account in self._config.get_threads_accounts():
-            self.queue_store(account.account_id).request_stop(False)
+            store = self.queue_store(account.account_id)
+            if store.recovery_required:
+                try:
+                    self._coordinator.update_account(
+                        account.account_id,
+                        enabled=False,
+                        blocked_reason="state_recovery_required",
+                        last_error="state_recovery_required",
+                    )
+                except KeyError:
+                    pass
+                continue
+            store.request_stop(False)
         self._coordinator.start_all()
         self._ensure_worker()
 
@@ -356,9 +419,20 @@ class MultiAccountRuntime:
     def stop_all(self) -> None:
         with self._lock:
             self._restart_requested = False
-        for store in list(self._stores.values()):
-            store.request_stop(True)
-        self._coordinator.request_stop()
+        try:
+            for account_id, store in list(self._stores.items()):
+                if store.recovery_required:
+                    continue
+                try:
+                    store.request_stop(True)
+                except Exception as exc:
+                    message = f"중지 상태를 저장하지 못했습니다: {exc}"
+                    self._persistence_errors[account_id] = message
+                    self._emit_log(account_id, message)
+        finally:
+            # The in-memory scheduler stop is independent of any one account's
+            # damaged or unwritable journal and must always reach the worker.
+            self._coordinator.request_stop()
 
     def wait_until_stopped(self, timeout: float) -> bool:
         """Wait for the active worker without holding the runtime lock."""

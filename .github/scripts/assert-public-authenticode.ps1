@@ -3,22 +3,31 @@ param(
   [string]$Path,
 
   [Parameter(Mandatory = $true)]
-  [string]$ExpectedThumbprint,
-
-  [switch]$AllowPinnedSelfSigned
+  [string]$TrustedThumbprints
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if ($AllowPinnedSelfSigned -and $env:GITHUB_ACTIONS -eq "true") {
-  throw "AllowPinnedSelfSigned is restricted to explicit local development use."
-}
-
-function Normalize-Thumbprint {
+function ConvertTo-TrustedThumbprintSet {
   param([Parameter(Mandatory = $true)][string]$Value)
 
-  return ($Value -replace "\s", "").ToUpperInvariant()
+  $pins = @(
+    $Value -split "[,;\s]+" |
+      Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+      ForEach-Object {
+        $normalized = ($_ -replace "[^a-fA-F0-9]", "").ToUpperInvariant()
+        if ($normalized -notmatch "^[A-F0-9]{40}$") {
+          throw "Invalid SHA-1 certificate thumbprint: $_"
+        }
+        $normalized
+      } |
+      Select-Object -Unique
+  )
+  if ($pins.Count -lt 1 -or $pins.Count -gt 2) {
+    throw "TrustedThumbprints must contain one pin, or current,next during rotation."
+  }
+  return $pins
 }
 
 function Assert-TrustedChain {
@@ -27,7 +36,10 @@ function Assert-TrustedChain {
     [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate,
 
     [Parameter(Mandatory = $true)]
-    [string]$Description
+    [string]$Description,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ApplicationPolicyOid
   )
 
   $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
@@ -35,54 +47,23 @@ function Assert-TrustedChain {
     $chain.ChainPolicy.RevocationMode =
       [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
     $chain.ChainPolicy.RevocationFlag =
-      [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
-    # Get-AuthenticodeSignature already validates certificate time at the trusted
-    # timestamp. Ignore current-time expiry here while still requiring a trusted,
-    # non-revoked public chain.
+      [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
     $chain.ChainPolicy.VerificationFlags =
-      [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::IgnoreNotTimeValid
+      [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
     $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(20)
+    [void]$chain.ChainPolicy.ApplicationPolicy.Add(
+      [System.Security.Cryptography.Oid]::new($ApplicationPolicyOid)
+    )
 
     if (-not $chain.Build($Certificate)) {
       $details = ($chain.ChainStatus | ForEach-Object {
           "{0}: {1}" -f $_.Status, $_.StatusInformation.Trim()
         }) -join "; "
-      throw "$Description certificate does not chain to a publicly trusted root: $details"
+      throw "$Description certificate does not chain to a non-revoked public root: $details"
     }
-
     $root = $chain.ChainElements[$chain.ChainElements.Count - 1].Certificate
     if ($root.Thumbprint -eq $Certificate.Thumbprint) {
-      throw "$Description certificate is self-signed and is not acceptable for a public release."
-    }
-  } finally {
-    $chain.Dispose()
-  }
-}
-
-function Assert-PinnedSelfSignedChain {
-  param(
-    [Parameter(Mandatory = $true)]
-    [System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate
-  )
-
-  if ($Certificate.Subject -ne $Certificate.Issuer) {
-    throw "Pinned fallback signer must be self-signed."
-  }
-
-  $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
-  try {
-    $chain.ChainPolicy.RevocationMode =
-      [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-    $chain.ChainPolicy.VerificationFlags =
-      [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
-    $built = $chain.Build($Certificate)
-    $statuses = @($chain.ChainStatus | ForEach-Object { $_.Status.ToString() })
-    $unexpected = @($statuses | Where-Object { $_ -ne "UntrustedRoot" })
-    if ($built -or $statuses.Count -eq 0 -or $unexpected.Count -gt 0) {
-      throw "Pinned fallback signer has an unexpected certificate state: $($statuses -join ', ')"
-    }
-    if ($chain.ChainElements.Count -ne 1) {
-      throw "Pinned fallback signer must have a one-certificate chain."
+      throw "$Description certificate must not be self-signed."
     }
   } finally {
     $chain.Dispose()
@@ -93,26 +74,18 @@ if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
   throw "Artifact not found: $Path"
 }
 
+$trusted = ConvertTo-TrustedThumbprintSet -Value $TrustedThumbprints
 $signature = Get-AuthenticodeSignature -FilePath $Path
+if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
+  throw "Public Authenticode validation failed for ${Path}: $($signature.Status) - $($signature.StatusMessage)"
+}
 if (-not $signature.SignerCertificate) {
   throw "Artifact has no signer certificate: $Path"
 }
 
-$isPubliclyTrusted =
-  $signature.Status -eq [System.Management.Automation.SignatureStatus]::Valid
-if (-not $isPubliclyTrusted) {
-  $allowedPinnedStatus =
-    $signature.Status -eq [System.Management.Automation.SignatureStatus]::NotTrusted -or
-    $signature.Status -eq [System.Management.Automation.SignatureStatus]::UnknownError
-  if (-not $AllowPinnedSelfSigned -or -not $allowedPinnedStatus) {
-    throw "Public Authenticode validation failed for ${Path}: $($signature.Status) - $($signature.StatusMessage)"
-  }
-}
-
-$expected = Normalize-Thumbprint $ExpectedThumbprint
-$actual = Normalize-Thumbprint $signature.SignerCertificate.Thumbprint
-if ($actual -ne $expected) {
-  throw "Signed artifact thumbprint mismatch. Expected $expected, got $actual."
+$actual = ($signature.SignerCertificate.Thumbprint -replace "[^a-fA-F0-9]", "").ToUpperInvariant()
+if ($actual -notin $trusted) {
+  throw "Signed artifact thumbprint is not pinned. Allowed: $($trusted -join ', '); got $actual."
 }
 
 $codeSigningOid = "1.3.6.1.5.5.7.3.3"
@@ -124,16 +97,17 @@ if (-not $hasCodeSigningEku) {
   throw "Signer certificate is missing the Code Signing EKU: $actual"
 }
 
-if ($isPubliclyTrusted) {
-  Assert-TrustedChain -Certificate $signature.SignerCertificate -Description "Signer"
-} else {
-  Assert-PinnedSelfSignedChain -Certificate $signature.SignerCertificate
-}
-
+Assert-TrustedChain `
+  -Certificate $signature.SignerCertificate `
+  -Description "Signer" `
+  -ApplicationPolicyOid $codeSigningOid
 if (-not $signature.TimeStamperCertificate) {
   throw "Artifact is not timestamped: $Path"
 }
-Assert-TrustedChain -Certificate $signature.TimeStamperCertificate -Description "Timestamp"
+Assert-TrustedChain `
+  -Certificate $signature.TimeStamperCertificate `
+  -Description "Timestamp" `
+  -ApplicationPolicyOid "1.3.6.1.5.5.7.3.8"
 
 Write-Host "Release Authenticode signature verified: $Path"
 Write-Host "Signer: $($signature.SignerCertificate.Subject)"

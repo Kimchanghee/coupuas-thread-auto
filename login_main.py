@@ -67,7 +67,9 @@ from src.theme import Colors, Typography, resolve_fonts
 from src.app_logging import setup_logging
 from src.app_icon import apply_app_icon_to_application
 from src.hidpi import configure_high_dpi, center_window
-VERSION = "v3.2.3"
+from src.version import VERSION_TAG
+
+VERSION = VERSION_TAG
 logger = logging.getLogger(__name__)
 APP_ICON_REL_PATH = Path("images") / "app_icon.ico"
 
@@ -296,7 +298,7 @@ def main():
     if single_instance_guard is None:
         return
 
-    log_file = setup_logging(capture_print=True)
+    log_file = setup_logging(capture_print=False)
     logger.info("애플리케이션을 시작합니다.")
     logger.info("로그 파일 경로: %s", log_file)
     _sync_auto_start_setting()

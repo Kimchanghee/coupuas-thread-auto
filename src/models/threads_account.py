@@ -78,6 +78,8 @@ class ThreadsAccount:
     updated_at: str = ""
     last_verified_username: str = ""
     last_verified_at: str = ""
+    last_check_status: str = ""
+    last_checked_at: str = ""
 
     def __post_init__(self) -> None:
         try:
@@ -138,6 +140,8 @@ class ThreadsAccount:
             "updated_at": self.updated_at,
             "last_verified_username": self.last_verified_username,
             "last_verified_at": self.last_verified_at,
+            "last_check_status": self.last_check_status,
+            "last_checked_at": self.last_checked_at,
         }
 
     def updated(self, **changes: Any) -> "ThreadsAccount":

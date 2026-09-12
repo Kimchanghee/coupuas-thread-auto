@@ -187,3 +187,27 @@ def test_resume_waits_for_previous_runtime_worker(monkeypatch):
     window._multi_account_runtime.is_running = False
     callbacks.pop()()
     assert window.resumed == [marker]
+
+
+def test_malformed_worker_resume_marker_is_ignored(monkeypatch):
+    errors = []
+
+    class FakeWindow:
+        _update_installing = True
+        update_btn = _Button()
+        _update_dialog = None
+
+        def _resume_update_work_when_ready(self, _marker):
+            raise AssertionError("malformed worker payload must not reach resume")
+
+    monkeypatch.setattr(main_window, "show_error", lambda *args: errors.append(args))
+    window = FakeWindow()
+
+    main_window.MainWindow._apply_update_install_result(
+        window,
+        {"success": False, "resume_marker": "not-a-dict", "message": "failed"},
+    )
+
+    assert window._update_installing is False
+    assert window.update_btn.enabled is True
+    assert errors and errors[0][2] == "failed"

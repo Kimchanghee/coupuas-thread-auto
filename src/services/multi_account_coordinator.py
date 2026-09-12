@@ -45,11 +45,15 @@ class MultiAccountCoordinator:
         clock: Callable[[], float] = time.time,
         sleeper: Callable[[float], None] = time.sleep,
         on_state: Optional[Callable[[AccountScheduleState], None]] = None,
+        on_state_error: Optional[
+            Callable[[AccountScheduleState, Exception], None]
+        ] = None,
     ):
         self._process_one = process_one
         self._clock = clock
         self._sleeper = sleeper
         self._on_state = on_state
+        self._on_state_error = on_state_error
         self._lock = threading.RLock()
         self._states: Dict[str, AccountScheduleState] = {}
         self._order: list[str] = []
@@ -100,7 +104,10 @@ class MultiAccountCoordinator:
                     last_error=state.last_error,
                 )
                 self._states[account_id] = state
-        self._emit(state)
+        try:
+            self._emit(state)
+        except Exception as exc:
+            return self._block_after_state_error(account_id, exc)
         return state
 
     def set_process_one(
@@ -159,7 +166,10 @@ class MultiAccountCoordinator:
                 raise KeyError(account_id)
             updated = replace(current, **changes)
             self._states[account_id] = updated
-        self._emit(updated)
+        try:
+            self._emit(updated)
+        except Exception as exc:
+            return self._block_after_state_error(account_id, exc)
         return updated
 
     def start_account(self, account_id: str) -> AccountScheduleState:
@@ -218,6 +228,26 @@ class MultiAccountCoordinator:
         if self._on_state is not None:
             self._on_state(replace(state))
 
+    def _block_after_state_error(
+        self,
+        account_id: str,
+        exc: Exception,
+    ) -> AccountScheduleState:
+        """Fail one account closed when its durable state cannot be committed."""
+        with self._lock:
+            current = self._states[account_id]
+            failed = replace(
+                current,
+                enabled=False,
+                running=False,
+                blocked_reason="state_persistence_failed",
+                last_error=str(exc)[:300] or "state persistence failed",
+            )
+            self._states[account_id] = failed
+        if self._on_state_error is not None:
+            self._on_state_error(replace(failed), exc)
+        return failed
+
     def _next_eligible(self) -> Optional[str]:
         now = self._clock()
         with self._lock:
@@ -253,7 +283,13 @@ class MultiAccountCoordinator:
             state = self._states[account_id]
             running_state = replace(state, running=True, last_error="")
             self._states[account_id] = running_state
-        self._emit(running_state)
+        try:
+            self._emit(running_state)
+        except Exception as exc:
+            # The state sink is part of the transition commit. Never invoke the
+            # external posting callback when the running phase was not durable.
+            self._block_after_state_error(account_id, exc)
+            return True
 
         try:
             result = self._process_one(account_id)
@@ -269,7 +305,10 @@ class MultiAccountCoordinator:
                     last_error=str(exc)[:300],
                 )
                 self._states[account_id] = failed_state
-            self._emit(failed_state)
+            try:
+                self._emit(failed_state)
+            except Exception as state_exc:
+                self._block_after_state_error(account_id, state_exc)
             return True
 
         now = self._clock()
@@ -297,12 +336,16 @@ class MultiAccountCoordinator:
                 last_error=block_reason if block_reason else "",
             )
             self._states[account_id] = updated
-        self._emit(updated)
+        try:
+            self._emit(updated)
+        except Exception as exc:
+            # Processing already happened, so retain its pending-count result but
+            # prevent another item from starting until persistence is repaired.
+            self._block_after_state_error(account_id, exc)
         return True
 
     def run_until_idle(self, *, poll_seconds: float = 0.1) -> None:
         """Run until no enabled account has pending work or stop is requested."""
-        self._stop_event.clear()
         while not self._stop_event.is_set():
             if self.run_once():
                 continue

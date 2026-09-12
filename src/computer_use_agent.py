@@ -92,12 +92,27 @@ class ComputerUseAgent:
     }
     PLAYWRIGHT_INSTALL_TIMEOUT_SEC = 300
 
-    def __init__(self, api_key: Optional[str] = None, headless: bool = False, profile_dir: str = ".threads_profile"):
+    SESSION_FILENAME = "storage_state.sec"
+    SESSION_STAGE_PREFIX = f"{SESSION_FILENAME}.stage."
+    SESSION_BACKUP_PREFIX = f"{SESSION_FILENAME}.backup."
+    SESSION_TEMP_SUFFIX = ".tmp"
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        headless: bool = False,
+        profile_dir: str = ".threads_profile",
+        load_saved_session: bool = True,
+    ):
         """
         Args:
             api_key: Google API key
             headless: whether to run browser in headless mode
             profile_dir: logical profile id (used to derive encrypted session path)
+            load_saved_session: default for whether ``start_browser`` restores the
+                encrypted saved session. Login/relogin flows should pass ``False``
+                so the previous verified session remains untouched while a fresh
+                candidate is verified.
         """
         resolved_api_key = str(
             api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
@@ -115,6 +130,7 @@ class ComputerUseAgent:
         self.context = None
         self.page: Optional[Page] = None
         self.headless = headless
+        self._load_saved_session_default = bool(load_saved_session)
 
         self.profile_name = self._normalize_profile_name(profile_dir)
         self.profile_path = self._resolve_profile_path(self.profile_name)
@@ -201,11 +217,13 @@ class ComputerUseAgent:
     def _resolve_profile_path(profile_name: str) -> Path:
         root = Path.home() / ".shorts_thread_maker" / "sessions"
         root.mkdir(parents=True, exist_ok=True)
-        secure_dir_permissions(root)
+        if not secure_dir_permissions(root):
+            raise PermissionError("브라우저 세션 루트 디렉터리 권한을 보호하지 못했습니다.")
 
         profile_path = root / profile_name
         profile_path.mkdir(parents=True, exist_ok=True)
-        secure_dir_permissions(profile_path)
+        if not secure_dir_permissions(profile_path):
+            raise PermissionError("브라우저 세션 디렉터리 권한을 보호하지 못했습니다.")
         return profile_path
 
     @staticmethod
@@ -225,20 +243,83 @@ class ComputerUseAgent:
         return resolved if resolved.parent == root else None
 
     def _get_storage_state_path(self) -> str:
-        return str(self.profile_path / "storage_state.sec")
+        return str(self.profile_path / self.SESSION_FILENAME)
+
+    def _ensure_session_directory_acl(self) -> bool:
+        try:
+            profile_path = Path(self.profile_path)
+            return (
+                profile_path.exists()
+                and profile_path.is_dir()
+                and secure_dir_permissions(profile_path)
+            )
+        except Exception:
+            logger.exception("브라우저 세션 디렉터리 권한 확인에 실패했습니다.")
+            return False
+
+    @staticmethod
+    def _fsync_directory(path: Path) -> bool:
+        """Flush directory metadata where the platform exposes that operation."""
+        if os.name == "nt":
+            # Windows has no portable Python API for opening a directory handle
+            # with the flags required by FlushFileBuffers. ``os.replace`` still
+            # provides the atomic namespace transition used by this transaction.
+            return True
+        descriptor: Optional[int] = None
+        try:
+            descriptor = os.open(str(path), os.O_RDONLY)
+            os.fsync(descriptor)
+            return True
+        except OSError:
+            logger.exception("브라우저 세션 디렉터리 동기화에 실패했습니다.")
+            return False
+        finally:
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    def _is_valid_staged_session_path(self, value: Any) -> bool:
+        try:
+            candidate = Path(value).resolve(strict=False)
+            profile_path = Path(self.profile_path).resolve(strict=False)
+        except (OSError, TypeError, ValueError):
+            return False
+        return (
+            candidate.parent == profile_path
+            and candidate.name.startswith(self.SESSION_STAGE_PREFIX)
+            and candidate.name.endswith(self.SESSION_TEMP_SUFFIX)
+            and candidate.name != self.SESSION_FILENAME
+        )
 
     def _load_storage_state(self) -> Optional[Dict[str, Any]]:
         secure_path = Path(self._get_storage_state_path())
+        if not self._ensure_session_directory_acl():
+            logger.error("브라우저 세션 디렉터리가 안전하지 않아 저장 세션을 불러오지 않습니다.")
+            return None
         if secure_path.exists():
             try:
+                if secure_path.is_symlink() or not secure_path.is_file():
+                    raise RuntimeError("브라우저 세션 파일 형식이 안전하지 않습니다.")
+                if not secure_file_permissions(secure_path):
+                    raise PermissionError("브라우저 세션 파일 권한을 보호하지 못했습니다.")
                 payload = secure_path.read_text(encoding="utf-8")
+                if not payload.startswith(("dpapi:", "fernet:")):
+                    raise RuntimeError("브라우저 세션 파일이 암호화되어 있지 않습니다.")
                 plain = unprotect_secret(payload)
                 if plain:
                     data = json.loads(plain)
-                    if isinstance(data, dict):
+                    if self.is_valid_storage_state(data):
                         return data
             except Exception:
-                pass
+                logger.warning(
+                    "암호화된 브라우저 세션을 안전하게 불러오지 못했습니다.",
+                    exc_info=True,
+                )
+            # An existing secure-session path is authoritative. Do not fall
+            # back to an older plaintext file when it is corrupt or unsafe.
+            return None
 
         # Legacy plaintext migration path.
         legacy_path = (
@@ -248,8 +329,12 @@ class ComputerUseAgent:
         )
         if legacy_path is not None and legacy_path.exists():
             try:
+                if legacy_path.is_symlink() or not legacy_path.is_file():
+                    raise RuntimeError("레거시 브라우저 세션 파일 형식이 안전하지 않습니다.")
+                if not secure_file_permissions(legacy_path):
+                    raise PermissionError("레거시 브라우저 세션 파일 권한을 보호하지 못했습니다.")
                 data = json.loads(legacy_path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
+                if self.is_valid_storage_state(data):
                     # Migrate immediately so plaintext session does not linger.
                     if self._write_storage_state(data):
                         return data
@@ -258,23 +343,114 @@ class ComputerUseAgent:
 
         return None
 
-    def _write_storage_state(self, state: Dict[str, Any]) -> bool:
-        secure_path = Path(self._get_storage_state_path())
-        legacy_path = (
-            self.legacy_profile_path / "storage_state.json"
-            if self.legacy_profile_path is not None
-            else None
-        )
-        payload = json.dumps(state, ensure_ascii=False)
-        protected = protect_secret(payload, f"shorts_thread_maker.session.{self.profile_name}")
-        if not protected:
-            # Fail closed: remove legacy plaintext even when secure storage is unavailable.
-            if legacy_path is not None and legacy_path.exists():
-                try:
-                    legacy_path.unlink()
-                except OSError:
-                    pass
+    @staticmethod
+    def is_valid_storage_state(state: Any) -> bool:
+        """Validate the minimum Playwright storage-state contract."""
+        if not isinstance(state, dict):
             return False
+        cookies = state.get("cookies")
+        origins = state.get("origins")
+        if not isinstance(cookies, list) or not isinstance(origins, list):
+            return False
+        if any(not isinstance(cookie, dict) for cookie in cookies):
+            return False
+        for origin in origins:
+            if not isinstance(origin, dict):
+                return False
+            if not isinstance(origin.get("origin"), str):
+                return False
+            local_storage = origin.get("localStorage")
+            if not isinstance(local_storage, list):
+                return False
+            if any(not isinstance(item, dict) for item in local_storage):
+                return False
+        return True
+
+    def capture_session_state(self) -> Dict[str, Any]:
+        """Capture the current browser state without persisting it."""
+        if not self.context:
+            raise RuntimeError("저장할 브라우저 세션이 없습니다.")
+        state = self.context.storage_state()
+        if not self.is_valid_storage_state(state):
+            raise RuntimeError("브라우저 세션 형식이 올바르지 않습니다.")
+        return state
+
+    def validate_session_state_identity(
+        self,
+        state: Dict[str, Any],
+        expected_username: str,
+        *,
+        timeout: int = 15000,
+    ) -> bool:
+        """Verify a captured state in a disposable browser context."""
+        expected = str(expected_username or "").strip()
+        if not expected or not self.is_valid_storage_state(state) or self.browser is None:
+            return False
+
+        validation_context = None
+        try:
+            validation_context = self.browser.new_context(
+                viewport={"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
+                storage_state=state,
+            )
+
+            def _guard_document_navigation(route, request):
+                try:
+                    if (
+                        request.resource_type == "document"
+                        and not self._is_allowed_document_request(request.url)
+                    ):
+                        route.abort()
+                        return
+                except Exception:
+                    route.abort()
+                    return
+                route.continue_()
+
+            validation_context.route("**/*", _guard_document_navigation)
+            validation_page = validation_context.new_page()
+
+            from src.threads_navigation import goto_threads_with_fallback
+            from src.threads_playwright_helper import ThreadsPlaywrightHelper
+
+            goto_threads_with_fallback(
+                validation_page,
+                path="/",
+                timeout=max(1000, int(timeout)),
+                retries_per_url=1,
+                logger=logger,
+            )
+            helper = ThreadsPlaywrightHelper(validation_page)
+            return bool(
+                helper.check_login_status()
+                and helper.verify_account(expected)
+            )
+        except Exception:
+            logger.warning(
+                "후보 브라우저 세션의 Threads 계정을 검증하지 못했습니다.",
+                exc_info=True,
+            )
+            return False
+        finally:
+            if validation_context is not None:
+                try:
+                    validation_context.close()
+                except Exception:
+                    logger.warning("후보 세션 검증 컨텍스트를 닫지 못했습니다.")
+
+    def stage_session(self, state: Optional[Dict[str, Any]] = None) -> Path:
+        """Encrypt and fsync a candidate session in a protected sibling file."""
+        candidate_state = self.capture_session_state() if state is None else state
+        if not self.is_valid_storage_state(candidate_state):
+            raise RuntimeError("브라우저 세션 형식이 올바르지 않습니다.")
+        if not self._ensure_session_directory_acl():
+            raise PermissionError("브라우저 세션 디렉터리 권한을 보호하지 못했습니다.")
+
+        secure_path = Path(self._get_storage_state_path())
+        payload = json.dumps(candidate_state, ensure_ascii=False)
+        protected = protect_secret(payload, f"shorts_thread_maker.session.{self.profile_name}")
+        if not protected or not str(protected).startswith(("dpapi:", "fernet:")):
+            raise RuntimeError("브라우저 세션을 암호화하지 못했습니다.")
 
         temp_path: Optional[Path] = None
         try:
@@ -282,34 +458,211 @@ class ComputerUseAgent:
                 mode="w",
                 encoding="utf-8",
                 dir=str(secure_path.parent),
-                prefix=f"{secure_path.name}.",
-                suffix=".tmp",
+                prefix=self.SESSION_STAGE_PREFIX,
+                suffix=self.SESSION_TEMP_SUFFIX,
                 delete=False,
             ) as handle:
                 handle.write(protected)
                 handle.flush()
                 os.fsync(handle.fileno())
                 temp_path = Path(handle.name)
-            secure_file_permissions(temp_path)
-            os.replace(temp_path, secure_path)
-            secure_file_permissions(secure_path)
+
+            if not secure_file_permissions(temp_path):
+                raise PermissionError("후보 브라우저 세션 파일 권한을 보호하지 못했습니다.")
+            if not self._ensure_session_directory_acl():
+                raise PermissionError("브라우저 세션 디렉터리 권한을 다시 확인하지 못했습니다.")
+            return temp_path
         except Exception:
-            logger.exception("암호화된 브라우저 세션을 저장하지 못했습니다.")
-            return False
-        finally:
             if temp_path is not None:
                 try:
                     temp_path.unlink(missing_ok=True)
                 except OSError:
+                    logger.warning("실패한 후보 브라우저 세션을 삭제하지 못했습니다.")
+            raise
+
+    def _copy_previous_session_for_rollback(self, secure_path: Path) -> Path:
+        backup_path: Optional[Path] = None
+        try:
+            with secure_path.open("rb") as source, tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=str(secure_path.parent),
+                prefix=self.SESSION_BACKUP_PREFIX,
+                suffix=self.SESSION_TEMP_SUFFIX,
+                delete=False,
+            ) as backup:
+                backup_path = Path(backup.name)
+                while True:
+                    chunk = source.read(64 * 1024)
+                    if not chunk:
+                        break
+                    backup.write(chunk)
+                backup.flush()
+                os.fsync(backup.fileno())
+            if not secure_file_permissions(backup_path):
+                raise PermissionError("기존 브라우저 세션 백업 권한을 보호하지 못했습니다.")
+            return backup_path
+        except Exception:
+            if backup_path is not None:
+                try:
+                    backup_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
+
+    def _rollback_session_replace(
+        self,
+        secure_path: Path,
+        backup_path: Optional[Path],
+        had_previous: bool,
+    ) -> bool:
+        restore_path: Optional[Path] = None
+        try:
+            if had_previous:
+                if backup_path is None or not backup_path.exists():
+                    return False
+                # Restore from a copy so the only exact rollback backup remains
+                # available until ACL and durability checks all succeed.
+                with backup_path.open("rb") as source, tempfile.NamedTemporaryFile(
+                    mode="wb",
+                    dir=str(secure_path.parent),
+                    prefix=f"{self.SESSION_FILENAME}.restore.",
+                    suffix=self.SESSION_TEMP_SUFFIX,
+                    delete=False,
+                ) as restore:
+                    restore_path = Path(restore.name)
+                    while True:
+                        chunk = source.read(64 * 1024)
+                        if not chunk:
+                            break
+                        restore.write(chunk)
+                    restore.flush()
+                    os.fsync(restore.fileno())
+                if not secure_file_permissions(restore_path):
+                    return False
+                os.replace(restore_path, secure_path)
+                restore_path = None
+                acl_ok = secure_file_permissions(secure_path)
+            else:
+                secure_path.unlink(missing_ok=True)
+                acl_ok = True
+            return acl_ok and self._fsync_directory(secure_path.parent)
+        except Exception:
+            logger.exception("기존 브라우저 세션 복원에 실패했습니다.")
+            return False
+        finally:
+            if restore_path is not None:
+                try:
+                    restore_path.unlink(missing_ok=True)
+                except OSError:
                     pass
 
-        # Remove legacy plaintext if present.
+    def commit_staged_session(self, staged_path: Any) -> bool:
+        """Atomically replace the saved session, rolling back every failed commit."""
+        if not self._is_valid_staged_session_path(staged_path):
+            logger.error("프로필 디렉터리 밖의 후보 브라우저 세션 커밋을 거부했습니다.")
+            return False
+
+        candidate = Path(staged_path)
+        secure_path = Path(self._get_storage_state_path())
+        if not self._ensure_session_directory_acl():
+            return False
+        try:
+            if candidate.is_symlink() or not candidate.is_file():
+                return False
+            if not secure_file_permissions(candidate):
+                return False
+            protected_payload = candidate.read_text(encoding="utf-8")
+            if not protected_payload.startswith(("dpapi:", "fernet:")):
+                return False
+            plain_payload = unprotect_secret(protected_payload)
+            if not plain_payload:
+                return False
+            decoded_state = json.loads(plain_payload)
+            if not self.is_valid_storage_state(decoded_state):
+                return False
+            if secure_path.exists():
+                if secure_path.is_symlink() or not secure_path.is_file():
+                    return False
+                if not secure_file_permissions(secure_path):
+                    return False
+        except Exception:
+            logger.warning(
+                "후보 브라우저 세션의 암호화 또는 구조 검증에 실패했습니다.",
+                exc_info=True,
+            )
+            return False
+
+        had_previous = secure_path.exists()
+        backup_path: Optional[Path] = None
+        replaced = False
+        committed = False
+        rollback_confirmed = False
+        try:
+            if had_previous:
+                backup_path = self._copy_previous_session_for_rollback(secure_path)
+
+            os.replace(candidate, secure_path)
+            replaced = True
+            if not secure_file_permissions(secure_path):
+                raise PermissionError("저장된 브라우저 세션 파일 권한을 보호하지 못했습니다.")
+            if not self._fsync_directory(secure_path.parent):
+                raise OSError("브라우저 세션 디렉터리를 동기화하지 못했습니다.")
+            committed = True
+        except Exception:
+            logger.exception("암호화된 브라우저 세션 커밋에 실패했습니다.")
+            rollback_confirmed = not replaced or self._rollback_session_replace(
+                secure_path,
+                backup_path,
+                had_previous,
+            )
+            if not rollback_confirmed:
+                logger.critical("브라우저 세션 커밋 롤백을 완전히 확인하지 못했습니다.")
+            return False
+        finally:
+            if backup_path is not None and (committed or rollback_confirmed):
+                try:
+                    backup_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("브라우저 세션 롤백 백업을 삭제하지 못했습니다.")
+
+        if not committed:
+            return False
+
+        legacy_path = (
+            self.legacy_profile_path / "storage_state.json"
+            if self.legacy_profile_path is not None
+            else None
+        )
         if legacy_path is not None and legacy_path.exists():
             try:
                 legacy_path.unlink()
             except OSError:
-                pass
+                logger.warning("레거시 평문 브라우저 세션을 삭제하지 못했습니다.")
         return True
+
+    def discard_staged_session(self, staged_path: Any) -> bool:
+        """Delete an uncommitted candidate without touching the saved session."""
+        if not self._is_valid_staged_session_path(staged_path):
+            return False
+        candidate = Path(staged_path)
+        try:
+            candidate.unlink(missing_ok=True)
+            return not candidate.exists()
+        except OSError:
+            logger.exception("후보 브라우저 세션을 폐기하지 못했습니다.")
+            return False
+
+    def _write_storage_state(self, state: Dict[str, Any]) -> bool:
+        staged_path: Optional[Path] = None
+        try:
+            staged_path = self.stage_session(state)
+            return self.commit_staged_session(staged_path)
+        except Exception:
+            logger.exception("암호화된 브라우저 세션을 저장하지 못했습니다.")
+            return False
+        finally:
+            if staged_path is not None:
+                self.discard_staged_session(staged_path)
 
     # ------------------------------------------------------------------ setup
     def _launch_browser(self, channel: Optional[str] = None, executable_path: Optional[str] = None):
@@ -399,10 +752,11 @@ class ComputerUseAgent:
                 logger.info("Playwright 브라우저 설치 출력: %s", stdout_text[:300])
             return True
         except Exception as exc:
-            logger.warning("Playwright 자동 설치에 실패했습니다: %s", exc)
+            logger.warning("Playwright 자동 설치에 실패했습니다: error_type=%s", type(exc).__name__)
             return False
 
-    def start_browser(self):
+    def start_browser(self, *, load_saved_session: Optional[bool] = None):
+        """Start a browser context, optionally restoring the verified saved state."""
         if self.context:
             return
         if sync_playwright is None:
@@ -426,7 +780,7 @@ class ComputerUseAgent:
                 break
             except Exception as exc:
                 launch_errors.append(exc)
-                logger.warning("브라우저 실행 실패 (%s): %s", label, exc)
+                logger.warning("브라우저 실행 실패 (%s): error_type=%s", label, type(exc).__name__)
 
         missing_browser_error = any(self._is_missing_browser_error(err) for err in launch_errors)
         if browser is None and launch_errors and missing_browser_error:
@@ -458,16 +812,22 @@ class ComputerUseAgent:
         context_kwargs: Dict[str, Any] = {
             "viewport": {"width": SCREEN_WIDTH, "height": SCREEN_HEIGHT},
         }
-        storage_state = self._load_storage_state()
-        if storage_state:
-            context_kwargs["storage_state"] = storage_state
+        should_load_saved_session = (
+            self._load_saved_session_default
+            if load_saved_session is None
+            else bool(load_saved_session)
+        )
+        if should_load_saved_session:
+            storage_state = self._load_storage_state()
+            if storage_state:
+                context_kwargs["storage_state"] = storage_state
 
         self.context = self.browser.new_context(**context_kwargs)
 
         def _guard_document_navigation(route, request):
             try:
                 if request.resource_type == "document" and not self._is_allowed_document_request(request.url):
-                    logger.warning("허용되지 않은 문서 이동 차단: %s", request.url)
+                    logger.warning("허용되지 않은 문서 이동을 차단했습니다")
                     route.abort()
                     return
             except Exception:
@@ -482,9 +842,12 @@ class ComputerUseAgent:
         """Persist storage state encrypted at rest."""
         if not self.context:
             return False
-        state = self.context.storage_state()
-        if not isinstance(state, dict):
-            raise RuntimeError("브라우저 세션 형식이 올바르지 않습니다.")
+        try:
+            state = self.capture_session_state()
+        except Exception as exc:
+            raise RuntimeError(
+                "암호화된 브라우저 세션을 저장하지 못했습니다."
+            ) from exc
         if not self._write_storage_state(state):
             raise RuntimeError("암호화된 브라우저 세션을 저장하지 못했습니다.")
         return True
@@ -514,20 +877,21 @@ class ComputerUseAgent:
             except Exception:
                 pass
 
-        try:
-            if self.context:
-                self.context.close()
-            if self.browser:
-                self.browser.close()
-            if self.playwright:
-                self.playwright.stop()
-        except Exception:
-            pass
-        finally:
-            self.page = None
-            self.browser = None
-            self.context = None
-            self.playwright = None
+        for resource, operation in (
+            (self.context, "close"),
+            (self.browser, "close"),
+            (self.playwright, "stop"),
+        ):
+            if resource is None:
+                continue
+            try:
+                getattr(resource, operation)()
+            except Exception:
+                logger.warning("브라우저 리소스 정리에 실패했습니다: %s", operation)
+        self.page = None
+        self.browser = None
+        self.context = None
+        self.playwright = None
 
     # ---------------------------------------------------------- action runner
     @staticmethod

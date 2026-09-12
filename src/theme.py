@@ -63,6 +63,15 @@ class Colors:
     TEXT_BRIGHT = PAPER
     TEXT_ON_INK = PAPER
     TEXT_ON_INK_MUTED = "#B8C7CB"
+    SUCCESS_TEXT = "#196347"
+    WARNING_TEXT = "#805000"
+    ERROR_TEXT = "#A52D29"
+    STATUS_ON_INK = "#B8E9DF"
+
+    @classmethod
+    def status_text(cls, color):
+        return {cls.SUCCESS: cls.SUCCESS_TEXT, cls.WARNING: cls.WARNING_TEXT,
+                cls.ERROR: cls.ERROR_TEXT}.get(color, color)
 
     BORDER = LINE
     BORDER_LIGHT = "#BCC7C4"

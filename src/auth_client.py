@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -20,6 +21,7 @@ from urllib.parse import urlparse
 import requests
 from dotenv import load_dotenv
 
+from src.app_logging import safe_activity_content_for_log, safe_external_url_for_log
 from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.secure_storage import protect_secret, unprotect_secret
 from src.subscription_plans import (
@@ -411,7 +413,7 @@ def _save_cred(data: dict) -> bool:
                 raise PermissionError("Final credential ACL hardening failed")
             return True
         except Exception as e:
-            logger.error("자격 증명 저장에 실패했습니다: %s", e)
+            logger.error("자격 증명 저장에 실패했습니다: error_type=%s", type(e).__name__)
             if temp_path:
                 try:
                     Path(temp_path).unlink(missing_ok=True)
@@ -738,7 +740,7 @@ _session.headers.update({
 })
 _AUTH_STATE_LOCK = threading.RLock()
 
-_auth_state: Dict[str, Any] = {
+_AUTH_STATE_DEFAULTS: Dict[str, Any] = {
     "user_id": None,
     "username": None,
     "token": None,
@@ -765,6 +767,83 @@ _auth_state: Dict[str, Any] = {
     "expires_at": None,
     "subscription_url": None,
 }
+_auth_state: Dict[str, Any] = dict(_AUTH_STATE_DEFAULTS)
+_AUTH_SESSION_GENERATION = 0
+
+
+@dataclass(frozen=True)
+class AuthSessionSnapshot:
+    """Immutable identity marker captured before an authenticated request."""
+
+    generation: int
+    user_id: Any
+    token: str
+
+
+def _canonical_user_id(value: Any) -> str:
+    normalized = _normalize_session_user_id(value)
+    return "" if normalized is None else str(normalized)
+
+
+def _reset_auth_state_locked() -> None:
+    _auth_state.clear()
+    _auth_state.update(_AUTH_STATE_DEFAULTS)
+
+
+def _advance_auth_generation_locked() -> int:
+    global _AUTH_SESSION_GENERATION
+    _AUTH_SESSION_GENERATION += 1
+    return _AUTH_SESSION_GENERATION
+
+
+def _start_auth_identity_transition() -> int:
+    """Invalidate older requests while preserving the current state until commit."""
+    with _AUTH_STATE_LOCK:
+        return _advance_auth_generation_locked()
+
+
+def _snapshot_matches_locked(snapshot: AuthSessionSnapshot) -> bool:
+    if not isinstance(snapshot, AuthSessionSnapshot):
+        return False
+    return (
+        snapshot.generation == _AUTH_SESSION_GENERATION
+        and _canonical_user_id(snapshot.user_id) == _canonical_user_id(_auth_state.get("user_id"))
+        and snapshot.token == str(_auth_state.get("token") or "")
+    )
+
+
+def capture_auth_session_snapshot() -> Optional[AuthSessionSnapshot]:
+    """Capture the current authenticated identity for stale-result rejection."""
+    _expire_token_if_needed()
+    with _AUTH_STATE_LOCK:
+        user_id = _normalize_session_user_id(_auth_state.get("user_id"))
+        token = str(_auth_state.get("token") or "").strip()
+        if user_id is None or not token:
+            return None
+        return AuthSessionSnapshot(
+            generation=_AUTH_SESSION_GENERATION,
+            user_id=user_id,
+            token=token,
+        )
+
+
+def is_auth_session_snapshot_current(snapshot: Optional[AuthSessionSnapshot]) -> bool:
+    """Return whether a captured request still belongs to the active identity."""
+    if snapshot is None:
+        return False
+    _expire_token_if_needed()
+    with _AUTH_STATE_LOCK:
+        return _snapshot_matches_locked(snapshot)
+
+
+def _resolve_request_session_snapshot(
+    session_snapshot: Optional[AuthSessionSnapshot],
+) -> Optional[AuthSessionSnapshot]:
+    if session_snapshot is None:
+        return capture_auth_session_snapshot()
+    if not is_auth_session_snapshot_current(session_snapshot):
+        return None
+    return session_snapshot
 
 
 def _mark_token_issued() -> None:
@@ -774,31 +853,8 @@ def _mark_token_issued() -> None:
 
 def _clear_auth_state_memory() -> None:
     with _AUTH_STATE_LOCK:
-        _auth_state["user_id"] = None
-        _auth_state["username"] = None
-        _auth_state["token"] = None
-        _auth_state["token_issued_at"] = None
-        _auth_state["phone"] = None
-        _auth_state["work_count"] = 0
-        _auth_state["work_used"] = 0
-        _auth_state["remaining_count"] = None
-        _auth_state["user_type"] = None
-        _auth_state["plan_type"] = None
-        _auth_state["plan_id"] = None
-        _auth_state["plan_name"] = None
-        _auth_state["account_limit"] = 1
-        _auth_state["billing_interval"] = None
-        _auth_state["is_recurring"] = False
-        _auth_state["commerce_scope"] = "coupang"
-        _auth_state["shopping_trial_ends_at"] = None
-        _auth_state["offer_eligible"] = False
-        _auth_state["offer_plan_id"] = None
-        _auth_state["offer_price_krw"] = None
-        _auth_state["offer_cycles"] = None
-        _auth_state["is_paid"] = None
-        _auth_state["subscription_status"] = None
-        _auth_state["expires_at"] = None
-        _auth_state["subscription_url"] = None
+        _reset_auth_state_locked()
+        _advance_auth_generation_locked()
 
 
 def _is_token_expired() -> bool:
@@ -812,6 +868,20 @@ def _is_token_expired() -> bool:
             return False
 
         return (time.time() - float(issued_at)) >= _TOKEN_TTL_SECONDS
+
+
+def _expire_token_if_needed() -> bool:
+    """Expire the exact current token atomically and invalidate its requests."""
+    with _AUTH_STATE_LOCK:
+        token = _auth_state.get("token")
+        issued_at = _auth_state.get("token_issued_at")
+        if not token or not isinstance(issued_at, (int, float)):
+            return False
+        if (time.time() - float(issued_at)) < _TOKEN_TTL_SECONDS:
+            return False
+        _reset_auth_state_locked()
+        _advance_auth_generation_locked()
+        return True
 
 
 def _coerce_bool(value: Any) -> Optional[bool]:
@@ -894,26 +964,123 @@ def _extract_identity_value(payload: Dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _merge_account_state(payload: Dict[str, Any]) -> None:
+def derive_paid_state(payload: Dict[str, Any], current_value: Optional[bool]) -> Optional[bool]:
+    """Derive entitlement from one response without stale-state cross-contamination."""
     if not isinstance(payload, dict):
-        return
+        return current_value
+
+    explicit_value = _extract_state_value(payload, "is_paid", "paid", "pro")
+    explicit_paid = _coerce_bool(explicit_value)
+    if explicit_paid is not None:
+        return explicit_paid
+
+    subscription_status = _extract_state_value(payload, "subscription_status", "plan_status")
+    if subscription_status is None:
+        subscription = payload.get("subscription")
+        if isinstance(subscription, dict):
+            subscription_status = subscription.get("status")
+    status_value = str(subscription_status or "").strip().lower()
+    if status_value in {
+        "cancelled",
+        "canceled",
+        "expired",
+        "inactive",
+        "past_due",
+        "revoked",
+        "terminated",
+        "unpaid",
+    }:
+        return False
+
+    user_type = str(
+        _extract_state_value(payload, "user_type", "account_type", "role") or ""
+    ).strip().lower()
+    plan_type = str(
+        _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier") or ""
+    ).strip().lower()
+    plan_id = str(_extract_state_value(payload, "plan_id") or "").strip().lower()
+    work_count = _extract_state_value(payload, "work_count", "quota_total", "limit_count")
+    remaining_count = _extract_state_value(
+        payload, "remaining_count", "remaining", "quota_remaining"
+    )
+
+    is_trial = _coerce_bool(_extract_state_value(payload, "is_trial"))
+    paid_roles = {"admin", "paid", "premium", "pro", "subscriber"}
+    known_paid_plan_ids = {
+        str(item).strip().lower()
+        for item in (_ONE_TIME_PAYAPP_PLAN_IDS | _RECURRING_PAYAPP_PLAN_IDS)
+    }
+    if (
+        user_type in paid_roles
+        or plan_id in known_paid_plan_ids
+        or plan_type in known_paid_plan_ids
+        or (isinstance(work_count, (int, float)) and int(work_count) < 0)
+        or (isinstance(remaining_count, (int, float)) and int(remaining_count) < 0)
+    ):
+        return True
+
+    # Positive entitlement markers are authoritative over generic trial/free
+    # labels.  Some account responses retain ``is_trial`` after an upgrade or
+    # describe an administrator with a basic default tier.
+    free_values = {"basic", "free", "starter", "trial"}
+    if is_trial is True or user_type in free_values or plan_type in free_values:
+        return False
+
+    return current_value
+
+
+def _merge_account_state(
+    payload: Dict[str, Any],
+    snapshot: Optional[AuthSessionSnapshot] = None,
+) -> bool:
+    if not isinstance(payload, dict):
+        return False
     with _AUTH_STATE_LOCK:
         user_id = _normalize_session_user_id(
             _extract_identity_value(payload, "user_id", "id", "uid")
         )
-        if user_id is not None:
+        token_value = _extract_state_value(payload, "token", "key")
+        token_text = str(token_value or "").strip()
+
+        if snapshot is not None:
+            if not _snapshot_matches_locked(snapshot):
+                return False
+            if (
+                user_id is not None
+                and _canonical_user_id(user_id) != _canonical_user_id(snapshot.user_id)
+            ):
+                return False
+        else:
+            current_user_id = _normalize_session_user_id(_auth_state.get("user_id"))
+            current_token = str(_auth_state.get("token") or "")
+            identity_changed = (
+                user_id is not None
+                and _canonical_user_id(user_id) != _canonical_user_id(current_user_id)
+            )
+            token_changed = bool(token_text and token_text != current_token)
+            if identity_changed or token_changed:
+                replacement_user = user_id if user_id is not None else current_user_id
+                replacement_token = token_text or current_token
+                if replacement_user is None or not replacement_token:
+                    return False
+                _reset_auth_state_locked()
+                _auth_state["user_id"] = replacement_user
+                _auth_state["token"] = replacement_token
+                _auth_state["token_issued_at"] = time.time()
+                _advance_auth_generation_locked()
+
+        if user_id is not None and _auth_state.get("user_id") is None:
             _auth_state["user_id"] = user_id
 
         username = _extract_identity_value(payload, "username", "login_id")
         if isinstance(username, str) and username.strip():
             _auth_state["username"] = username.strip()
 
-        token = _extract_state_value(payload, "token", "key")
-        if token:
-            token_text = str(token).strip()
-            if token_text:
-                _auth_state["token"] = token_text
-                _auth_state["token_issued_at"] = time.time()
+        current_token = str(_auth_state.get("token") or "")
+        if token_text and token_text != current_token:
+            _auth_state["token"] = token_text
+            _auth_state["token_issued_at"] = time.time()
+            _advance_auth_generation_locked()
 
         phone = _extract_state_value(payload, "phone", "contact", "mobile", "phone_number")
         if isinstance(phone, str) and phone.strip():
@@ -940,8 +1107,8 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
             _auth_state["user_type"] = user_type.strip().lower()
 
         plan_type = _extract_state_value(payload, "plan_type", "plan", "subscription_plan", "tier")
-        if isinstance(plan_type, str) and plan_type.strip():
-            _auth_state["plan_type"] = plan_type.strip()
+        if isinstance(plan_type, str):
+            _auth_state["plan_type"] = plan_type.strip() or None
 
         plan_id = _extract_state_value(payload, "plan_id")
         if isinstance(plan_id, str):
@@ -987,7 +1154,11 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
             if isinstance(value, (int, float)):
                 _auth_state[state_key] = int(value)
 
-        subscription_status = _extract_state_value(payload, "subscription_status", "plan_status", "status")
+        subscription_status = _extract_state_value(payload, "subscription_status", "plan_status")
+        if subscription_status is None:
+            subscription = payload.get("subscription")
+            if isinstance(subscription, dict):
+                subscription_status = subscription.get("status")
         if isinstance(subscription_status, str) and subscription_status.strip():
             _auth_state["subscription_status"] = subscription_status.strip()
 
@@ -1014,54 +1185,56 @@ def _merge_account_state(payload: Dict[str, Any]) -> None:
         if isinstance(subscription_url, str) and subscription_url.strip():
             _auth_state["subscription_url"] = subscription_url.strip()
 
-        is_paid_value = _extract_state_value(payload, "is_paid", "paid", "pro")
-        coerced_is_paid = _coerce_bool(is_paid_value)
-        if coerced_is_paid is not None:
-            _auth_state["is_paid"] = coerced_is_paid
+        _auth_state["is_paid"] = derive_paid_state(payload, _auth_state.get("is_paid"))
+        return True
 
-        if _auth_state.get("is_paid") is None:
-            plan_value = str(_auth_state.get("plan_type") or "").strip().lower()
-            if plan_value:
-                _auth_state["is_paid"] = plan_value not in {"free", "trial", "basic", "starter"}
 
-        if _auth_state.get("is_paid") is None:
-            user_type_value = str(_auth_state.get("user_type") or "").strip().lower()
-            if user_type_value:
-                _auth_state["is_paid"] = user_type_value in {"subscriber", "admin", "paid", "pro", "premium"}
+def _commit_auth_identity(
+    payload: Dict[str, Any],
+    *,
+    username_fallback: str,
+    expected_generation: int,
+) -> bool:
+    """Atomically replace all account-scoped state with one successful identity."""
+    user_id = _normalize_session_user_id(
+        _extract_identity_value(payload, "user_id", "id", "uid")
+    )
+    if user_id is None:
+        user_id = _normalize_session_user_id(username_fallback)
+    token = str(_extract_state_value(payload, "token", "key") or "").strip()
+    if user_id is None or not token:
+        return False
 
-        if _auth_state.get("is_paid") is None:
-            work_count_value = _auth_state.get("work_count")
-            if isinstance(work_count_value, int):
-                _auth_state["is_paid"] = work_count_value < 0
-
-        status_value = str(_auth_state.get("subscription_status") or "").strip().lower()
-        if status_value in {"expired", "inactive", "cancelled"}:
-            _auth_state["is_paid"] = False
+    with _AUTH_STATE_LOCK:
+        if _AUTH_SESSION_GENERATION != expected_generation:
+            return False
+        _reset_auth_state_locked()
+        _auth_state["user_id"] = user_id
+        _auth_state["username"] = str(username_fallback or "").strip().lower() or None
+        _auth_state["token"] = token
+        _auth_state["token_issued_at"] = time.time()
+        generation = _advance_auth_generation_locked()
+        snapshot = AuthSessionSnapshot(generation, user_id, token)
+        return _merge_account_state(payload, snapshot=snapshot)
 
 
 def get_auth_state() -> Dict[str, Any]:
-    if _is_token_expired():
-        _clear_auth_state_memory()
+    _expire_token_if_needed()
     with _AUTH_STATE_LOCK:
         return dict(_auth_state)
 
 
 def is_logged_in() -> bool:
-    if _is_token_expired():
-        _clear_auth_state_memory()
-        return False
+    _expire_token_if_needed()
     with _AUTH_STATE_LOCK:
         return _auth_state.get("token") is not None and _auth_state.get("user_id") is not None
 
 
 def _get_session_user_and_token() -> tuple[Any, Any]:
-    if _is_token_expired():
-        _clear_auth_state_memory()
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return None, None
-    with _AUTH_STATE_LOCK:
-        user_id = _normalize_session_user_id(_auth_state.get("user_id"))
-        token = _auth_state.get("token")
-        return user_id, token
+    return snapshot.user_id, snapshot.token
 
 
 def _build_auth_headers(token: Any) -> Dict[str, str]:
@@ -1101,16 +1274,8 @@ def is_trusted_payment_url(value: Any) -> bool:
 
 
 def safe_url_for_log(value: Any) -> str:
-    """Return URL without query/fragment/userinfo for logs."""
-    try:
-        parsed = urlparse(str(value or "").strip())
-    except Exception:
-        return ""
-    host = (parsed.hostname or "").strip().lower()
-    if not parsed.scheme or not host:
-        return ""
-    path = parsed.path or ""
-    return f"{parsed.scheme}://{host}{path}"
+    """Compatibility wrapper for the central external-URL log sanitizer."""
+    return safe_external_url_for_log(value)
 
 
 def _resolve_default_payapp_plan_id() -> str:
@@ -1129,14 +1294,16 @@ def create_payapp_checkout(
     *,
     plan_id: Optional[str] = None,
     payment_type: Optional[str] = None,
+    session_snapshot: Optional[AuthSessionSnapshot] = None,
 ) -> Dict[str, Any]:
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = _resolve_request_session_snapshot(session_snapshot)
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     phone_digits = _normalize_phone_number(phone)
     if not re.fullmatch(r"01[016789]\d{7,8}", phone_digits):
@@ -1174,12 +1341,14 @@ def create_payapp_checkout(
             json=body,
             headers=headers,
             timeout=30,
-            retries=1,
+            # Checkout creation is not guaranteed idempotent by the deployed
+            # API. A lost response must never create a second payment request.
+            retries=0,
         )
         payload = _safe_json(resp)
 
         if resp.status_code == 200:
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             if payload.get("success") is False:
                 return {
                     "success": False,
@@ -1237,7 +1406,7 @@ def create_payapp_checkout(
             "plan_id": resolved_plan_id,
         }
     except requests.exceptions.RequestException as e:
-        logger.warning("PayApp 결제 요청 실패: %s", e)
+        logger.warning("PayApp 결제 요청 실패: error_type=%s", type(e).__name__)
         return {
             "success": False,
             "message": _request_error_message(
@@ -1259,14 +1428,16 @@ def create_payapp_subscription(
     phone: str,
     *,
     plan_id: str = _MONTHLY_PAYAPP_PLAN_ID,
+    session_snapshot: Optional[AuthSessionSnapshot] = None,
 ) -> Dict[str, Any]:
     """Create the monthly recurring PayApp subscription checkout."""
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = _resolve_request_session_snapshot(session_snapshot)
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
     phone_digits = _normalize_phone_number(phone)
     if not re.fullmatch(r"01[016789]\d{7,8}", phone_digits):
         return {"success": False, "message": "휴대폰 번호를 정확히 입력해주세요."}
@@ -1291,7 +1462,8 @@ def create_payapp_subscription(
             json=body,
             headers=headers,
             timeout=30,
-            retries=1,
+            # Subscription creation is a non-idempotent external side effect.
+            retries=0,
         )
         payload = _safe_json(resp)
         if resp.status_code == 200:
@@ -1318,14 +1490,18 @@ def create_payapp_subscription(
         }
 
 
-def get_payapp_subscriptions() -> Dict[str, Any]:
+def get_payapp_subscriptions(
+    *,
+    session_snapshot: Optional[AuthSessionSnapshot] = None,
+) -> Dict[str, Any]:
     """Return recurring PayApp subscriptions owned by the logged-in user."""
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = _resolve_request_session_snapshot(session_snapshot)
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
     headers = _build_auth_headers(token)
     headers["X-User-ID"] = str(user_id)
     try:
@@ -1351,14 +1527,19 @@ def get_payapp_subscriptions() -> Dict[str, Any]:
         }
 
 
-def cancel_payapp_subscription(rebill_no: str) -> Dict[str, Any]:
+def cancel_payapp_subscription(
+    rebill_no: str,
+    *,
+    session_snapshot: Optional[AuthSessionSnapshot] = None,
+) -> Dict[str, Any]:
     """Cancel a recurring PayApp subscription after server-side ownership checks."""
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = _resolve_request_session_snapshot(session_snapshot)
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
     rebill_no = str(rebill_no or "").strip()
     if not rebill_no or len(rebill_no) > 160:
         return {"success": False, "message": "해지할 정기결제 정보가 없습니다."}
@@ -1371,7 +1552,7 @@ def cancel_payapp_subscription(rebill_no: str) -> Dict[str, Any]:
             json={"user_id": str(user_id), "rebill_no": rebill_no},
             headers=headers,
             timeout=20,
-            retries=1,
+            retries=0,
         )
         payload = _safe_json(resp)
         if resp.status_code == 200:
@@ -1392,9 +1573,10 @@ def get_subscription_status() -> Dict[str, Any]:
     err = _check_api_url()
     if err:
         return {"success": False, "message": err}
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
     headers = _build_auth_headers(token)
     headers["X-User-ID"] = str(user_id)
     try:
@@ -1408,15 +1590,13 @@ def get_subscription_status() -> Dict[str, Any]:
         payload = _safe_json(resp)
         if resp.status_code == 200:
             is_trial = payload.get("is_trial")
-            if isinstance(is_trial, bool):
-                payload.setdefault("user_type", "trial" if is_trial else "subscriber")
-                payload.setdefault("is_paid", not is_trial)
-                if is_trial and payload.get("plan_id") is None:
-                    with _AUTH_STATE_LOCK:
-                        _auth_state["plan_id"] = None
-                        _auth_state["plan_name"] = None
-                        _auth_state["plan_type"] = None
-            _merge_account_state(payload)
+            if is_trial is True:
+                payload = dict(payload)
+                payload.setdefault("user_type", "trial")
+                payload.setdefault("is_paid", False)
+                if payload.get("plan_id") is None:
+                    payload.update({"plan_id": "", "plan_name": "", "plan_type": ""})
+            _merge_account_state(payload, snapshot=snapshot)
             return payload
         return {
             "success": False,
@@ -1438,9 +1618,10 @@ def get_payment_status(payment_id: str) -> Dict[str, Any]:
     if not payment_id:
         return {"success": False, "message": "결제 ID가 필요합니다."}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     headers = _build_auth_headers(token)
     headers["X-User-ID"] = str(user_id)
@@ -1456,7 +1637,7 @@ def get_payment_status(payment_id: str) -> Dict[str, Any]:
         )
         payload = _safe_json(resp)
         if resp.status_code == 200:
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             payload.setdefault("success", True)
             return payload
         if resp.status_code in {401, 403}:
@@ -1511,7 +1692,7 @@ def check_username(username: str) -> Dict[str, Any]:
             return {"available": False, "message": "아이디 확인 응답이 비었습니다."}
         return {"available": False, "message": f"서버 오류 ({resp.status_code})"}
     except requests.exceptions.RequestException as e:
-        logger.warning("아이디 중복 확인 요청 실패: %s", e)
+        logger.warning("아이디 중복 확인 요청 실패: error_type=%s", type(e).__name__)
         return {
             "available": False,
             "message": _request_error_message(
@@ -1585,6 +1766,7 @@ def register(
         "privacy_version": PRIVACY_VERSION,
         "program_type": PROGRAM_TYPE,
     }
+    transition_generation = _start_auth_identity_transition()
 
     try:
         resp = _request_with_retry(
@@ -1602,7 +1784,6 @@ def register(
             data = payload
             if not data:
                 return {"success": False, "message": "회원가입 응답이 비었습니다."}
-            _merge_account_state(data)
             if data.get("success") is False:
                 data["message"] = _normalize_api_message(
                     payload=data,
@@ -1611,18 +1792,18 @@ def register(
                     default_message=str(data.get("message") or "회원가입에 실패했습니다."),
                 )
             if data.get("success"):
-                result_data = data.get("data", {})
-                token = result_data.get("token")
-                user_id = result_data.get("user_id")
-                if token and user_id:
-                    with _AUTH_STATE_LOCK:
-                        _auth_state["user_id"] = user_id
-                        _auth_state["username"] = username
-                        _auth_state["token"] = token
-                        _auth_state["token_issued_at"] = time.time()
-                        _auth_state["work_count"] = result_data.get("work_count", 0)
-                        _auth_state["work_used"] = 0
-                    _merge_account_state(result_data)
+                if not _commit_auth_identity(
+                    data,
+                    username_fallback=username,
+                    expected_generation=transition_generation,
+                ):
+                    data = dict(data)
+                    data.update(
+                        {
+                            "success": False,
+                            "message": "인증 상태가 변경되어 회원가입 응답을 적용하지 않았습니다. 다시 로그인해주세요.",
+                        }
+                    )
             return data
 
         if resp.status_code == 422:
@@ -1642,7 +1823,7 @@ def register(
             }
         return {"success": False, "message": f"서버 오류 ({resp.status_code})"}
     except requests.exceptions.RequestException as e:
-        logger.warning("회원가입 요청 실패: %s", e)
+        logger.warning("회원가입 요청 실패: error_type=%s", type(e).__name__)
         return {
             "success": False,
             "message": _request_error_message(
@@ -1680,6 +1861,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
         "ip": _resolve_client_ip(),
         "program_type": PROGRAM_TYPE,
     }
+    transition_generation = _start_auth_identity_transition()
 
     try:
         resp = _request_with_retry(
@@ -1695,35 +1877,19 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
             data = _safe_json(resp)
             if not data:
                 return {"status": False, "message": "로그인 응답이 비었습니다."}
-            _merge_account_state(data)
             if data.get("status") is True:
-                with _AUTH_STATE_LOCK:
-                    resolved_user_id = _normalize_session_user_id(
-                        data.get("id")
-                        if data.get("id") is not None
-                        else data.get("user_id")
+                if not _commit_auth_identity(
+                    data,
+                    username_fallback=username,
+                    expected_generation=transition_generation,
+                ):
+                    data = dict(data)
+                    data.update(
+                        {
+                            "status": False,
+                            "message": "인증 상태가 변경되어 로그인 응답을 적용하지 않았습니다. 다시 시도해주세요.",
+                        }
                     )
-                    if resolved_user_id is None:
-                        resolved_user_id = _normalize_session_user_id(_auth_state.get("user_id"))
-                    resolved_token = str(
-                        data.get("key")
-                        or data.get("token")
-                        or _auth_state.get("token")
-                        or ""
-                    ).strip()
-                    if resolved_token:
-                        _auth_state["token"] = resolved_token
-                        _auth_state["token_issued_at"] = time.time()
-                    if resolved_user_id is None:
-                        # Legacy fallback when backend omits a user id.
-                        resolved_user_id = username
-                    _auth_state["user_id"] = resolved_user_id
-                    _auth_state["username"] = username
-                    if isinstance(data.get("work_count"), (int, float)):
-                        _auth_state["work_count"] = int(data.get("work_count"))
-                    if isinstance(data.get("work_used"), (int, float)):
-                        _auth_state["work_used"] = int(data.get("work_used"))
-                _merge_account_state(data)
             elif data.get("status") is False:
                 data["message"] = _normalize_api_message(
                     payload=data,
@@ -1751,7 +1917,7 @@ def login(username: str, password: str, force: bool = False) -> Dict[str, Any]:
             }
         return {"status": False, "message": f"서버 오류 ({resp.status_code})"}
     except requests.exceptions.RequestException as e:
-        logger.warning("로그인 요청 실패: %s", e)
+        logger.warning("로그인 요청 실패: error_type=%s", type(e).__name__)
         return {
             "status": False,
             "message": _request_error_message(
@@ -1779,8 +1945,13 @@ def clear_local_session() -> None:
 
 
 def logout() -> bool:
-    user_id, token = _get_session_user_and_token()
+    snapshot = capture_auth_session_snapshot()
+    user_id = snapshot.user_id if snapshot is not None else None
+    token = snapshot.token if snapshot is not None else None
     server_ok = True
+    # Invalidate the local session before network I/O so a delayed logout
+    # response can never clear a newer login.
+    clear_local_session()
 
     if user_id and token:
         try:
@@ -1795,8 +1966,6 @@ def logout() -> bool:
             logger.warning("로그아웃 API 호출 중 통신 오류가 발생했습니다.")
             server_ok = False
 
-    clear_local_session()
-
     return server_ok
 
 
@@ -1804,9 +1973,10 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
     if _check_api_url():
         return {"status": False}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"status": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     try:
         resp = _session.post(
@@ -1823,7 +1993,7 @@ def heartbeat(current_task: str = "", app_version: str = "") -> Dict[str, Any]:
         )
         if resp.status_code == 200:
             payload = _safe_json(resp)
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             return payload
         payload = _safe_json(resp)
         if resp.status_code == 422:
@@ -1851,9 +2021,10 @@ def check_work_available() -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     try:
         resp = _session.post(
@@ -1864,7 +2035,7 @@ def check_work_available() -> Dict[str, Any]:
         )
         if resp.status_code == 200:
             payload = _safe_json(resp)
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             return payload
         return {"success": False}
     except Exception:
@@ -1875,9 +2046,10 @@ def use_work() -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     try:
         resp = _session.post(
@@ -1888,10 +2060,12 @@ def use_work() -> Dict[str, Any]:
         )
         if resp.status_code == 200:
             data = _safe_json(resp)
-            if data.get("success"):
+            if data.get("success") and not isinstance(data.get("work_used"), (int, float)):
                 with _AUTH_STATE_LOCK:
-                    _auth_state["work_used"] = data.get("work_used", _auth_state["work_used"] + 1)
-            _merge_account_state(data)
+                    if _snapshot_matches_locked(snapshot):
+                        data = dict(data)
+                        data["work_used"] = int(_auth_state.get("work_used") or 0) + 1
+            _merge_account_state(data, snapshot=snapshot)
             return data
         return {"success": False}
     except Exception:
@@ -1920,9 +2094,10 @@ def reserve_work(idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
     if _WORK_RESERVATION_SUPPORTED is False:
         return {"success": False, "unsupported": True, "message": "작업 예약 기능이 지원되지 않습니다."}
 
@@ -1962,7 +2137,7 @@ def reserve_work(idempotency_key: Optional[str] = None) -> Dict[str, Any]:
                         "recovered": True,
                     }
                 )
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             return payload
         return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
     except Exception:
@@ -1976,9 +2151,10 @@ def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     try:
         resp = _session.post(
@@ -1989,7 +2165,7 @@ def commit_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
         )
         payload = _safe_json(resp)
         if resp.status_code == 200:
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             return payload
         return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
     except Exception:
@@ -2003,9 +2179,10 @@ def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
     if _check_api_url():
         return {"success": False}
 
-    user_id, token = _get_session_user_and_token()
-    if not user_id or not token:
+    snapshot = capture_auth_session_snapshot()
+    if snapshot is None:
         return {"success": False, "message": "로그인이 필요합니다."}
+    user_id, token = snapshot.user_id, snapshot.token
 
     try:
         resp = _session.post(
@@ -2018,7 +2195,7 @@ def release_reserved_work(reservation_id: Optional[str]) -> Dict[str, Any]:
             return {"success": False, "unsupported": True}
         payload = _safe_json(resp)
         if resp.status_code == 200:
-            _merge_account_state(payload)
+            _merge_account_state(payload, snapshot=snapshot)
             return payload
         return {"success": False, "message": _extract_api_message(payload, f"서버 오류 ({resp.status_code})")}
     except Exception:
@@ -2057,10 +2234,18 @@ def log_action(action: str, content: str = None, level: str = "INFO") -> None:
         if now < _LOG_ACTION_FAILURE_SUPPRESS_UNTIL:
             return
 
+    action_text = re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(action or "").strip())[:100]
+    if not action_text:
+        return
+    content_text = safe_activity_content_for_log(content)
+    level_text = str(level or "INFO").upper()
+    if level_text not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        level_text = "INFO"
+
     try:
         resp = _session.post(
             f"{API_SERVER_URL}/user/logs",
-            json={"level": level, "action": action, "content": content},
+            json={"level": level_text, "action": action_text, "content": content_text},
             headers={"Authorization": f"Bearer {token}"},
             timeout=2.0,
         )

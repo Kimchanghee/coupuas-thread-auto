@@ -40,6 +40,9 @@ foreach ($key in $environmentKeys) {
 
 $process = $null
 $windowProcess = $null
+$expectedWindowTitle = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String("7Iqk66CI65OcIOyHvO2VkSDsnpDrj5ntmZQgLSDroZzqt7jsnbg=")
+)
 function Get-DescendantProcessIds {
     param([Parameter(Mandatory = $true)][int]$RootProcessId)
 
@@ -89,7 +92,7 @@ try {
             Where-Object {
                 $_.MainWindowHandle -ne 0 -and
                 $_.Responding -and
-                $_.MainWindowTitle -eq "스레드 쇼핑 자동화 - 로그인"
+                $_.MainWindowTitle -eq $expectedWindowTitle
             } |
             Select-Object -First 1
         if ($windowProcess) {
@@ -105,7 +108,7 @@ try {
     if (-not $windowProcess.Responding) {
         throw "Packaged login window is not responding."
     }
-    if ($windowProcess.MainWindowTitle -ne "스레드 쇼핑 자동화 - 로그인") {
+    if ($windowProcess.MainWindowTitle -ne $expectedWindowTitle) {
         throw "Unexpected packaged window title: '$($windowProcess.MainWindowTitle)'"
     }
 
@@ -127,7 +130,7 @@ try {
         throw "Packaged application returned a non-zero exit code: $($process.ExitCode)"
     }
 
-    Write-Host "[OK] Signed packaged login window launched, responded, and exited cleanly."
+    Write-Host "[OK] Packaged login window launched, responded, and exited cleanly."
 } finally {
     foreach ($smokeProcess in Get-SmokeProcesses) {
         Stop-Process -Id $smokeProcess.Id -Force -ErrorAction SilentlyContinue

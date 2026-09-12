@@ -1,0 +1,10 @@
+# Deploy only the website and its API, excluding desktop data and QA artifacts.
+*
+!api
+!api/**
+!public
+!public/**
+!package.json
+!package-lock.json
+!vercel.json
+!.vercelignore

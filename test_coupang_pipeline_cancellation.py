@@ -1,6 +1,12 @@
 import pytest
 
-from src.coupang_uploader import CancelledException, CoupangPartnersPipeline
+from pathlib import Path
+
+from src.coupang_uploader import (
+    CancelledException,
+    CoupangPartnersPipeline,
+    CoupangThreadsUploader,
+)
 from src.services.cancellation import OperationCancelled
 from src.services.managed_ai_client import ManagedAiClientError
 
@@ -155,3 +161,30 @@ def test_uploader_postprocessing_error_keeps_managed_reservation(monkeypatch):
     assert error.reservation_id == "reservation-downstream-1"
     assert error.ai_job_id == "job-downstream-1"
     assert "private postprocessing detail" not in str(error)
+
+
+def test_uploader_cancel_closes_without_saving_browser_state():
+    events = []
+
+    class Agent:
+        def save_session(self):
+            raise AssertionError("cancel must not overwrite a verified session")
+
+        def close(self, *, save_session=True):
+            events.append(("close", save_session))
+
+    uploader = CoupangThreadsUploader()
+    uploader._set_current_agent(Agent())
+
+    uploader.cancel()
+
+    assert events == [("close", False)]
+
+
+def test_upload_workers_never_save_or_implicitly_save_sessions():
+    source = (
+        Path(__file__).resolve().parent / "src" / "coupang_uploader.py"
+    ).read_text(encoding="utf-8")
+
+    assert "agent.save_session()" not in source
+    assert source.count("agent.close(save_session=False)") >= 4

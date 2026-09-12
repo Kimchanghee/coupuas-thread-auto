@@ -18,6 +18,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 import build_exe  # noqa: E402 - repository root must be added before import
+from src.version import VERSION as APP_VERSION  # noqa: E402
 
 
 PACKAGE_IDENTITY_NAME = "YMcompany.30069A065C875"
@@ -41,13 +42,33 @@ def normalize_msix_version(value: str) -> str:
     return ".".join(str(number) for number in numbers)
 
 
-def read_app_version(entrypoint_path: Path) -> str:
-    """Read and normalize VERSION from a Python entrypoint."""
-    source = Path(entrypoint_path).read_text(encoding="utf-8")
+def read_app_version(repo_root: Path | None = None) -> str:
+    """Return the Store form of the canonical application version.
+
+    ``repo_root`` is accepted for callers that validate another checkout.  The
+    canonical file is parsed without importing that checkout as executable code.
+    """
+    if repo_root is None or Path(repo_root).resolve() == _REPO_ROOT:
+        return normalize_msix_version(APP_VERSION)
+
+    version_path = Path(repo_root).resolve() / "src" / "version.py"
+    source = version_path.read_text(encoding="utf-8")
     match = re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', source, re.MULTILINE)
     if not match:
-        raise ValueError(f"VERSION was not found in {entrypoint_path}")
+        raise ValueError(f"VERSION was not found in {version_path}")
     return normalize_msix_version(match.group(1))
+
+
+def validate_store_version(value: str, *, app_version: str) -> str:
+    """Require the Store version's first three parts to equal the app version."""
+    store_version = normalize_msix_version(value)
+    canonical = normalize_msix_version(app_version)
+    if store_version.split(".")[:3] != canonical.split(".")[:3]:
+        raise ValueError(
+            "Microsoft Store major.minor.patch must match the application "
+            f"version ({canonical}); got {store_version}"
+        )
+    return store_version
 
 
 def build_manifest(version: str) -> str:
@@ -216,7 +237,8 @@ def build_store_package(
     if not makeappx_path.is_file():
         raise FileNotFoundError(makeappx_path)
 
-    msix_version = normalize_msix_version(version)
+    canonical_version = read_app_version(repo_root)
+    msix_version = validate_store_version(version, app_version=canonical_version)
     build_root.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     work_dir = Path(tempfile.mkdtemp(prefix="pyinstaller-", dir=build_root))
@@ -275,10 +297,11 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
         if repo_root is not None
         else Path(__file__).resolve().parents[1]
     )
+    canonical_version = read_app_version(resolved_repo_root)
     version = (
-        normalize_msix_version(args.version)
+        validate_store_version(args.version, app_version=canonical_version)
         if args.version
-        else read_app_version(resolved_repo_root / "login_main.py")
+        else canonical_version
     )
     if args.makeappx:
         makeappx_path = args.makeappx.resolve()

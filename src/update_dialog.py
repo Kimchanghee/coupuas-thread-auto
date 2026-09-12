@@ -376,7 +376,7 @@ class UpdateDialog(QDialog):
         self.header_title.setText("새 업데이트가 준비되었습니다")
         self.target_version_value.setText(version or "새 버전")
         self.status_label.setText(f"{version or '새 버전'} 업데이트를 사용할 수 있어요")
-        self.status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
+        self.status_label.setStyleSheet(f"color: {Colors.STATUS_ON_INK};")
         size_mb = float(update_info.get("size_mb", 0) or 0)
         self.size_label.setText(f"약 {size_mb:.1f} MB" if size_mb else "")
         self.status_detail.setText("업데이트 후 프로그램이 자동으로 다시 시작됩니다.")
@@ -394,12 +394,13 @@ class UpdateDialog(QDialog):
         self.safety_label.setText("현재 대기열은 자동 저장됩니다. 설치 후 중단 지점부터 이어서 시작합니다.")
 
     def _on_no_update(self):
+        self.size_label.clear()
         self._busy = False
         self._set_state("latest")
         self.header_title.setText("최신 버전을 사용 중입니다")
         self.target_version_value.setText(self.current_version)
         self.status_label.setText("현재 최신 버전을 사용하고 있어요")
-        self.status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
+        self.status_label.setStyleSheet(f"color: {Colors.STATUS_ON_INK};")
         self.status_detail.setText("새 업데이트가 나오면 실행 중에도 자동으로 알려드릴게요.")
         self.changelog_text.setPlainText("추가로 설치할 업데이트가 없습니다.")
         self.install_btn.setVisible(False)
@@ -412,12 +413,13 @@ class UpdateDialog(QDialog):
         self.safety_label.setText("추가로 설치할 항목이 없습니다. 새 버전이 있으면 실행 중에 알려드립니다.")
 
     def _on_check_error(self, error_message):
+        self.size_label.clear()
         self._busy = False
         self._set_state("error")
         self.header_title.setText("업데이트를 확인하지 못했어요")
         self.target_version_value.setText("확인 실패")
         self.status_label.setText("업데이트 정보를 확인하지 못했어요")
-        self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
+        self.status_label.setStyleSheet("color: #FFB4AB;")
         self.status_detail.setText(
             user_friendly_message(
                 error_message,
@@ -454,7 +456,7 @@ class UpdateDialog(QDialog):
         self.progress_label.setText("0%")
         self.progress_label.setVisible(True)
         self.status_label.setText("업데이트를 준비하고 있어요")
-        self.status_label.setStyleSheet(f"color: {Colors.ACCENT_LIGHT};")
+        self.status_label.setStyleSheet(f"color: {Colors.STATUS_ON_INK};")
         self.status_detail.setText("현재 작업을 안전하게 확인한 뒤 다운로드를 시작합니다.")
         self.safety_label.setText("현재 작업과 대기열을 저장했습니다. 안전하게 다운로드를 시작합니다.")
         self.install_requested.emit(dict(self.update_info))
@@ -478,11 +480,12 @@ class UpdateDialog(QDialog):
         self.progress_label.setText(f"{value}%")
         self.status_label.setText("업데이트를 내려받고 있어요")
         self.status_detail.setText("완료되면 설치 프로그램이 자동으로 시작됩니다.")
-        self.safety_label.setText("다운로드 중에도 저장된 대기열은 보호됩니다.")
+        self.safety_label.setText("이 창을 닫아도 다운로드와 설치 준비는 계속됩니다. 저장된 대기열은 유지됩니다.")
         self.install_btn.setText("다운로드 중")
         self.install_btn.setEnabled(False)
         self.close_btn.setVisible(True)
-        self.close_btn.setText("닫기")
+        self.close_btn.setText("화면 닫기")
+        self.close_btn.setToolTip("창만 닫습니다. 업데이트 다운로드는 계속됩니다.")
         self.close_btn.setEnabled(True)
 
     def set_installing(self):
@@ -508,7 +511,7 @@ class UpdateDialog(QDialog):
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
         self.status_label.setText("업데이트를 완료하지 못했어요")
-        self.status_label.setStyleSheet(f"color: {Colors.ERROR};")
+        self.status_label.setStyleSheet("color: #FFB4AB;")
         self.status_detail.setText(
             user_friendly_message(
                 message,

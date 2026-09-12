@@ -42,7 +42,6 @@ class AutoUpdater:
     EXPECTED_EXE_NAME = STANDALONE_EXE_NAME
     PREFERRED_UPDATE_ASSET_NAMES = (INSTALLER_ASSET_NAME, STANDALONE_EXE_NAME)
     INSTALLER_ARGS = ("/SP-", "/SILENT", "/SUPPRESSMSGBOXES", "/CLOSEAPPLICATIONS", "/NORESTART")
-    REQUIRE_SIGNED_UPDATES = True
     MAX_UPDATE_SIZE_BYTES = 200 * 1024 * 1024
     MINIMUM_SAFE_VERSION = "2.2.3"
     # Release CI injects the production signer thumbprint into this constant at build time.
@@ -54,16 +53,16 @@ class AutoUpdater:
         self.is_dev_mode = not getattr(sys, "frozen", False)
 
         default_thumbprints = {
-            item.strip().upper()
+            item.strip().replace(":", "").upper()
             for item in self.DEFAULT_TRUSTED_SIGNER_THUMBPRINTS
-            if str(item).strip()
+            if re.fullmatch(r"[A-Fa-f0-9]{40}", str(item).strip().replace(":", ""))
         }
         if self.is_dev_mode:
             env_thumbprints = os.getenv("COUPUAS_TRUSTED_SIGNER_THUMBPRINTS", "")
             env_thumbprint_set = {
-                item.strip().upper()
+                item.strip().replace(":", "").upper()
                 for item in env_thumbprints.split(",")
-                if item.strip()
+                if re.fullmatch(r"[A-Fa-f0-9]{40}", item.strip().replace(":", ""))
             }
             self.trusted_thumbprints = env_thumbprint_set or default_thumbprints
         else:
@@ -85,9 +84,6 @@ class AutoUpdater:
         self.trusted_publishers = publishers or {
             self._normalize_identity(item) for item in self.DEFAULT_TRUSTED_PUBLISHERS
         }
-
-        # Unsigned updates are not allowed in production builds.
-        self.allow_unsigned_updates = False
 
         self.last_expected_sha256: Optional[str] = None
         self.last_update_asset_name: str = ""
@@ -202,13 +198,9 @@ class AutoUpdater:
 
     def _verify_authenticode_signature(self, file_path: str) -> bool:
         if os.name != "nt":
-            return True
-        if self.allow_unsigned_updates:
-            return True
-        if not self.REQUIRE_SIGNED_UPDATES:
-            return True
-        if not self.is_dev_mode and not self.trusted_thumbprints:
-            # Fail closed: production updates require pinned signer thumbprints.
+            return False
+        if not self.trusted_thumbprints or not self.trusted_publishers:
+            # Every environment requires both an exact signer pin and publisher.
             return False
 
         escaped_file_path = str(file_path).replace("'", "''")
@@ -219,22 +211,53 @@ class AutoUpdater:
             "Import-Module -Name $securityModule -ErrorAction Stop;"
             f"$sig=Get-AuthenticodeSignature -FilePath '{escaped_file_path}';"
             "$cert=$sig.SignerCertificate;"
+            "$timestampCert=$sig.TimeStamperCertificate;"
             "$chainStatuses=@();"
+            "$chainBuilt=$false;"
             "if($cert){"
             "$chain=[System.Security.Cryptography.X509Certificates.X509Chain]::new();"
             "try{"
             "$chain.ChainPolicy.RevocationMode="
-            "[System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck;"
-            "[void]$chain.Build($cert);"
+            "[System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online;"
+            "$chain.ChainPolicy.RevocationFlag="
+            "[System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain;"
+            "$chain.ChainPolicy.VerificationFlags="
+            "[System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag;"
+            "$chain.ChainPolicy.UrlRetrievalTimeout=[TimeSpan]::FromSeconds(8);"
+            "[void]$chain.ChainPolicy.ApplicationPolicy.Add("
+            "[System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'));"
+            "$chainBuilt=$chain.Build($cert);"
             "$chainStatuses=@($chain.ChainStatus | ForEach-Object {$_.Status.ToString()})"
             "}finally{$chain.Dispose()}"
+            "};"
+            "$timestampChainStatuses=@();"
+            "$timestampChainBuilt=$false;"
+            "if($timestampCert){"
+            "$timestampChain=[System.Security.Cryptography.X509Certificates.X509Chain]::new();"
+            "try{"
+            "$timestampChain.ChainPolicy.RevocationMode="
+            "[System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online;"
+            "$timestampChain.ChainPolicy.RevocationFlag="
+            "[System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain;"
+            "$timestampChain.ChainPolicy.VerificationFlags="
+            "[System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag;"
+            "$timestampChain.ChainPolicy.UrlRetrievalTimeout=[TimeSpan]::FromSeconds(8);"
+            "[void]$timestampChain.ChainPolicy.ApplicationPolicy.Add("
+            "[System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.8'));"
+            "$timestampChainBuilt=$timestampChain.Build($timestampCert);"
+            "$timestampChainStatuses=@($timestampChain.ChainStatus | ForEach-Object {$_.Status.ToString()})"
+            "}finally{$timestampChain.Dispose()}"
             "};"
             "$obj=[PSCustomObject]@{"
             "Status=$sig.Status.ToString();"
             "StatusMessage=$sig.StatusMessage;"
             "Subject=($(if($cert){$cert.Subject}else{''}));"
             "Thumbprint=($(if($cert){$cert.Thumbprint}else{''}));"
-            "ChainStatuses=$chainStatuses"
+            "ChainBuilt=$chainBuilt;"
+            "ChainStatuses=$chainStatuses;"
+            "HasTimestamp=($null -ne $timestampCert);"
+            "TimestampChainBuilt=$timestampChainBuilt;"
+            "TimestampChainStatuses=$timestampChainStatuses"
             "};"
             "$obj | ConvertTo-Json -Compress"
         )
@@ -245,7 +268,7 @@ class AutoUpdater:
                 operation="updater.verify_authenticode",
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=30,
                 check=True,
             )
             data = json.loads((completed.stdout or "").strip() or "{}")
@@ -260,22 +283,29 @@ class AutoUpdater:
                 for item in raw_chain_statuses
                 if str(item or "").strip()
             }
+            raw_timestamp_chain_statuses = data.get("TimestampChainStatuses") or []
+            if isinstance(raw_timestamp_chain_statuses, str):
+                raw_timestamp_chain_statuses = [raw_timestamp_chain_statuses]
+            timestamp_chain_statuses = {
+                str(item or "").strip().lower()
+                for item in raw_timestamp_chain_statuses
+                if str(item or "").strip()
+            }
 
-            if self.trusted_thumbprints and thumbprint not in self.trusted_thumbprints:
+            if status != "valid":
+                return False
+            if thumbprint not in self.trusted_thumbprints:
                 return False
             subject_identities = self._extract_subject_identities(subject)
-            if self.trusted_publishers and not subject_identities.intersection(self.trusted_publishers):
+            if not subject_identities.intersection(self.trusted_publishers):
                 return False
-            if status != "valid":
-                allowed_chain_errors = {"untrustedroot", "partialchain"}
-                trust_chain_only_error = (
-                    status in {"nottrusted", "unknownerror"}
-                    and bool(chain_statuses)
-                    and chain_statuses.issubset(allowed_chain_errors)
-                )
-                if not (self.trusted_thumbprints and trust_chain_only_error):
-                    return False
-            return bool(subject)
+            if data.get("ChainBuilt") is not True or chain_statuses:
+                return False
+            if data.get("HasTimestamp") is not True:
+                return False
+            if data.get("TimestampChainBuilt") is not True or timestamp_chain_statuses:
+                return False
+            return bool(subject and thumbprint)
         except Exception:
             return False
 
@@ -588,15 +618,45 @@ try {{
     }}
 
     $signature = Get-AuthenticodeSignature -FilePath $Installer
+    $status = $signature.Status.ToString()
+    if ($status -ne 'Valid') {{
+        throw ('Installer signature status is not valid: ' + $status)
+    }}
     $certificate = $signature.SignerCertificate
+    $timestampCertificate = $signature.TimeStamperCertificate
     if (-not $certificate) {{ throw 'Installer signer certificate is missing.' }}
+    if (-not $timestampCertificate) {{ throw 'Installer trusted timestamp is missing.' }}
+
     $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
     try {{
-        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-        [void]$chain.Build($certificate)
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+        $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
+        $chain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+        $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(8)
+        [void]$chain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+        $chainBuilt = $chain.Build($certificate)
         $chainStatuses = @($chain.ChainStatus | ForEach-Object {{ $_.Status.ToString() }})
     }} finally {{
         $chain.Dispose()
+    }}
+    if (-not $chainBuilt -or $chainStatuses.Count -ne 0) {{
+        throw 'Installer signer chain or online revocation validation failed.'
+    }}
+
+    $timestampChain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    try {{
+        $timestampChain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+        $timestampChain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
+        $timestampChain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+        $timestampChain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(8)
+        [void]$timestampChain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.8'))
+        $timestampChainBuilt = $timestampChain.Build($timestampCertificate)
+        $timestampChainStatuses = @($timestampChain.ChainStatus | ForEach-Object {{ $_.Status.ToString() }})
+    }} finally {{
+        $timestampChain.Dispose()
+    }}
+    if (-not $timestampChainBuilt -or $timestampChainStatuses.Count -ne 0) {{
+        throw 'Installer timestamp chain or online revocation validation failed.'
     }}
     $thumbprint = $certificate.Thumbprint.ToUpperInvariant()
     $trustedThumbSet = Parse-TrustedList $TrustedThumbprints $false
@@ -604,30 +664,15 @@ try {{
         throw 'Installer signer thumbprint is not trusted.'
     }}
     $trustedPublisherSet = Parse-TrustedList $TrustedPublishers $true
-    if ($trustedPublisherSet.Count -gt 0) {{
-        $publisherMatch = $false
-        foreach ($subjectId in (Get-SubjectIdentities $certificate.Subject)) {{
-            if ($trustedPublisherSet.Contains($subjectId)) {{
-                $publisherMatch = $true
-                break
-            }}
-        }}
-        if (-not $publisherMatch) {{ throw 'Installer signer publisher is not trusted.' }}
-    }}
-
-    $status = $signature.Status.ToString()
-    if ($status -ne 'Valid') {{
-        $allowedChainErrors = @('UntrustedRoot', 'PartialChain')
-        $unexpectedChainErrors = @($chainStatuses | Where-Object {{ $_ -notin $allowedChainErrors }})
-        $chainOnly = (
-            $status -in @('NotTrusted', 'UnknownError') -and
-            $chainStatuses.Count -gt 0 -and
-            $unexpectedChainErrors.Count -eq 0
-        )
-        if (-not $chainOnly) {{
-            throw ('Installer signature status is not allowed: ' + $status)
+    if ($trustedPublisherSet.Count -eq 0) {{ throw 'Installer trusted publisher set is empty.' }}
+    $publisherMatch = $false
+    foreach ($subjectId in (Get-SubjectIdentities $certificate.Subject)) {{
+        if ($trustedPublisherSet.Contains($subjectId)) {{
+            $publisherMatch = $true
+            break
         }}
     }}
+    if (-not $publisherMatch) {{ throw 'Installer signer publisher is not trusted.' }}
 
     $arguments = @({installer_args})
     $process = Start-Process -FilePath $Installer -ArgumentList $arguments -Wait -PassThru
@@ -669,7 +714,7 @@ try {{
     [Parameter(Mandatory=$true)][string]$CurrentExe,
     [Parameter(Mandatory=$true)][string]$UpdateFile,
     [Parameter(Mandatory=$true)][string]$BackupExe,
-    [string]$ExpectedSha256 = '',
+    [Parameter(Mandatory=$true)][string]$ExpectedSha256,
     [string]$TrustedThumbprints = '',
     [string]$TrustedPublishers = ''
 )
@@ -719,26 +764,54 @@ try {
         [System.IO.FileAccess]::Read,
         [System.IO.FileShare]::Read
     )
-    if ($ExpectedSha256) {
-        $actualHash = (Get-FileHash -LiteralPath $UpdateFile -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actualHash -ne $ExpectedSha256.ToLowerInvariant()) {
-            throw 'Update checksum mismatch.'
-        }
+    $actualHash = (Get-FileHash -LiteralPath $UpdateFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $ExpectedSha256.ToLowerInvariant()) {
+        throw 'Update checksum mismatch.'
     }
     $sig = Get-AuthenticodeSignature -FilePath $UpdateFile
     $status = $sig.Status.ToString()
+    if ($status -ne 'Valid') {
+        throw ('Update signature status is not valid: ' + $status)
+    }
     $cert = $sig.SignerCertificate
+    $timestampCert = $sig.TimeStamperCertificate
     if (-not $cert) {
         throw 'Update signer certificate is missing.'
+    }
+    if (-not $timestampCert) {
+        throw 'Update trusted timestamp is missing.'
     }
 
     $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
     try {
-        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-        [void]$chain.Build($cert)
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+        $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
+        $chain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+        $chain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(8)
+        [void]$chain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+        $chainBuilt = $chain.Build($cert)
         $chainStatuses = @($chain.ChainStatus | ForEach-Object { $_.Status.ToString() })
     } finally {
         $chain.Dispose()
+    }
+    if (-not $chainBuilt -or $chainStatuses.Count -ne 0) {
+        throw 'Update signer chain or online revocation validation failed.'
+    }
+
+    $timestampChain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+    try {
+        $timestampChain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+        $timestampChain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::EntireChain
+        $timestampChain.ChainPolicy.VerificationFlags = [System.Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+        $timestampChain.ChainPolicy.UrlRetrievalTimeout = [TimeSpan]::FromSeconds(8)
+        [void]$timestampChain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.8'))
+        $timestampChainBuilt = $timestampChain.Build($timestampCert)
+        $timestampChainStatuses = @($timestampChain.ChainStatus | ForEach-Object { $_.Status.ToString() })
+    } finally {
+        $timestampChain.Dispose()
+    }
+    if (-not $timestampChainBuilt -or $timestampChainStatuses.Count -ne 0) {
+        throw 'Update timestamp chain or online revocation validation failed.'
     }
 
     $thumb = ''
@@ -750,19 +823,6 @@ try {
         throw 'Update signer thumbprint is not trusted.'
     }
 
-    if ($status -ne 'Valid') {
-        $allowedChainErrors = @('UntrustedRoot', 'PartialChain')
-        $unexpectedChainErrors = @($chainStatuses | Where-Object { $_ -notin $allowedChainErrors })
-        $chainOnly = (
-            $status -in @('NotTrusted', 'UnknownError') -and
-            $chainStatuses.Count -gt 0 -and
-            $unexpectedChainErrors.Count -eq 0
-        )
-        if (-not $chainOnly) {
-            throw ('Update signature status is not allowed: ' + $status)
-        }
-    }
-
     $trustedPublisherSet = New-Object 'System.Collections.Generic.HashSet[string]'
     if ($TrustedPublishers) {
         foreach ($item in $TrustedPublishers.Split(',')) {
@@ -772,18 +832,19 @@ try {
             }
         }
     }
-    if ($trustedPublisherSet.Count -gt 0) {
-        $subjectIds = Get-SubjectIdentities($cert.Subject)
-        $publisherMatch = $false
-        foreach ($subjectId in $subjectIds) {
-            if ($trustedPublisherSet.Contains($subjectId)) {
-                $publisherMatch = $true
-                break
-            }
+    if ($trustedPublisherSet.Count -eq 0) {
+        throw 'Update trusted publisher set is empty.'
+    }
+    $subjectIds = Get-SubjectIdentities($cert.Subject)
+    $publisherMatch = $false
+    foreach ($subjectId in $subjectIds) {
+        if ($trustedPublisherSet.Contains($subjectId)) {
+            $publisherMatch = $true
+            break
         }
-        if (-not $publisherMatch) {
-            throw 'Update signer publisher is not trusted.'
-        }
+    }
+    if (-not $publisherMatch) {
+        throw 'Update signer publisher is not trusted.'
     }
 
     $ready = $false
@@ -826,6 +887,9 @@ try {
     if ($updateLock) {
         $updateLock.Dispose()
     }
+    # The verification lock intentionally denies delete sharing. Remove the
+    # downloaded replacement only after releasing that handle.
+    Remove-Item -LiteralPath $UpdateFile -Force -ErrorAction SilentlyContinue
     if ($tempReplacement -and (Test-Path -LiteralPath $tempReplacement)) {
         Remove-Item -LiteralPath $tempReplacement -Force -ErrorAction SilentlyContinue
     }

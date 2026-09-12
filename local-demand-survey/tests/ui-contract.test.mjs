@@ -77,8 +77,15 @@ test("Vercel-only project has no hidden Vinext, Cloudflare or D1 scaffold", asyn
 
 test("Windows launcher uses Next.js lockfile install and real build artifact", async () => {
   const launcher = await readFile(new URL("../로컬_설문_실행.bat", import.meta.url), "utf8");
-  assert.match(launcher, /node_modules\\\.bin\\next\.cmd/);
-  assert.match(launcher, /npm ci/);
+  const preflight = await readFile(
+    new URL("../scripts/ensure-locked-deps.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(launcher, /node scripts\\ensure-locked-deps\.mjs/);
+  assert.match(preflight, /package-lock\.json/);
+  assert.match(preflight, /createHash\("sha256"\)/);
+  assert.match(preflight, /spawnSync\(npm, \["ci"/);
+  assert.match(preflight, /node_modules/);
   assert.match(launcher, /\.next\\BUILD_ID/);
   assert.doesNotMatch(launcher, /vinext|dist\\server/i);
 });

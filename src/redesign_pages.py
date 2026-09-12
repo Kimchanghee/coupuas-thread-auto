@@ -74,14 +74,14 @@ def _status_color(item: Any) -> str:
     status = _text(_read(item, "status", _read(item, "result", ""))).lower()
     value = f"{kind} {status}"
     if any(word in value for word in ("error", "fail", "실패", "만료", "오류")):
-        return Colors.ERROR
+        return Colors.ERROR_TEXT
     if any(
         word in value
         for word in ("warning", "pending", "재확인", "확인 필요", "중복", "대기")
     ):
-        return Colors.WARNING
+        return Colors.WARNING_TEXT
     if any(word in value for word in ("success", "healthy", "완료", "성공", "정상")):
-        return Colors.SUCCESS
+        return Colors.SUCCESS_TEXT
     return Colors.ACCENT
 
 
@@ -269,10 +269,11 @@ class _PageBase(QWidget):
             QLabel[uiRole="muted"], QLabel[uiRole="metricLabel"], QLabel[uiRole="metricDetail"] {{
                 color: {Colors.TEXT_MUTED};
                 {Typography.CAPTION}
+                font-size: 13px;
             }}
             QLabel[uiRole="metricValue"] {{
                 color: {Colors.TEXT_PRIMARY};
-                {Typography.TITLE_MD}
+                font-size: 28px; font-weight: 700;
             }}
             QLabel[uiRole="inverseTitle"] {{
                 color: {Colors.TEXT_ON_INK};
@@ -376,16 +377,14 @@ class _PageBase(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        compact = self.width() < _COMPACT_BREAKPOINT
-        if compact != self._compact:
-            self._compact = compact
-            self._apply_responsive_layout()
+        self._compact = self.width() < _COMPACT_BREAKPOINT
+        self._apply_responsive_layout()
 
     def _apply_responsive_layout(self) -> None:
         if hasattr(self, "header_layout"):
             self.header_layout.setDirection(
                 QBoxLayout.Direction.TopToBottom
-                if self._compact
+                if self.width() < 600
                 else QBoxLayout.Direction.LeftToRight
             )
 
@@ -396,6 +395,7 @@ class DashboardPage(_PageBase):
     new_automation_requested = pyqtSignal()
     history_open_requested = pyqtSignal()
     account_selected = pyqtSignal(str)
+    add_account_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("dashboardPage", "운영 홈")
@@ -424,6 +424,7 @@ class DashboardPage(_PageBase):
         self._metric_widgets: list[QWidget] = []
         self.body.addWidget(self.metrics_host)
 
+
         self.dashboard_pair = QWidget()
         self.dashboard_pair_layout = QBoxLayout(
             QBoxLayout.Direction.LeftToRight, self.dashboard_pair
@@ -432,27 +433,31 @@ class DashboardPage(_PageBase):
         self.dashboard_pair_layout.setSpacing(Spacing.LG)
 
         self.next_action_card = _Card(
-            "dashboardNextActionCard", "다음 자동화 안내", dark=True
+            "dashboardNextActionCard", "다음 할 일"
         )
         hero_layout = QVBoxLayout(self.next_action_card)
         hero_layout.setContentsMargins(Spacing.XL, Spacing.XL, Spacing.XL, Spacing.XL)
         hero_layout.setSpacing(Spacing.MD)
-        hero_title = QLabel("다음 자동화를 준비하세요")
-        hero_title.setProperty("uiRole", "inverseTitle")
+        hero_title = self.next_action_title = QLabel("다음 자동화를 준비하세요")
+        hero_title.setProperty("uiRole", "sectionTitle")
+        hero_title.setWordWrap(True)
         hero_body = QLabel(
             "제휴 링크를 검사한 뒤 연결된 Threads 계정으로 안전하게 배포할 수 있습니다."
         )
-        hero_body.setProperty("uiRole", "inverseBody")
+        self.next_action_description = hero_body
+        hero_body.setProperty("uiRole", "muted")
         hero_body.setWordWrap(True)
         hero_layout.addWidget(hero_title)
         hero_layout.addWidget(hero_body)
         hero_layout.addStretch(1)
-        hero_action = _button(
-            "새 자동화 시작",
+        hero_action = self.next_action_button = _button(
+            "계정 확인",
             "dashboardHeroAutomationButton",
-            "새 자동화 시작",
+            "다음 할 일 확인",
+            kind="secondary",
         )
-        hero_action.clicked.connect(self.new_automation_requested.emit)
+        self._attention_account_id = None
+        hero_action.clicked.connect(self._open_next_action)
         hero_layout.addWidget(hero_action, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.accounts_card = _Card("dashboardAccountHealthCard", "Threads 계정 상태")
@@ -536,6 +541,24 @@ class DashboardPage(_PageBase):
 
         _clear_layout(self.account_health_layout)
         account_rows = list(accounts or [])
+        attention = [a for a in account_rows if _status_color(a) != Colors.SUCCESS_TEXT]
+        self._attention_account_id = _identifier(attention[0]) if attention else None
+        self.next_action_button.setVisible(bool(attention) or not account_rows)
+        if not account_rows:
+            self.next_action_title.setText("첫 게시를 위한 계정을 연결하세요")
+            self.next_action_description.setText("Threads 계정을 연결한 뒤 발급받은 제휴 링크를 입력하면 됩니다.")
+            self.next_action_button.setText("계정 연결")
+        elif attention:
+            account = attention[0]
+            name = _text(_read(account, "username", _read(account, "name", "")))
+            self.next_action_title.setText(f"확인할 계정이 {len(attention)}개 있어요")
+            self.next_action_description.setText(f"{name} · {_read(account, 'status', '연결 상태 미확인')}\n계정 상태를 확인한 뒤 작업을 이어가세요.")
+            self.next_action_button.setText("계정 확인")
+        else:
+            self.next_action_title.setText("다음 게시를 준비할 수 있어요")
+            self.next_action_description.setText("상단의 ‘새 자동화 만들기’에서 기존 초안을 이어가거나 새 링크를 입력하세요. 게시 직전에 계정을 다시 확인합니다.")
+        tint = Colors.WARNING_BG if attention else Colors.SKY
+        self.next_action_card.setStyleSheet(f"QFrame#dashboardNextActionCard {{ background: {tint}; border: 1px solid {Colors.BORDER}; border-radius: {Radius.CARD}; }}")
         if not account_rows:
             self.account_health_layout.addWidget(
                 _EmptyState(
@@ -578,6 +601,12 @@ class DashboardPage(_PageBase):
         self.recent_table.setVisible(has_jobs)
         self.recent_empty.setVisible(not has_jobs)
 
+    def _open_next_action(self) -> None:
+        if self._attention_account_id:
+            self.account_selected.emit(self._attention_account_id)
+        else:
+            self.add_account_requested.emit()
+
     def _reflow_metrics(self) -> None:
         for widget in self._metric_widgets:
             self.metrics_layout.removeWidget(widget)
@@ -604,6 +633,7 @@ class HistoryPage(_PageBase):
     filters_changed = pyqtSignal(object)
     retry_requested = pyqtSignal(str)
     record_open_requested = pyqtSignal(str)
+    account_check_requested = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("historyPage", "작업 기록")
@@ -639,6 +669,10 @@ class HistoryPage(_PageBase):
         self.period_filter = _filter_combo("historyPeriodFilter", "조회 기간 필터")
         self.account_filter = _filter_combo("historyAccountFilter", "계정 필터")
         self.status_filter = _filter_combo("historyStatusFilter", "작업 상태 필터")
+        for combo in (self.period_filter, self.account_filter, self.status_filter):
+            combo.setMinimumContentsLength(5)
+            combo.setMinimumWidth(0)
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._filter_widgets: list[QWidget] = [
             self.search_input,
             self.period_filter,
@@ -657,6 +691,14 @@ class HistoryPage(_PageBase):
         self.metrics_layout.setSpacing(Spacing.MD)
         self._metric_widgets: list[QWidget] = []
         self.body.addWidget(self.metrics_host)
+
+        self.compact_metrics = QLabel()
+        self.compact_metrics.setObjectName("historyCompactMetrics")
+        self.compact_metrics.setProperty("uiRole", "muted")
+        self.compact_metrics.setWordWrap(True)
+        self.compact_metrics.setVisible(False)
+        self.body.addWidget(self.compact_metrics)
+
 
         table_card = _Card("historyResultsCard", "게시 이력")
         table_layout = QVBoxLayout(table_card)
@@ -703,6 +745,9 @@ class HistoryPage(_PageBase):
         rows: Sequence[Any] | None = None,
         metrics: Mapping[str, Any] | Sequence[Any] | None = None,
     ) -> None:
+        selected = self.history_table.currentRow()
+        selected_id = _identifier(self._rows[selected]) if 0 <= selected < len(self._rows) else None
+        scroll = self.history_table.verticalScrollBar().value()
         self._rows = list(rows or [])
         _set_table_data(
             self.history_table,
@@ -712,6 +757,13 @@ class HistoryPage(_PageBase):
         has_rows = bool(self._rows)
         self.history_table.setVisible(has_rows)
         self.history_empty.setVisible(not has_rows)
+        self.history_table.setCurrentCell(-1, -1)
+        if selected_id is not None:
+            for index, item in enumerate(self._rows):
+                if _identifier(item) == selected_id:
+                    self.history_table.selectRow(index)
+                    break
+        self.history_table.verticalScrollBar().setValue(scroll)
 
         _clear_layout(self.metrics_layout)
         metric_items = _normalise_metrics(metrics)
@@ -747,15 +799,16 @@ class HistoryPage(_PageBase):
         }
 
     def _handle_cell_action(self, row: int, column: int) -> None:
-        if (
-            not (0 <= row < len(self._rows))
-            or column != self.history_table.columnCount() - 1
-        ):
+        if not (0 <= row < len(self._rows)):
             return
         item = self._rows[row]
         record_id = _identifier(item, str(row))
         action = _text(_read(item, "action", "")).lower()
-        if "재시도" in action or "retry" in action:
+        if column != self.history_table.columnCount() - 1:
+            self.record_open_requested.emit(record_id)
+        elif "계정 확인" in action:
+            self.account_check_requested.emit(record_id)
+        elif "재시도" in action or "retry" in action:
             self.retry_requested.emit(record_id)
         else:
             self.record_open_requested.emit(record_id)
@@ -764,10 +817,10 @@ class HistoryPage(_PageBase):
         for widget in self._filter_widgets:
             self.filters_layout.removeWidget(widget)
         if self._compact:
-            self.filters_layout.addWidget(self.search_input, 0, 0, 1, 2)
+            self.filters_layout.addWidget(self.search_input, 0, 0, 1, 3)
             self.filters_layout.addWidget(self.period_filter, 1, 0)
             self.filters_layout.addWidget(self.account_filter, 1, 1)
-            self.filters_layout.addWidget(self.status_filter, 2, 0, 1, 2)
+            self.filters_layout.addWidget(self.status_filter, 1, 2)
         else:
             self.filters_layout.addWidget(self.search_input, 0, 0)
             self.filters_layout.addWidget(self.period_filter, 0, 1)
@@ -775,9 +828,15 @@ class HistoryPage(_PageBase):
             self.filters_layout.addWidget(self.status_filter, 0, 3)
         self.filters_layout.setColumnStretch(0, 3 if not self._compact else 1)
         for column in range(1, 4):
-            self.filters_layout.setColumnStretch(column, 1 if not self._compact else 0)
+            self.filters_layout.setColumnStretch(column, 1 if not self._compact or column < 3 else 0)
 
     def _reflow_metrics(self) -> None:
+        if hasattr(self, "compact_metrics"):
+            self.metrics_host.hide()
+            self.compact_metrics.show()
+            complete = sum(_text(_read(row, "result", "")) in {"성공", "게시 완료", "완료"} for row in self._rows)
+            attention = sum(_text(_read(row, "result", "")) in {"실패", "확인 필요", "세션 만료", "로그인 만료"} or _text(_read(row, "status_kind", "")) in {"error", "warning"} for row in self._rows)
+            self.compact_metrics.setText(f"조회 결과 {len(self._rows)}건  ·  게시 완료 {complete}  ·  확인 필요 {attention}")
         for widget in self._metric_widgets:
             self.metrics_layout.removeWidget(widget)
         columns = 2 if self._compact else min(4, max(1, len(self._metric_widgets)))
@@ -800,6 +859,7 @@ class AccountsPage(_PageBase):
     remove_account_requested = pyqtSignal(str)
     reconnect_account_requested = pyqtSignal(str)
     test_account_requested = pyqtSignal(str)
+    edit_account_requested = pyqtSignal()
     manage_subscription_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -819,7 +879,7 @@ class AccountsPage(_PageBase):
         self._add_page_header(
             "ACCOUNT HEALTH",
             "Threads 계정",
-            "연결 상태와 세션 건강, 계정 한도를 관리합니다.",
+            "연결 상태와 게시 계정을 확인하고, 필요한 계정만 다시 연결합니다.",
             self.add_account_button,
         )
 
@@ -943,27 +1003,28 @@ class AccountsPage(_PageBase):
         self.account_action_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self.account_action_layout.setSpacing(Spacing.SM)
         self.reconnect_button = _button(
-            "브라우저에서 다시 로그인",
+            "다시 로그인",
             "accountsReconnectButton",
             "선택한 Threads 계정 다시 로그인",
+            kind="secondary",
         )
         self.test_button = _button(
-            "연결 테스트",
+            "연결 상태 확인",
             "accountsTestButton",
             "선택한 Threads 계정 연결 테스트",
-            kind="secondary",
+            kind="primary",
         )
         self.reconnect_button.clicked.connect(self._request_reconnect)
         self.test_button.clicked.connect(self._request_test)
-        self.account_action_layout.addWidget(self.reconnect_button)
         self.account_action_layout.addWidget(self.test_button)
+        self.account_action_layout.addWidget(self.reconnect_button)
         detail_layout.addLayout(self.account_action_layout)
+        self.edit_button = _button("계정 정보 수정", "accountsEditButton", "선택한 계정 정보 수정", kind="secondary")
+        self.edit_button.clicked.connect(self.edit_account_requested.emit)
+        detail_layout.addWidget(self.edit_button, 0, Qt.AlignmentFlag.AlignLeft)
         detail_layout.addStretch(1)
-        danger_title = QLabel("위험 구역")
-        danger_title.setStyleSheet(f"color: {Colors.ERROR}; {Typography.TITLE_SM}")
-        detail_layout.addWidget(danger_title)
         danger_description = QLabel(
-            "계정을 삭제하면 저장된 세션 연결이 해제됩니다. 삭제 영향은 실행 전에 다시 확인해야 합니다."
+            "계정 삭제는 저장된 연결에 영향을 줍니다. 삭제 전에 대상을 다시 확인합니다."
         )
         danger_description.setProperty("uiRole", "muted")
         danger_description.setWordWrap(True)
@@ -1008,12 +1069,13 @@ class AccountsPage(_PageBase):
             )
             username = _text(_read(account, "username", ""))
             status = _text(_read(account, "status", "상태 미확인"), "상태 미확인")
-            line = f"{name}\n{username} · {status}" if username else f"{name}\n{status}"
+            username = f"@{username.lstrip('@')}" if username else ""
+            line = f"{name}\n{username}\n{status}" if username else f"{name}\n{status}"
             item = QListWidgetItem(line)
             item.setData(Qt.ItemDataRole.UserRole, account_id)
             item.setToolTip(f"{name}\n{username}\n{status}".strip())
             item.setForeground(QColor(_status_color(account)))
-            item.setSizeHint(QSize(0, 64))
+            item.setSizeHint(QSize(0, 100))
             self.account_list.addItem(item)
             if selected_id is not None and account_id == str(selected_id):
                 self.account_list.setCurrentItem(item)
@@ -1088,7 +1150,7 @@ class AccountsPage(_PageBase):
         for key, value in values.items():
             self.detail_values[key].setText(value)
             self.detail_values[key].setToolTip(value)
-        for button in (self.remove_button, self.reconnect_button, self.test_button):
+        for button in (self.remove_button, self.reconnect_button, self.test_button, self.edit_button):
             button.setEnabled(True)
 
     def _clear_detail(self) -> None:
@@ -1101,7 +1163,7 @@ class AccountsPage(_PageBase):
         )
         for value in self.detail_values.values():
             value.setText("—")
-        for button in (self.remove_button, self.reconnect_button, self.test_button):
+        for button in (self.remove_button, self.reconnect_button, self.test_button, self.edit_button):
             button.setEnabled(False)
 
     def _request_remove(self) -> None:
@@ -1122,6 +1184,7 @@ class AccountsPage(_PageBase):
             self.detail_card.hide()
 
     def _apply_account_visibility(self) -> None:
+        self.back_button.setVisible(self._compact)
         if not self._compact:
             self.master_card.show()
             self.detail_card.show()
@@ -1162,7 +1225,7 @@ class SubscriptionPage(_PageBase):
             self.setParent(parent)
 
         self.manage_button = _button(
-            "구독 관리",
+            "결제 관리 열기",
             "subscriptionManageButton",
             "현재 구독 관리",
             kind="secondary",
@@ -1231,6 +1294,18 @@ class SubscriptionPage(_PageBase):
         plans_title = QLabel("요금제 비교")
         plans_title.setProperty("uiRole", "sectionTitle")
         plans_layout.addWidget(plans_title)
+        self.plan_period_filter = QComboBox()
+        _set_accessible(self.plan_period_filter, "subscriptionPeriodFilter", "이용권 비교 기간")
+        self.plan_period_filter.addItem("월간 이용권", "month")
+        self.plan_period_filter.addItem("7일 이용권", "week")
+        self.plan_period_filter.setMinimumHeight(ControlHeight.INPUT)
+        self.plan_period_filter.currentIndexChanged.connect(self._display_plans)
+        plans_layout.addWidget(self.plan_period_filter, 0, Qt.AlignmentFlag.AlignRight)
+        self.plans_comparison = _make_table("subscriptionComparisonTable", "같은 기간의 이용권 비교", [])
+        self.plans_comparison.setWordWrap(True)
+        self.plans_comparison.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.plans_comparison.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        plans_layout.addWidget(self.plans_comparison)
         self.plans_host = QWidget()
         self.plans_grid = QGridLayout(self.plans_host)
         self.plans_grid.setContentsMargins(0, 0, 0, 0)
@@ -1239,7 +1314,7 @@ class SubscriptionPage(_PageBase):
         self._plan_widgets: list[QWidget] = []
 
         self.side_stack = QWidget()
-        self.side_stack_layout = QVBoxLayout(self.side_stack)
+        self.side_stack_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self.side_stack)
         self.side_stack_layout.setContentsMargins(0, 0, 0, 0)
         self.side_stack_layout.setSpacing(Spacing.LG)
         support_card = _Card("subscriptionSupportCard", "고객 지원")
@@ -1275,7 +1350,7 @@ class SubscriptionPage(_PageBase):
             Spacing.XL, Spacing.LG, Spacing.XL, Spacing.LG
         )
         management_layout.setSpacing(Spacing.MD)
-        management_title = QLabel("구독 관리")
+        management_title = QLabel("결제 관리")
         management_title.setProperty("uiRole", "sectionTitle")
         self.billing_date = QLabel("다음 결제일 정보 없음")
         self.billing_date.setProperty("uiRole", "muted")
@@ -1287,7 +1362,7 @@ class SubscriptionPage(_PageBase):
         danger_note.setWordWrap(True)
         danger_note.setStyleSheet(f"color: {Colors.ERROR}; {Typography.CAPTION}")
         management_action = _button(
-            "결제 정보 관리",
+            "결제 관리 열기",
             "subscriptionBillingButton",
             "결제 정보와 정기결제 관리",
             kind="secondary",
@@ -1358,22 +1433,46 @@ class SubscriptionPage(_PageBase):
             self.usage_value.setText(usage)
             renewal = _text(_read(subscription, "renewal_date", ""))
             self.renewal_value.setText(
-                f"{renewal} 갱신" if renewal else "갱신일 정보 없음"
+                f"{_read(subscription, 'renewal_label', '갱신일')} {renewal}" if renewal else _read(subscription, "renewal_empty", "갱신일 정보 없음")
             )
-            billing = _text(_read(subscription, "billing_date", renewal))
+            billing = _text(_read(subscription, "billing_date", ""))
             self.billing_date.setText(
-                f"다음 결제일 {billing}" if billing else "다음 결제일 정보 없음"
+                f"다음 결제일 {billing}" if billing else _read(subscription, "billing_empty", "다음 결제일 정보 없음")
             )
             payment = _text(_read(subscription, "payment_method", ""))
             self.payment_method.setText(
-                f"결제 수단 {payment}" if payment else "결제 수단 정보 없음"
+                f"결제 수단 {payment}" if payment else _read(subscription, "payment_empty", "결제 수단 정보 없음")
             )
             response = _text(_read(subscription, "support_response_time", ""))
             self.support_response.setText(response or "응답 시간 정보 없음")
 
+        self._plan_rows = list(plans or [])
+        current_ids = tuple(_identifier(p) for p in self._plan_rows if _read(p, "current", False))
+        if current_ids != getattr(self, "_last_current_plan_ids", None) and self._plan_rows:
+            current = next((p for p in self._plan_rows if _read(p, "current", False)), None)
+            self._last_current_plan_ids = current_ids
+            self.plan_period_filter.blockSignals(True)
+            self.plan_period_filter.setCurrentIndex(1 if current and self._plan_period(current) == "week" else 0)
+            self.plan_period_filter.blockSignals(False)
+        self._display_plans()
+
+    @staticmethod
+    def _plan_period(plan: Any) -> str:
+        identifier = _identifier(plan)
+        if identifier.endswith("-week"):
+            return "week"
+        if identifier.endswith("-month"):
+            return "month"
+        return ""
+
+    def _display_plans(self, *_args) -> None:
         _clear_layout(self.plans_grid)
         self._plan_widgets = []
-        plan_rows = list(plans or [])
+        all_rows = getattr(self, "_plan_rows", [])
+        periods = {self._plan_period(plan) for plan in all_rows} - {""}
+        self.plan_period_filter.setVisible(len(periods) > 1)
+        period = self.plan_period_filter.currentData()
+        plan_rows = [plan for plan in all_rows if len(periods) < 2 or self._plan_period(plan) in ("", period)]
         if not plan_rows:
             self._plan_widgets = [
                 _EmptyState(
@@ -1387,6 +1486,33 @@ class SubscriptionPage(_PageBase):
                 self._create_plan_card(plan, index)
                 for index, plan in enumerate(plan_rows)
             ]
+        table = self.plans_comparison
+        table.clear()
+        table.setColumnCount(len(plan_rows) + 1)
+        table.setRowCount(4 if plan_rows else 0)
+        table.setHorizontalHeaderLabels(["비교 기준", *[_text(_read(p, "name", "이용권")) for p in plan_rows]])
+        for row, label in enumerate(("이용 요금", "포함 혜택", "이용 안내", "선택")):
+            if not plan_rows:
+                break
+            table.setItem(row, 0, QTableWidgetItem(label))
+            for col, plan in enumerate(plan_rows, 1):
+                if row < 3:
+                    value = [_text(_read(plan, "price", "가격 정보 없음")), "\n".join(map(str, _read(plan, "features", []) or [])), _text(_read(plan, "tagline", _read(plan, "description", "")))][row]
+                    item = QTableWidgetItem(value)
+                    item.setToolTip(value)
+                    table.setItem(row, col, item)
+                else:
+                    current = bool(_read(plan, "current", False))
+                    button = _button("현재 이용권" if current else "이용권 선택", f"subscriptionCompareAction{col}", f"{_read(plan, 'name', '이용권')} 선택", kind="secondary" if current else "primary")
+                    button.setEnabled(not current)
+                    button.clicked.connect(lambda _checked=False, value=_identifier(plan): self.plan_selected.emit(value))
+                    table.setCellWidget(row, col, button)
+        table.resizeRowsToContents()
+        if plan_rows:
+            table.setRowHeight(1, max(table.rowHeight(1), 94))
+            table.setRowHeight(2, max(table.rowHeight(2), 60))
+            table.setRowHeight(3, 56)
+        table.setFixedHeight(table.horizontalHeader().height() + sum(table.rowHeight(i) for i in range(table.rowCount())) + 4)
         self._reflow_plans()
 
     def _create_plan_card(self, plan: Any, index: int) -> QWidget:
@@ -1440,6 +1566,9 @@ class SubscriptionPage(_PageBase):
         return card
 
     def _reflow_plans(self) -> None:
+        comparison = bool(getattr(self, "_plan_rows", [])) and not self._compact
+        self.plans_comparison.setVisible(comparison)
+        self.plans_host.setVisible(not comparison)
         for widget in self._plan_widgets:
             self.plans_grid.removeWidget(widget)
         columns = 1 if self._compact else min(2, max(1, len(self._plan_widgets)))
@@ -1450,11 +1579,8 @@ class SubscriptionPage(_PageBase):
 
     def _apply_responsive_layout(self) -> None:
         super()._apply_responsive_layout()
-        self.subscription_pair_layout.setDirection(
-            QBoxLayout.Direction.TopToBottom
-            if self._compact
-            else QBoxLayout.Direction.LeftToRight
-        )
+        self.subscription_pair_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+        self.side_stack_layout.setDirection(QBoxLayout.Direction.TopToBottom if self._compact else QBoxLayout.Direction.LeftToRight)
         for widget in (
             self.current_plan_label,
             self.current_plan_name,

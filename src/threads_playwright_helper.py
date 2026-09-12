@@ -4,10 +4,12 @@ Threads Playwright 직접 제어 헬퍼
 AI Vision 없이 Playwright selector로 직접 제어 (빠르고 안정적)
 """
 import os
+import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 try:
     from playwright.sync_api import Page
@@ -27,9 +29,56 @@ class ThreadsPlaywrightHelper:
     - 검증 가능 (DOM 상태 직접 확인)
     """
 
+    # Identity evidence is intentionally restricted to controls whose accessible
+    # name explicitly identifies the signed-in user's own profile navigation.
+    # Generic /@ links, feed authors, page text and public profile URLs must never
+    # be used to prove which account owns the current browser session.
+    _SELF_PROFILE_LINK_SELECTORS = (
+        'nav a[aria-label="Profile"][href*="/@"]',
+        'nav a[aria-label="프로필"][href*="/@"]',
+        'nav a[aria-label="Your profile"][href*="/@"]',
+        'nav a[aria-label="내 프로필"][href*="/@"]',
+        'nav a[href*="/@"]:has(svg[aria-label="Profile"])',
+        'nav a[href*="/@"]:has(svg[aria-label="프로필"])',
+        'a[data-testid="nav-profile"][href*="/@"]',
+    )
+    _THREADS_PROFILE_HOSTS = {
+        "threads.net",
+        "www.threads.net",
+        "threads.com",
+        "www.threads.com",
+    }
+    _THREADS_USERNAME_PATTERN = re.compile(r"[A-Za-z0-9._]{1,30}")
+    _COMPOSE_CONTAINER_SELECTORS = (
+        'div[role="dialog"]',
+        'form',
+        '[data-testid*="composer"]',
+        '[data-testid*="compose"]',
+    )
+    _COMPOSE_EDITOR_SELECTOR = 'textarea, div[contenteditable="true"]'
+    _COMPOSE_POST_CONTROL_SELECTOR = 'button, div[role="button"]'
+    _COMPOSE_POST_LABELS = frozenset({"게시", "post", "게시하기"})
+    _COMPOSE_ADD_LABELS = frozenset(
+        {"스레드에 추가", "add to thread", "내용을 더 추가", "add more"}
+    )
+    _MEDIA_PREVIEW_SELECTOR = (
+        'img[src], video[src], [data-testid*="media-preview"], '
+        '[data-testid*="attachment"], [aria-label*="Remove attachment" i], '
+        '[aria-label*="첨부 파일 삭제"]'
+    )
+    _MEDIA_PROCESSING_SELECTOR = (
+        '[role="progressbar"], [aria-busy="true"], '
+        '[data-testid*="progress"], [data-testid*="processing"]'
+    )
+    _MEDIA_ERROR_SELECTOR = (
+        '[role="alert"], [data-testid*="upload-error"], '
+        '[aria-label*="upload failed" i], [aria-label*="업로드 실패"]'
+    )
+
     def __init__(self, page: Page):
         self.page = page
-        self.last_error = None
+        self.last_error: Optional[str] = None
+        self.external_post_attempted = False
 
     def _save_debug_screenshot(self, prefix: str) -> Optional[str]:
         if os.getenv("THREAD_AUTO_DEBUG_SCREENSHOTS", "").strip() != "1":
@@ -119,7 +168,9 @@ class ThreadsPlaywrightHelper:
             if not isinstance(cookie, dict):
                 continue
             name = str(cookie.get("name") or "").strip().lower()
-            trusted_domain = self._is_trusted_session_cookie_domain(cookie.get("domain"))
+            trusted_domain = self._is_trusted_session_cookie_domain(
+                str(cookie.get("domain") or "")
+            )
             if name in auth_cookie_names and trusted_domain:
                 return True
         return False
@@ -322,91 +373,97 @@ class ThreadsPlaywrightHelper:
             print(f"  Instagram 로그인 실패: {e}")
             return False
 
-    def get_logged_in_username(self) -> Optional[str]:
-        """
-        현재 로그인된 계정의 사용자명 확인
-        (프로필 페이지 URL에서 추출 - 가장 확실한 방법)
-
-        Returns:
-            사용자명 또는 None
-        """
+    @classmethod
+    def _username_from_self_profile_href(cls, raw_href: Any) -> Optional[str]:
+        href = str(raw_href or "").strip()
+        if not href:
+            return None
         try:
-            current_url = self.page.url
+            parsed = urlparse(href)
+        except (TypeError, ValueError):
+            return None
 
-            # 방법 1: 프로필 아이콘 클릭해서 자기 프로필로 이동
-            print("  프로필 페이지로 이동하여 사용자명 확인...")
+        if parsed.scheme or parsed.netloc:
+            if parsed.scheme != "https" or (parsed.hostname or "").lower() not in cls._THREADS_PROFILE_HOSTS:
+                return None
+        match = re.fullmatch(r"/@([^/]+)/?", parsed.path or "")
+        if not match:
+            return None
+        username = match.group(1)
+        if not cls._THREADS_USERNAME_PATTERN.fullmatch(username):
+            return None
+        return username
 
-            # 프로필 아이콘/버튼 클릭 시도
-            profile_btn_selectors = [
-                'a[href*="/@"][role="link"]',  # 프로필 링크
-                'nav a:last-child',  # 네비게이션 마지막 (보통 프로필)
-                '[aria-label*="프로필"]',
-                '[aria-label*="Profile"]',
-                'a[href*="/@"]:has(img)',  # 이미지가 있는 프로필 링크
-            ]
+    def _authoritative_self_profile_usernames(self) -> set[str]:
+        self.last_error = None
+        usernames: set[str] = set()
+        for selector in self._SELF_PROFILE_LINK_SELECTORS:
+            try:
+                locator = self.page.locator(selector)
+                count = locator.count()
+            except Exception:
+                continue
 
-            for selector in profile_btn_selectors:
+            # A self-navigation selector should resolve to at most a handful of
+            # responsive-layout duplicates. An excessive result is unexpected
+            # and therefore not safe identity evidence.
+            if count > 8:
+                self.last_error = "self_identity_ambiguous"
+                return set()
+
+            for index in range(count):
                 try:
-                    btns = self.page.locator(selector).all()
-                    for btn in btns:
-                        href = btn.get_attribute('href')
-                        # 프로필 페이지 링크만 (게시물 제외)
-                        if href and '/@' in href and '/post/' not in href:
-                            btn.click()
-                            time.sleep(2)
-
-                            # URL에서 사용자명 추출
-                            new_url = self.page.url
-                            if '/@' in new_url:
-                                username = new_url.split('/@')[-1].split('/')[0].split('?')[0]
-                                if username:
-                                    print(f"  프로필 페이지 URL에서 사용자명 발견: @{username}")
-                                    # 원래 페이지로 돌아가기
-                                    self.page.goto(current_url, wait_until="domcontentloaded", timeout=10000)
-                                    return username
+                    item = locator.nth(index)
+                    if not item.is_visible(timeout=500):
+                        continue
+                    # Even an exact accessible label is not evidence when it is
+                    # rendered inside a feed article. Treat DOM-inspection
+                    # failure as unknown rather than trusting the link.
+                    outside_feed = item.evaluate(
+                        "el => !Boolean(el.closest('article'))"
+                    )
+                    if outside_feed is not True:
+                        continue
+                    username = self._username_from_self_profile_href(
+                        item.get_attribute("href")
+                    )
                 except Exception:
                     continue
+                if username:
+                    usernames.add(username.lower())
+        return usernames
 
-            # 방법 2: 설정 > 계정 페이지에서 확인
-            print("  설정 페이지에서 사용자명 확인...")
-            try:
-                goto_threads_with_fallback(
-                    self.page,
-                    path="/settings/account",
-                    timeout=10000,
-                    retries_per_url=1,
-                )
-                time.sleep(2)
-
-                # 페이지 텍스트에서 @ 로 시작하는 사용자명 찾기
-                page_text = self.page.content()
-
-                # @username 패턴 찾기
-                import re
-                # 설정 페이지의 프로필 섹션에서 사용자명
-                username_match = re.search(r'/@([a-zA-Z0-9_.]+)', page_text)
-                if username_match:
-                    username = username_match.group(1)
-                    print(f"  설정 페이지에서 사용자명 발견: @{username}")
-                    self.page.goto(current_url, wait_until="domcontentloaded", timeout=10000)
-                    return username
-
-            except Exception as e:
-                print(f"  설정 페이지 확인 실패: {e}")
-
-            # 방법 3: 단순히 로그인 됐다고만 표시 (사용자명 없이)
-            print("  사용자명을 찾을 수 없음 (로그인 상태만 확인됨)")
+    def get_logged_in_username(self) -> Optional[str]:
+        """Return the unambiguous username from authoritative self-account UI."""
+        try:
+            usernames = self._authoritative_self_profile_usernames()
+        except Exception as exc:
+            print(f"  사용자명 확인 실패: {exc}")
+            self.last_error = "self_identity_unknown"
             return None
 
-        except Exception as e:
-            print(f"  사용자명 확인 실패: {e}")
+        if len(usernames) == 1:
+            username = next(iter(usernames))
+            self.last_error = None
+            print(f"  자기 프로필 내비게이션에서 사용자명 확인: @{username}")
+            return username
+        if len(usernames) > 1:
+            self.last_error = "self_identity_conflict"
+            print("  자기 계정 UI에서 충돌하는 사용자명이 발견되어 검증을 중단합니다.")
             return None
+
+        if self.last_error != "self_identity_ambiguous":
+            self.last_error = "self_identity_unknown"
+        print("  자기 계정 UI에서 사용자명을 확인하지 못했습니다.")
+        return None
 
     def verify_account(self, expected_username: str) -> bool:
         """로그인 계정이 기대 계정과 실제로 일치하는지 확인."""
         expected_raw = str(expected_username or "").strip()
         if not expected_raw:
-            return self.check_login_status()
+            self.last_error = "expected_identity_missing"
+            print("  검증할 Threads 사용자명이 설정되지 않아 안전상 중단합니다.")
+            return False
 
         if not self.check_login_status():
             print("  로그인되어 있지 않음")
@@ -552,8 +609,12 @@ class ThreadsPlaywrightHelper:
         """
         # 1. 현재 로그인 상태 확인
         if self.check_login_status():
+            if not username:
+                self.last_error = "expected_identity_missing"
+                print("  검증할 Threads 사용자명이 없어 로그인 사용을 중단합니다.")
+                return False
             # 계정 검증
-            if username and not self.verify_account(username):
+            if not self.verify_account(username):
                 print("  다른 계정으로 로그인되어 있음 - 자동 로그아웃 시도")
 
                 # 로그아웃 시도
@@ -583,27 +644,165 @@ class ThreadsPlaywrightHelper:
         if self.try_instagram_login():
             if username:
                 return self.verify_account(username)
-            return True
+            self.last_error = "expected_identity_missing"
+            print("  검증할 Threads 사용자명이 없어 로그인 사용을 중단합니다.")
+            return False
 
         print("  로그인 실패")
         return False
 
     # ========== 쓰레드 작성 ==========
 
+    @staticmethod
+    def _normalize_compose_text(value: Any) -> str:
+        """Normalize only whitespace while preserving all meaningful text."""
+        return " ".join(str(value or "").split())
+
+    @staticmethod
+    def _element_is_visible(element) -> bool:
+        try:
+            return bool(element.is_visible(timeout=500))
+        except TypeError:
+            try:
+                return bool(element.is_visible())
+            except Exception:
+                return False
+        except Exception:
+            return False
+
+    def _visible_editor_handles(self, container) -> list:
+        """Return visible editors that belong to one verified compose surface."""
+        try:
+            handles = container.locator(
+                self._COMPOSE_EDITOR_SELECTOR
+            ).element_handles()
+        except Exception:
+            return []
+        return [handle for handle in handles if self._element_is_visible(handle)]
+
+    def _visible_controls_with_labels(self, container, labels: frozenset[str]) -> list:
+        """Return exact-label, visible controls within one compose surface."""
+        try:
+            controls = container.locator(self._COMPOSE_POST_CONTROL_SELECTOR)
+            count = controls.count()
+        except Exception:
+            return []
+
+        matches = []
+        for index in range(count):
+            try:
+                control = controls.nth(index)
+                if not self._element_is_visible(control):
+                    continue
+                label = self._normalize_compose_text(control.inner_text()).casefold()
+                if label in labels:
+                    matches.append(control)
+            except Exception:
+                continue
+        return matches
+
+    def _visible_post_controls(self, container) -> list:
+        """Return exact-label, visible Post controls within a compose surface."""
+        return self._visible_controls_with_labels(
+            container,
+            self._COMPOSE_POST_LABELS,
+        )
+
+    def _active_compose_container(self):
+        """Locate one unambiguous visible compose container, never the page root."""
+        selectors = list(self._COMPOSE_CONTAINER_SELECTORS)
+        try:
+            path = urlparse(str(self.page.url or "")).path.casefold()
+        except Exception:
+            path = ""
+        if path.rstrip("/").endswith(("/compose", "/intent/post")):
+            # Direct compose routes sometimes render without a dialog or form.
+            # `main` is permitted only on those dedicated routes.
+            selectors.append("main")
+
+        for selector in selectors:
+            try:
+                candidates = self.page.locator(selector)
+                candidate_count = candidates.count()
+            except Exception:
+                continue
+
+            qualified = []
+            for index in range(candidate_count):
+                try:
+                    candidate = candidates.nth(index)
+                    if not self._element_is_visible(candidate):
+                        continue
+                    if not self._visible_editor_handles(candidate):
+                        continue
+                    if not self._visible_post_controls(candidate):
+                        continue
+                    qualified.append(candidate)
+                except Exception:
+                    continue
+
+            if len(qualified) == 1:
+                return qualified[0]
+            if len(qualified) > 1:
+                self.last_error = "compose_scope_ambiguous"
+                return None
+
+        return None
+
+    def _compose_editor_handles(self) -> list:
+        container = self._active_compose_container()
+        if container is None:
+            return []
+        return self._visible_editor_handles(container)
+
+    def _read_compose_editor_texts(self) -> Optional[list[str]]:
+        """Read visible editor contents from the active compose surface only."""
+        handles = self._compose_editor_handles()
+        if not handles:
+            return None
+
+        contents = []
+        for handle in handles:
+            try:
+                contents.append(
+                    str(
+                        handle.evaluate(
+                            """el => {
+                                if ('value' in el && el.value !== undefined && el.value !== null) {
+                                    return el.value;
+                                }
+                                return el.innerText || el.textContent || '';
+                            }"""
+                        )
+                        or ""
+                    )
+                )
+            except Exception:
+                return None
+        return contents
+
+    def _verify_compose_paragraphs(self, paragraphs: list[str]) -> bool:
+        """Require an exact whitespace-normalized editor/payload match."""
+        observed = self._read_compose_editor_texts()
+        if observed is None or len(observed) != len(paragraphs):
+            self.last_error = "thread_structure_unverified"
+            return False
+
+        expected_normalized = [
+            self._normalize_compose_text(paragraph) for paragraph in paragraphs
+        ]
+        observed_normalized = [
+            self._normalize_compose_text(content) for content in observed
+        ]
+        if observed_normalized != expected_normalized:
+            self.last_error = "thread_content_unverified"
+            return False
+        return True
+
     def _compose_editor_available(self) -> bool:
         """Return True when a Threads compose editor is visible."""
         try:
-            if self.page.locator('textarea, div[contenteditable="true"]').count() > 0:
-                return True
-
-            post_button = self.page.locator(
-                'div[role="button"]:has-text("게시"), '
-                'div[role="button"]:has-text("Post"), '
-                'button:has-text("게시"), '
-                'button:has-text("Post")'
-            ).count()
-            dialog = self.page.locator('div[role="dialog"], form').count()
-            return post_button > 0 and dialog > 0
+            return bool(self._compose_editor_handles())
         except Exception:
             return False
 
@@ -732,9 +931,7 @@ class ThreadsPlaywrightHelper:
             textarea 개수
         """
         try:
-            # 다양한 textarea selector
-            textareas = self.page.locator('textarea, div[contenteditable="true"]').count()
-            return textareas
+            return len(self._compose_editor_handles())
         except Exception:
             return 0
 
@@ -746,15 +943,16 @@ class ThreadsPlaywrightHelper:
             비어 있는 textarea index (없으면 None)
         """
         try:
-            textareas = self.page.locator('textarea, div[contenteditable="true"]')
-            total = textareas.count()
+            textareas = self._compose_editor_handles()
+            total = len(textareas)
             empty_indices = []
 
             for idx in range(total):
                 try:
-                    content = textareas.nth(idx).evaluate("el => (el.value || el.innerText || '').trim()")
+                    content = textareas[idx].evaluate("el => (el.value || el.innerText || '').trim()")
                 except Exception:
-                    content = ""
+                    # An unreadable editor is not evidence that it is empty.
+                    continue
 
                 if not content:
                     empty_indices.append(idx)
@@ -781,9 +979,8 @@ class ThreadsPlaywrightHelper:
             True: 성공, False: 실패
         """
         try:
-            textarea_selector = 'textarea, div[contenteditable="true"]'
-            textareas = self.page.locator(textarea_selector)
-            total_textareas = textareas.count()
+            textareas = self._compose_editor_handles()
+            total_textareas = len(textareas)
 
             print(f"      [type_in_textarea] 전체 textarea 개수: {total_textareas}, 입력할 index: {index}")
 
@@ -793,10 +990,7 @@ class ThreadsPlaywrightHelper:
                 return False
 
             def textarea_handles():
-                try:
-                    return list(self.page.locator(textarea_selector).element_handles())
-                except Exception:
-                    return []
+                return self._compose_editor_handles()
 
             handles = textarea_handles()
             if len(handles) <= index:
@@ -813,7 +1007,8 @@ class ThreadsPlaywrightHelper:
                 trimmed_existing = (existing_text or "").strip()
                 print(f"      Textarea[{index}] 타입: {tag_name}, 기존 내용 길이: {len(trimmed_existing)}자")
             except Exception:
-                trimmed_existing = ""
+                self.last_error = "textarea_state_unknown"
+                return False
 
             if require_empty and trimmed_existing:
                 print(f"      Textarea[{index}]에 기존 내용이 있어 덮어쓰지 않음")
@@ -849,18 +1044,9 @@ class ThreadsPlaywrightHelper:
                     return ""
 
             def content_matches(actual: str) -> bool:
-                expected = str(text or "").strip()
-                observed = str(actual or "").strip()
-                if not expected:
-                    return True
-                if observed == expected:
-                    return True
-                expected_compact = " ".join(expected.split())
-                observed_compact = " ".join(observed.split())
-                if expected_compact and expected_compact in observed_compact:
-                    return True
-                min_chars = max(8, int(len(expected_compact) * 0.8))
-                return len(observed_compact) >= min_chars
+                expected = self._normalize_compose_text(text)
+                observed = self._normalize_compose_text(actual)
+                return observed == expected
 
             def focus_target() -> None:
                 current_textarea().click(timeout=5000)
@@ -938,320 +1124,129 @@ class ThreadsPlaywrightHelper:
             return False
 
     def click_add_to_thread(self) -> bool:
-        """
-        '스레드에 추가' 버튼/영역 클릭
+        """Click one exact Add-to-thread control in the active composer."""
+        container = self._active_compose_container()
+        if container is None:
+            self.last_error = self.last_error or "compose_scope_unverified"
+            return False
 
-        Returns:
-            True: 성공, False: 실패
-        """
+        controls = self._visible_controls_with_labels(
+            container,
+            self._COMPOSE_ADD_LABELS,
+        )
+        if len(controls) != 1:
+            self.last_error = (
+                "add_thread_button_missing"
+                if not controls
+                else "add_thread_button_ambiguous"
+            )
+            return False
+
         try:
-            # 다양한 selector 시도 (우선순위 순)
-            selectors = [
-                # 1. Playwright text selector (정확한 텍스트 매칭)
-                'text=스레드에 추가',
-                'text=Add to thread',
-
-                # 2. 정확한 텍스트를 가진 요소 (text-is는 정확매칭)
-                'div:text-is("스레드에 추가")',
-                'span:text-is("스레드에 추가")',
-                'button:text-is("스레드에 추가")',
-
-                # 3. 한글 표기 (has-text는 부분 매칭)
-                'div:has-text("스레드에 추가")',
-                'span:has-text("스레드에 추가")',
-                'button:has-text("스레드에 추가")',
-                'a:has-text("스레드에 추가")',
-
-                # 4. 영어
-                'div:has-text("Add to thread")',
-                'span:has-text("Add to thread")',
-                'button:has-text("Add to thread")',
-                'a:has-text("Add to thread")',
-
-                # 5. 부분 텍스트 - visible 조건 추가
-                'div:has-text("스레드") >> visible=true',
-                'span:has-text("스레드에")',
-
-                # 6. 클릭 가능한 div (role 또는 tabindex) - 텍스트 검증 필수
-                'div[role="button"]',
-                'div[tabindex="0"]',
-
-                # 7. 광범위 - compose 창 내의 모든 클릭 가능 요소
-                'form div[role="button"]',
-                'form div[tabindex]',
-            ]
-
-            print("  '스레드에 추가' 버튼 찾는 중...")
-
-            for i, selector in enumerate(selectors):
-                try:
-                    btn = self.page.locator(selector).first
-                    count = btn.count()
-
-                    if count > 0:
-                        # 디버그: 클릭할 요소 정보 먼저 확인
-                        element_text = btn.evaluate("el => el.innerText || el.textContent || el.placeholder || ''")
-                        element_tag = btn.evaluate("el => el.tagName")
-
-                        print(f"    후보 발견 (selector #{i+1}): <{element_tag}> '{element_text[:50]}'")
-
-                        # text selector는 정확하므로 바로 클릭
-                        if selector.startswith('text='):
-                            print("    text selector - 바로 클릭")
-                            btn.click()
-                            print("    '스레드에 추가' 버튼 클릭 완료")
-                            time.sleep(2)
-                            return True
-
-                        # "스레드에 추가"가 포함되어 있으면 우선 허용
-                        if "스레드에 추가" in element_text or "add to thread" in element_text.lower():
-                            print("    '스레드에 추가' 텍스트 포함 - 클릭")
-                            btn.click()
-                            print("    '스레드에 추가' 버튼 클릭 완료")
-                            time.sleep(2)
-                            return True
-
-                        # 텍스트가 너무 길면 컨테이너 DIV일 가능성 높음 (100자 이상)
-                        if len(element_text) > 100:
-                            print(f"    제외됨: 텍스트 너무 길음 ({len(element_text)}자) - 컨테이너 DIV")
-                            continue
-
-                        # "만들기", "Post", "게시" 등 잘못된 버튼 제외
-                        exclude_texts = ["만들기", "post", "게시", "취소", "cancel", "닫기", "close"]
-                        if any(exc in element_text.lower() for exc in exclude_texts):
-                            print(f"    제외됨: '{element_text[:30]}' (잘못된 버튼)")
-                            continue
-
-                        # "스레드에 추가" 또는 "내용을 더 추가" 텍스트 포함 여부 확인
-                        valid_texts = ["스레드에 추가", "스레드", "내용을 더 추가", "add to thread", "add more"]
-                        if selector in ['div[role="button"]', 'div[tabindex="0"]', 'form div[role="button"]', 'form div[tabindex]']:
-                            # 광범위한 selector는 텍스트 검증 필수
-                            if not any(valid in element_text.lower() for valid in valid_texts):
-                                print(f"    제외됨: '{element_text[:30]}' (관련 텍스트 없음)")
-                                continue
-
-                        print("    올바른 버튼 확인")
-                        btn.click()
-                        print("    '스레드에 추가' 버튼 클릭 완료")
-                        time.sleep(2)  # UI 업데이트 대기
-                        return True
-                except Exception:
-                    # 이 selector는 실패, 다음으로
-                    continue
-
-            # 모든 selector 실패 - 디버그 정보 출력
-            print("  '스레드에 추가' 버튼을 찾을 수 없음 (모든 selector 실패)")
-            print("  페이지의 모든 클릭 가능 요소 분석 중...")
-
-            try:
-                # 모든 버튼, div[role=button], div[tabindex] 찾기
-                all_buttons = self.page.locator('button, div[role="button"], div[tabindex], a[role="button"]').all()
-                print(f"  총 {len(all_buttons)}개 클릭 가능 요소 발견:")
-
-                for idx, btn in enumerate(all_buttons[:20]):  # 처음 20개만
-                    try:
-                        tag = btn.evaluate("el => el.tagName")
-                        text = btn.evaluate("el => (el.innerText || el.textContent || el.placeholder || el.getAttribute('aria-label') || '').substring(0, 50)")
-                        role = btn.evaluate("el => el.getAttribute('role') || ''")
-                        classes = btn.evaluate("el => el.className || ''")
-                        print(f"      [{idx}] <{tag}> role={role} text='{text}' class='{classes[:30]}'")
-                    except Exception:
-                        pass
-
-                debug_path = self._save_debug_screenshot("debug_add_button")
-                if debug_path:
-                    print(f"  Debug screenshot saved: {debug_path}")
-            except Exception as e:
-                print(f"  디버그 정보 출력 실패: {e}")
-
+            controls[0].click()
+            time.sleep(2)
+            return True
+        except Exception:
+            self.last_error = "add_thread_button_click_failed"
             return False
-
-        except Exception as e:
-            print(f"  '스레드에 추가' 버튼 클릭 실패: {e}")
-            return False
-
     def click_post_button(self) -> bool:
-        """
-        Post 버튼 클릭
-
-        Returns:
-            True: 성공, False: 실패
-        """
-        try:
-            print("  게시 버튼 찾는 중...")
-
-            # 1차: Playwright 직접 클릭 - 하단 우측의 "게시" 버튼 찾기
-            try:
-                # "게시" 텍스트를 가진 버튼 찾기
-                post_btns = self.page.locator('div[role="button"]').all()
-                target_btn = None
-                max_y = -1  # Y좌표가 가장 큰 버튼 (화면 하단에 위치)
-
-                for btn in post_btns:
-                    try:
-                        text = btn.inner_text().strip()
-                        if text in ['게시', 'Post', '게시하기']:
-                            box = btn.bounding_box()
-                            if box and box['width'] > 0 and box['height'] > 0:
-                                # 하단에 있는 버튼 선택 (Y좌표가 큰 것)
-                                if box['y'] > max_y:
-                                    max_y = box['y']
-                                    target_btn = btn
-                    except Exception:
-                        continue
-
-                if target_btn:
-                    box = target_btn.bounding_box()
-                    if box:
-                        click_x = box['x'] + box['width'] / 2
-                        click_y = box['y'] + box['height'] / 2
-                        print(f"  게시 버튼 발견 (하단): ({click_x:.0f}, {click_y:.0f})")
-
-                        # 마우스로 직접 클릭
-                        self.page.mouse.click(click_x, click_y)
-                        print("  게시 버튼 마우스 클릭 완료")
-                        time.sleep(5)
-                        return True
-
-            except Exception as e:
-                print(f"  Playwright 직접 클릭 실패: {e}")
-
-            # 2차: JavaScript로 클릭 (fallback) - 하단 버튼 찾기
-            try:
-                result = self.page.evaluate("""
-                    () => {
-                        const elements = document.querySelectorAll('div[role="button"], button');
-                        let postBtn = null;
-                        let maxY = -1;
-
-                        for (const el of elements) {
-                            const text = (el.innerText || el.textContent || '').trim();
-                            if (text === '게시' || text === 'Post' || text === '게시하기') {
-                                const rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    // 하단에 있는 버튼 선택 (Y좌표가 큰 것)
-                                    if (rect.y > maxY) {
-                                        maxY = rect.y;
-                                        postBtn = el;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (postBtn) {
-                            postBtn.scrollIntoView({block: 'center'});
-                            postBtn.click();
-                            postBtn.dispatchEvent(new MouseEvent('click', {
-                                bubbles: true,
-                                cancelable: true,
-                                view: window
-                            }));
-                            return 'clicked at y=' + maxY;
-                        }
-                        return 'not found';
-                    }
-                """)
-
-                if result.startswith('clicked'):
-                    print(f"  게시 버튼 JS 클릭 성공 ({result})")
-                    time.sleep(5)
-                    return True
-
-            except Exception as e:
-                print(f"  JS 클릭 시도 실패: {e}")
-
-            # 2차: Playwright force 클릭 (요소 가림 무시)
-            try:
-                print("  Playwright force 클릭 시도...")
-                selectors = [
-                    'div[role="button"]:has-text("게시")',
-                    'div[role="button"]:has-text("Post")',
-                    'button:has-text("게시")',
-                    'button:has-text("Post")',
-                ]
-
-                for selector in selectors:
-                    btns = self.page.locator(selector)
-                    count = btns.count()
-
-                    # 가장 하단 버튼 찾기 (Y좌표가 큰 것)
-                    bottom_btn = None
-                    bottom_y = -1
-
-                    for idx in range(count):
-                        btn = btns.nth(idx)
-                        try:
-                            text = btn.inner_text().strip()
-                            if text in ['게시', 'Post', '게시하기']:
-                                box = btn.bounding_box()
-                                if box and box['y'] > bottom_y:
-                                    bottom_y = box['y']
-                                    bottom_btn = btn
-                        except Exception:
-                            continue
-
-                    if bottom_btn:
-                        # force=True로 클릭 (다른 요소가 가려도 클릭)
-                        bottom_btn.click(force=True)
-                        print(f"  게시 버튼 force 클릭 성공 (y={bottom_y})")
-                        time.sleep(5)
-                        return True
-
-            except Exception as e:
-                print(f"  Force 클릭 시도 실패: {e}")
-
-            # 3차: Ctrl+Enter 단축키
-            try:
-                print("  Ctrl+Enter 시도...")
-                textareas = self.page.locator('div[contenteditable="true"]')
-                if textareas.count() > 0:
-                    textareas.last.focus()
-                    time.sleep(0.3)
-
-                self.page.keyboard.press("Control+Enter")
-                time.sleep(5)
-                print("  Ctrl+Enter 전송 완료")
-                return True
-
-            except Exception as e:
-                print(f"  Ctrl+Enter 시도 실패: {e}")
-
-            # 4차: 좌표 기반 클릭 (다이얼로그 하단 우측 영역)
-            try:
-                print("  좌표 기반 클릭 시도...")
-                viewport = self.page.viewport_size
-                if viewport:
-                    # 다이얼로그 하단 우측 영역 (게시 버튼이 보통 여기 있음)
-                    # 다이얼로그는 보통 화면 중앙에 위치, 게시 버튼은 다이얼로그 하단 우측
-                    x = viewport['width'] // 2 + 200  # 중앙에서 우측으로
-                    y = viewport['height'] // 2 + 200  # 중앙에서 하단으로
-                    self.page.mouse.click(x, y)
-                    print(f"  좌표 클릭 완료 ({x}, {y})")
-                    time.sleep(5)
-                    post_btn_still_visible = self.page.locator(
-                        'div[role="button"]:has-text("게시"), div[role="button"]:has-text("Post"), '
-                        'button:has-text("게시"), button:has-text("Post")'
-                    ).count() > 0
-                    if not post_btn_still_visible:
-                        return True
-                    print("  좌표 클릭 후에도 게시 버튼이 남아 있어 실패로 처리")
-            except Exception as e:
-                print(f"  좌표 클릭 실패: {e}")
-
-            print("  게시 버튼 클릭 모든 방법 실패")
-            try:
-                debug_path = self._save_debug_screenshot("debug_post_button")
-                if debug_path:
-                    print(f"  Debug screenshot saved: {debug_path}")
-            except Exception:
-                pass
+        """Click exactly one visible Post control in the active compose surface."""
+        print("  게시 버튼 찾는 중...")
+        container = self._active_compose_container()
+        if container is None:
+            self.last_error = self.last_error or "compose_scope_unverified"
+            print("  활성 작성창을 확인하지 못해 게시를 중단합니다")
             return False
 
-        except Exception as e:
-            print(f"  게시 버튼 클릭 실패: {e}")
+        controls = self._visible_post_controls(container)
+        if len(controls) != 1:
+            self.last_error = (
+                "post_button_missing" if not controls else "post_button_ambiguous"
+            )
+            print(f"  활성 작성창의 게시 버튼을 하나로 확정하지 못했습니다 ({len(controls)}개)")
+            return False
+
+        try:
+            # One normal Playwright click only. Force, JavaScript dispatch,
+            # keyboard shortcuts, and coordinate fallbacks can target unrelated
+            # UI or replay a non-idempotent mutation, so they are prohibited.
+            # From this exact point onward a dispatch may have happened even if
+            # Playwright later raises (for example during navigation teardown).
+            self.external_post_attempted = True
+            controls[0].click()
+            print("  활성 작성창의 게시 버튼 클릭 완료")
+            return True
+        except Exception as exc:
+            self.last_error = "post_button_click_failed"
+            print(f"  게시 버튼 클릭 실패: {type(exc).__name__}")
             return False
 
     # ========== 이미지 업로드 ==========
+
+    @staticmethod
+    def _file_input_has_expected_attachment(file_input, expected_name: str) -> bool:
+        try:
+            state = file_input.evaluate(
+                """el => ({
+                    count: el.files ? el.files.length : 0,
+                    names: el.files ? Array.from(el.files, file => file.name) : []
+                })"""
+            )
+        except Exception:
+            return False
+        if not isinstance(state, dict):
+            return False
+        names = state.get("names")
+        return state.get("count") == 1 and names == [expected_name]
+
+    def _compose_row_handle(self, container, editor):
+        """Resolve the smallest visible-editor subtree for one composer row."""
+        try:
+            container_handle = container.element_handle()
+            if container_handle is None:
+                return None
+            row_handle = editor.evaluate_handle(
+                """(editor, composer) => {
+                    const selector = 'textarea, div[contenteditable="true"]';
+                    const visible = el => {
+                        const style = window.getComputedStyle(el);
+                        const rect = el.getBoundingClientRect();
+                        return style.visibility !== 'hidden' &&
+                            style.display !== 'none' && rect.width > 0 && rect.height > 0;
+                    };
+                    let row = editor;
+                    while (row.parentElement && row.parentElement !== composer) {
+                        const parent = row.parentElement;
+                        const editors = Array.from(parent.querySelectorAll(selector))
+                            .filter(visible);
+                        if (editors.length > 1) break;
+                        row = parent;
+                    }
+                    return row === editor ? null : row;
+                }""",
+                container_handle,
+            )
+            return row_handle.as_element()
+        except Exception:
+            return None
+
+    def _visible_descendants(self, scope, selector: str) -> list:
+        try:
+            if hasattr(scope, "query_selector_all"):
+                handles = scope.query_selector_all(selector)
+            else:
+                handles = scope.locator(selector).element_handles()
+        except Exception:
+            return []
+        return [handle for handle in handles if self._element_is_visible(handle)]
+
+    def _media_row_state(self, row) -> tuple[int, bool, bool]:
+        previews = len(self._visible_descendants(row, self._MEDIA_PREVIEW_SELECTOR))
+        processing = bool(
+            self._visible_descendants(row, self._MEDIA_PROCESSING_SELECTOR)
+        )
+        error = bool(self._visible_descendants(row, self._MEDIA_ERROR_SELECTOR))
+        return previews, processing, error
 
     def upload_image(self, image_path: str, *, post_index: int = 0) -> bool:
         """
@@ -1266,38 +1261,97 @@ class ThreadsPlaywrightHelper:
         import os
         try:
             if not image_path or not os.path.exists(image_path):
-                print(f"  이미지 파일 없음: {image_path}")
+                print("  이미지 파일 없음")
+                self.last_error = "media_file_missing"
                 return False
 
-            print(f"  이미지 업로드 중: {image_path}")
+            print("  이미지 업로드 중")
+            container = self._active_compose_container()
+            editors = (
+                self._visible_editor_handles(container)
+                if container is not None
+                else []
+            )
+            if container is None or not (0 <= post_index < len(editors)):
+                self.last_error = "media_compose_scope_unverified"
+                print("  이미지 대상 작성 행을 확인하지 못했습니다")
+                return False
 
-            # Threads renders one file input per composer row on some versions,
-            # and a single input bound to the focused row on others. Prefer the
-            # row-specific input, while retaining the single-input fallback.
-            file_inputs = self.page.locator('input[type="file"]')
+            # All file inputs must be descendants of the verified active
+            # composer. When Threads exposes one shared input, focus the exact
+            # row first so the input is bound to that row. Any other cardinality
+            # is ambiguous and therefore fails closed.
+            file_inputs = container.locator('input[type="file"]')
             input_count = file_inputs.count()
-
-            if input_count > 0:
-                file_input = (
-                    file_inputs.nth(post_index)
-                    if input_count > post_index
-                    else file_inputs.first
-                )
-                file_input.set_input_files(os.path.abspath(image_path))
-                time.sleep(3)  # 이미지 업로드 대기
-                print("  이미지 업로드 완료")
-                return True
+            if input_count == len(editors):
+                file_input = file_inputs.nth(post_index)
+            elif input_count == 1:
+                editors[post_index].click()
+                file_input = file_inputs.first
             else:
-                print("  이미지 업로드 input 요소를 찾을 수 없음")
+                self.last_error = "media_input_ambiguous"
+                print(f"  작성 행과 이미지 입력을 안전하게 연결할 수 없습니다 ({input_count}개)")
                 return False
+
+            target_row = self._compose_row_handle(container, editors[post_index])
+            if target_row is None:
+                self.last_error = "media_row_unverified"
+                print("  이미지 첨부 대상 작성 행을 확인하지 못했습니다")
+                return False
+            baseline_previews, _baseline_processing, baseline_error = (
+                self._media_row_state(target_row)
+            )
+            if baseline_error:
+                self.last_error = "media_attachment_rejected"
+                return False
+
+            expected_name = os.path.basename(os.path.abspath(image_path))
+            file_input.set_input_files(os.path.abspath(image_path))
+            try:
+                verify_polls = int(
+                    os.getenv("THREAD_AUTO_MEDIA_VERIFY_POLLS", "60") or "60"
+                )
+            except ValueError:
+                verify_polls = 60
+            verify_polls = max(1, min(verify_polls, 120))
+            expected_file_state_seen = False
+
+            for _attempt in range(verify_polls):
+                preview_count, processing, upload_error = self._media_row_state(
+                    target_row
+                )
+                if upload_error:
+                    self.last_error = "media_attachment_rejected"
+                    print("  이미지 첨부 오류가 표시되어 중단합니다")
+                    return False
+                expected_file_state_seen = (
+                    expected_file_state_seen
+                    or self._file_input_has_expected_attachment(
+                        file_input,
+                        expected_name,
+                    )
+                )
+                if (
+                    expected_file_state_seen
+                    and preview_count > baseline_previews
+                    and not processing
+                ):
+                    print("  이미지 미리보기와 처리 완료 상태 확인")
+                    return True
+                time.sleep(0.5)
+
+            self.last_error = "media_attachment_unverified"
+            print("  이미지 미리보기 또는 처리 완료 상태를 확인하지 못했습니다")
+            return False
 
         except Exception as e:
-            print(f"  이미지 업로드 실패: {e}")
+            self.last_error = "media_upload_failed"
+            print(f"  이미지 업로드 실패: {type(e).__name__}")
             return False
 
     # ========== 통합 워크플로우 ==========
 
-    def create_thread_direct(self, posts_data) -> bool:
+    def create_thread_direct(self, posts_data, *, expected_username: str) -> bool:
         """
         Playwright로 직접 스레드 생성 (AI 없이)
 
@@ -1305,10 +1359,18 @@ class ThreadsPlaywrightHelper:
             posts_data: 포스트 데이터 리스트
                        - List[str]: 문단 텍스트 리스트 (기존 방식)
                        - List[dict]: [{'text': '...', 'image_path': '...'}, ...]
+            expected_username: 게시 직전 다시 검증할 Threads 사용자명
 
         Returns:
             True: 성공, False: 실패
         """
+        self.external_post_attempted = False
+        expected_identity = str(expected_username or "").strip()
+        if not expected_identity:
+            self.last_error = "expected_identity_missing"
+            print("  게시할 Threads 사용자명이 없어 안전상 중단합니다.")
+            return False
+
         try:
             total_timeout_seconds = int(os.getenv("THREAD_AUTO_PLAYWRIGHT_TOTAL_TIMEOUT_SEC", "180") or "180")
             deadline = time.monotonic() + max(total_timeout_seconds, 30)
@@ -1323,18 +1385,25 @@ class ThreadsPlaywrightHelper:
             # Publishing structure is intentionally immutable: one root post
             # followed by one product comment. Do not merge these even when a
             # legacy environment variable requests a single post.
-            if posts_data and isinstance(posts_data[0], str):
-                # Legacy callers are supported only when they provide both parts.
-                paragraphs = posts_data
-                media_paths = [None for _ in posts_data]
-            else:
-                # Canonical payload: root_post + product_comment.
-                paragraphs = [post.get('text', '') for post in posts_data]
-                media_paths = [post.get('image_path') for post in posts_data]
-
-            paragraphs = [str(paragraph or "").strip() for paragraph in paragraphs if str(paragraph or "").strip()]
-            if len(paragraphs) != 2:
+            if not isinstance(posts_data, (list, tuple)) or len(posts_data) != 2:
                 print("  업로드 구조 오류: 본문 1개와 상품 댓글 1개가 필요합니다")
+                self.last_error = "invalid_thread_structure"
+                return False
+
+            if all(isinstance(post, str) for post in posts_data):
+                paragraphs = [str(post).strip() for post in posts_data]
+                media_paths = [None, None]
+            elif all(isinstance(post, dict) for post in posts_data):
+                paragraphs = [
+                    str(post.get("text") or "").strip() for post in posts_data
+                ]
+                media_paths = [post.get("image_path") for post in posts_data]
+            else:
+                paragraphs = []
+                media_paths = []
+
+            if len(paragraphs) != 2 or any(not text for text in paragraphs):
+                print("  업로드 구조 오류: 두 문단 모두 비어 있지 않아야 합니다")
                 self.last_error = "invalid_thread_structure"
                 return False
 
@@ -1461,23 +1530,38 @@ class ThreadsPlaywrightHelper:
                     self.last_error = f"media_upload_failed:{i}"
                     return False
 
-            # 4. 최종 검증
+            # 4. Post 버튼 클릭 직전 계정과 작성 내용을 모두 재검증한다.
+            # 계정 검증 도중 DOM이 다시 렌더링될 수 있으므로 내용 검증이 반드시
+            # identity 검증 뒤, 외부 게시 시도 플래그를 세우기 전에 위치해야 한다.
             print("\n  최종 검증...")
-            final_count = self.count_textareas()
-            if final_count != total:
-                print(f"  Textarea 개수 불일치 ({final_count}/{total})")
-
-            # 5. Post 버튼 클릭
             if is_timed_out("before_click_post"):
                 return False
+            if not self.verify_account(expected_identity):
+                self.last_error = "account_identity_unverified"
+                print("  게시 직전 Threads 계정을 확인하지 못해 안전상 중단합니다.")
+                return False
+            if not self._verify_compose_paragraphs(paragraphs):
+                if self.last_error == "thread_structure_unverified":
+                    actual_count = self.count_textareas()
+                    print(f"  활성 작성창 편집기 개수 불일치 ({actual_count}/{total})")
+                else:
+                    print("  활성 작성창 내용이 입력 문단과 정확히 일치하지 않습니다")
+                return False
+
+            # 5. Post 버튼 클릭
             print("\n  게시 중...")
+            attempted_after = time.time()
             if not self.click_post_button():
                 return False
 
             # 6. 게시 완료 검증 (프로필 최신 글 매칭)
             if is_timed_out("before_verify_post"):
                 return False
-            if not self.verify_post_success(paragraphs[0] if paragraphs else ""):
+            if not self.verify_post_success(
+                paragraphs[0],
+                expected_username=expected_identity,
+                attempted_after=attempted_after,
+            ):
                 print("  게시 검증 실패 (프로필에서 최신 글 확인 불가)")
                 return False
 
@@ -1489,44 +1573,151 @@ class ThreadsPlaywrightHelper:
             self.last_error = str(e)
             return False
 
-    def verify_post_success(self, first_paragraph: str = "") -> bool:
-        """
-        게시 성공 여부 확인 (DOM 체크)
-
-        Returns:
-            True: 성공, False: 실패
-        """
+    @classmethod
+    def _is_expected_post_permalink(cls, raw_href: Any, username: str) -> bool:
         try:
-            # 게시 처리 대기 (Threads가 서버에 전송하는 시간)
-            print("  게시 처리 대기 중...")
-            time.sleep(3)
+            parsed = urlparse(str(raw_href or "").strip())
+        except (TypeError, ValueError):
+            return False
+        if parsed.scheme or parsed.netloc:
+            if parsed.scheme != "https":
+                return False
+            if (parsed.hostname or "").casefold() not in cls._THREADS_PROFILE_HOSTS:
+                return False
+        return bool(
+            re.fullmatch(
+                rf"/@{re.escape(username)}/post/[^/]+/?",
+                parsed.path or "",
+                flags=re.IGNORECASE,
+            )
+        )
 
-            # Compose 창이 닫혔는지 확인 (여러 번 시도)
-            for attempt in range(3):
-                # "게시" 버튼이 여전히 보이는지 확인 (compose 창이 열려있는 더 정확한 지표)
-                post_btn_visible = self.page.locator('div[role="button"]:has-text("게시"), div[role="button"]:has-text("Post")').count() > 0
+    @staticmethod
+    def _parse_threads_timestamp(raw_value: Any) -> Optional[float]:
+        value = str(raw_value or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
 
-                # compose 모달 체크 (role="dialog"나 특정 클래스)
-                compose_modal = self.page.locator('div[role="dialog"]').count() > 0
+    def _profile_article_proves_post(
+        self,
+        article,
+        *,
+        expected_text: str,
+        expected_username: str,
+        attempted_after: float,
+    ) -> bool:
+        expected_normalized = self._normalize_compose_text(expected_text)
+        if not expected_normalized:
+            return False
 
-                if not post_btn_visible and not compose_modal:
-                    print("  Compose 창이 닫혔습니다 - 게시 성공")
+        exact_text_found = False
+        try:
+            text_nodes = article.locator(
+                '[data-testid="post-text"], div[dir="auto"], span[dir="auto"]'
+            )
+            for index in range(min(text_nodes.count(), 40)):
+                node = text_nodes.nth(index)
+                if not self._element_is_visible(node):
+                    continue
+                if self._normalize_compose_text(node.inner_text()) == expected_normalized:
+                    exact_text_found = True
+                    break
+        except Exception:
+            return False
+        if not exact_text_found:
+            return False
+
+        recent_timestamp_found = False
+        try:
+            timestamps = article.locator("time[datetime]")
+            for index in range(min(timestamps.count(), 5)):
+                post_timestamp = self._parse_threads_timestamp(
+                    timestamps.nth(index).get_attribute("datetime")
+                )
+                # Allow only a small clock-skew margin; an older matching post
+                # must never be accepted as evidence for this attempt.
+                if post_timestamp is not None and post_timestamp + 5 >= attempted_after:
+                    recent_timestamp_found = True
+                    break
+        except Exception:
+            return False
+        if not recent_timestamp_found:
+            return False
+
+        try:
+            permalinks = article.locator('a[href*="/post/"]')
+            for index in range(min(permalinks.count(), 10)):
+                if self._is_expected_post_permalink(
+                    permalinks.nth(index).get_attribute("href"),
+                    expected_username,
+                ):
                     return True
+        except Exception:
+            return False
+        return False
 
-                if attempt < 2:
-                    print(f"  Compose 창 닫힘 대기 중... ({attempt + 1}/3)")
-                    time.sleep(2)
-
-            # 마지막으로 URL 변경 확인 (compose에서 벗어났는지)
-            current_url = self.page.url
-            if '/compose' not in current_url.lower():
-                print("  compose 페이지에서 이동됨 - 게시 성공 추정")
-                return True
-
-            # compose 상태가 유지되면 실제 게시 실패로 판단
-            print("  compose 상태가 유지됨 - 게시 실패로 판단")
+    def verify_post_success(
+        self,
+        first_paragraph: str,
+        *,
+        expected_username: str,
+        attempted_after: float,
+    ) -> bool:
+        """Require fresh, attributable evidence on the authoritative self profile."""
+        expected_text = str(first_paragraph or "").strip()
+        expected_raw = str(expected_username or "").strip().lstrip("@").casefold()
+        if "@" in expected_raw and "." in expected_raw.split("@")[-1]:
+            expected_raw = expected_raw.split("@", 1)[0]
+        if (
+            not expected_text
+            or not self._THREADS_USERNAME_PATTERN.fullmatch(expected_raw)
+            or not isinstance(attempted_after, (int, float))
+            or attempted_after <= 0
+        ):
+            self.last_error = "posting_unknown"
             return False
 
-        except Exception as e:
-            print(f"  검증 중 오류: {e}")
-            return False
+        print("  자기 프로필에서 새 게시물 증거 확인 중...")
+        profile_path = f"/@{expected_raw}"
+        for attempt in range(4):
+            try:
+                goto_threads_with_fallback(
+                    self.page,
+                    path=profile_path,
+                    timeout=15000,
+                    retries_per_url=1,
+                )
+                time.sleep(2)
+                if not self.verify_account(expected_raw):
+                    self.last_error = "posting_unknown"
+                    return False
+
+                articles = self.page.locator("article")
+                for index in range(min(articles.count(), 5)):
+                    article = articles.nth(index)
+                    if not self._element_is_visible(article):
+                        continue
+                    if self._profile_article_proves_post(
+                        article,
+                        expected_text=expected_text,
+                        expected_username=expected_raw,
+                        attempted_after=float(attempted_after),
+                    ):
+                        self.last_error = None
+                        print("  새 게시물 permalink, 내용, 시각 확인 완료")
+                        return True
+            except Exception:
+                pass
+            if attempt < 3:
+                time.sleep(2)
+
+        self.last_error = "posting_unknown"
+        print("  이번 게시 시도에서 생성된 새 게시물을 증명하지 못했습니다")
+        return False

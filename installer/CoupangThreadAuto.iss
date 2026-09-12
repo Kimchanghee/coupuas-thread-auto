@@ -1,5 +1,5 @@
 #ifndef MyAppVersion
-#define MyAppVersion "0.0.0"
+#error MyAppVersion must be supplied by build_installer.py from src/version.py
 #endif
 
 [Setup]

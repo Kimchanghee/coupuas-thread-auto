@@ -196,6 +196,39 @@ class MultiAccountUploadRunner:
         if self._log_callback is not None:
             self._log_callback(account_id, str(message or ""))
 
+    def _verify_identity_before_generation(self, account) -> None:
+        """Fail closed before content generation can reserve managed quota."""
+        agent = None
+        helper = None
+        try:
+            agent = self._browser_factory(profile_id=account.profile_id)
+            agent.start_browser()
+            self._navigator(agent.page)
+            helper = self._helper_factory(agent.page)
+            if not helper.check_login_status():
+                raise AccountBlockedError(
+                    "login_required",
+                    "Threads 로그인이 필요합니다.",
+                )
+            if not helper.verify_account(account.expected_username):
+                raise AccountBlockedError(
+                    "account_mismatch",
+                    f"설정된 @{account.expected_username} 계정과 로그인 계정이 다릅니다.",
+                )
+        except AccountBlockedError:
+            raise
+        except Exception as exc:
+            raise AccountBlockedError(
+                "account_identity_unverified",
+                "Threads 계정을 확인하지 못해 게시글 생성을 시작하지 않았습니다.",
+            ) from exc
+        finally:
+            if agent is not None:
+                try:
+                    agent.close(save_session=False)
+                except Exception:
+                    pass
+
     @staticmethod
     def _pending_count(queue_store) -> int:
         state = queue_store.snapshot()
@@ -556,6 +589,28 @@ class MultiAccountUploadRunner:
             queue_store.update_current(idempotency_key=idempotency_key)
 
         try:
+            self._verify_identity_before_generation(account)
+        except AccountBlockedError as exc:
+            queue_store.requeue_current()
+            queue_store.set_phase("blocked", last_error=str(exc))
+            self._log(
+                account_id,
+                "이 계정의 작업을 계속하려면 Threads 로그인을 확인해주세요.",
+            )
+            return AccountRunResult(
+                processed=False,
+                pending_count=self._pending_count(queue_store),
+                block_reason=exc.code,
+            )
+
+        if self._stop_requested(queue_store):
+            queue_store.requeue_current()
+            return AccountRunResult(
+                processed=False,
+                pending_count=self._pending_count(queue_store),
+            )
+
+        try:
             self._log(account_id, "상품 정보와 게시글을 생성하는 중...")
             reset_cancel = getattr(self._pipeline, "reset_cancel", None)
             if callable(reset_cancel):
@@ -693,6 +748,7 @@ class MultiAccountUploadRunner:
                 pending_count=self._pending_count(queue_store),
             )
         agent = None
+        helper = None
         try:
             agent = self._browser_factory(profile_id=account.profile_id)
             agent.start_browser()
@@ -736,8 +792,27 @@ class MultiAccountUploadRunner:
             payload = build_product_thread_payload(post_data)
             self._log(account_id, f"Threads 업로드 중: {product_name}")
             queue_store.update_current(stage="posting")
-            if not helper.create_thread_direct(payload):
+            if not helper.create_thread_direct(
+                payload,
+                expected_username=account.expected_username,
+            ):
                 helper_error = str(getattr(helper, "last_error", "") or "upload_failed")
+                external_post_attempted = bool(
+                    getattr(helper, "external_post_attempted", True)
+                )
+                if not external_post_attempted and helper_error in {
+                    "account_identity_unverified",
+                    "expected_identity_missing",
+                }:
+                    raise AccountBlockedError(
+                        "account_identity_unverified",
+                        "게시 직전 Threads 계정을 확인하지 못했습니다.",
+                    )
+                if not external_post_attempted:
+                    raise AccountBlockedError(
+                        "pre_post_validation_failed",
+                        "외부 게시 전 작성 화면 검증에 실패했습니다.",
+                    )
                 queue_store.update_current(stage="posting_unknown")
                 queue_store.set_phase("blocked", last_error=helper_error[:300])
                 return AccountRunResult(
@@ -781,6 +856,26 @@ class MultiAccountUploadRunner:
             current = queue_store.snapshot().get("current_item") or {}
             stage = str(current.get("stage") or "")
             if stage in {"posting", "posting_unknown"}:
+                attempt_known = helper is not None and hasattr(
+                    helper,
+                    "external_post_attempted",
+                )
+                attempted = bool(
+                    getattr(helper, "external_post_attempted", True)
+                )
+                if stage == "posting" and attempt_known and not attempted:
+                    if not self._release_reservation(queue_store, reservation):
+                        return self._release_pending_result(queue_store)
+                    self._rotate_idempotency_and_requeue(queue_store)
+                    queue_store.set_phase(
+                        "blocked",
+                        last_error="pre_post_validation_failed",
+                    )
+                    return AccountRunResult(
+                        processed=False,
+                        pending_count=self._pending_count(queue_store),
+                        block_reason="pre_post_validation_failed",
+                    )
                 queue_store.set_phase("blocked", last_error=str(exc)[:300])
                 self._log(
                     account_id,
@@ -820,10 +915,6 @@ class MultiAccountUploadRunner:
         finally:
             if agent is not None:
                 try:
-                    agent.save_session()
-                except Exception:
-                    pass
-                try:
-                    agent.close()
+                    agent.close(save_session=False)
                 except Exception:
                     pass

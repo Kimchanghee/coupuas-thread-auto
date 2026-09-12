@@ -8,14 +8,16 @@ at the 1360, 900 and 760 DIP breakpoints defined by the UI blueprint.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import ClassVar
 
 from PyQt6.QtCore import QPointF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPolygonF
+from PyQt6.QtGui import QColor, QPainter, QPolygonF, QIcon, QPixmap, QPen, QPainterPath
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -23,6 +25,80 @@ from PyQt6.QtWidgets import (
 )
 
 from src.theme import Colors, ControlHeight, Radius, Spacing
+
+
+def navigation_icon(kind, color=Colors.ACCENT):
+    """Draw consistent 24 DIP line icons at double resolution for high DPI."""
+    return _navigation_icon_cached(str(kind), str(color))
+
+
+@lru_cache(maxsize=32)
+def _navigation_icon_cached(kind, color):
+    pixmap = QPixmap(48, 48)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    pixmap.setDevicePixelRatio(2)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor(color), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    path = QPainterPath()
+    lines = {
+        "home": [(3, 11, 12, 3), (12, 3, 21, 11), (5, 10, 5, 21), (5, 21, 19, 21), (19, 21, 19, 10), (10, 21, 10, 14), (10, 14, 14, 14), (14, 14, 14, 21)],
+        "automation": [(14, 2, 5, 13), (5, 13, 11, 13), (11, 13, 10, 22), (10, 22, 20, 10), (20, 10, 14, 10), (14, 10, 14, 2)],
+        "history": [(7, 3, 20, 3), (20, 3, 20, 21), (20, 21, 4, 21), (4, 21, 4, 3), (8, 8, 16, 8), (8, 12, 16, 12), (8, 16, 13, 16)],
+        "settings": [(4, 6, 20, 6), (4, 12, 20, 12), (4, 18, 20, 18), (8, 3, 8, 9), (16, 9, 16, 15), (10, 15, 10, 21)],
+        "subscription": [(3, 5, 21, 5), (21, 5, 21, 19), (21, 19, 3, 19), (3, 19, 3, 5), (3, 10, 21, 10), (6, 15, 11, 15)],
+    }
+    if kind == "accounts":
+        painter.drawEllipse(8, 3, 8, 8)
+        path.moveTo(4, 21)
+        path.cubicTo(4, 11, 20, 11, 20, 21)
+    for x1, y1, x2, y2 in lines.get(kind, []):
+        path.moveTo(x1, y1)
+        path.lineTo(x2, y2)
+    painter.drawPath(path)
+    painter.end()
+    return QIcon(pixmap)
+
+
+class PasswordEdit(QLineEdit):
+    """Accessible visibility control; never copies the password into another field."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEchoMode(QLineEdit.EchoMode.Password)
+        self.visibility_button = QPushButton("보기", self)
+        self.visibility_button.setCheckable(True)
+        self.visibility_button.setAccessibleName("비밀번호 표시")
+        self.visibility_button.setStyleSheet(f"QPushButton {{border: none; background: transparent; color: {Colors.ACCENT}; font-size: 13px; padding: 0; min-height: 32px;}}")
+        self.visibility_button.toggled.connect(self._toggle_visibility)
+
+    def _toggle_visibility(self, visible):
+        self.setEchoMode(QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password)
+        self.visibility_button.setText("숨기기" if visible else "보기")
+        self.visibility_button.setAccessibleName("비밀번호 숨기기" if visible else "비밀번호 표시")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.setTextMargins(14, 0, 66, 0)
+        self.visibility_button.setGeometry(max(0, self.width() - 62), (self.height() - 36) // 2, 56, 36)
+
+    def keyPressEvent(self, event):
+        super().keyPressEvent(event)
+        self._check_caps_lock()
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._check_caps_lock()
+
+    def _check_caps_lock(self):
+        import sys
+        if sys.platform == "win32":
+            import ctypes
+            from PyQt6.QtWidgets import QToolTip
+            active = bool(ctypes.windll.user32.GetKeyState(0x14) & 1)
+            self.setToolTip("Caps Lock이 켜져 있습니다" if active else "")
+            if active:
+                QToolTip.showText(self.mapToGlobal(self.rect().bottomLeft()), self.toolTip(), self)
 
 
 class BrandMark(QWidget):
@@ -297,7 +373,26 @@ class PipelineRail(QFrame):
         self._stages: tuple[str, ...] = ()
         self._current_index = 0
         self._error_index: int | None = None
+        self._compact = False
+        self._compact_summary = QLabel(self)
+        self._compact_summary.setStyleSheet(f"color: {Colors.DEEP_TEAL}; font-size: 14px; font-weight: 600;")
+        self._compact_summary.hide()
         self.set_stages(stages or self.DEFAULT_STAGES)
+
+    def set_compact(self, compact: bool) -> None:
+        self._compact = compact
+        self.setMinimumHeight(32 if compact else 84)
+        for node in self._stage_nodes:
+            node.parentWidget().setVisible(not compact)
+        for connector in self._connectors:
+            connector.setVisible(not compact)
+        self._compact_summary.setVisible(compact)
+        self._compact_summary.setGeometry(self.rect())
+        self._apply_state()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._compact_summary.setGeometry(self.rect())
 
     @property
     def current_index(self) -> int:
@@ -427,7 +522,7 @@ class PipelineRail(QFrame):
                     Colors.CORAL,
                     "!",
                 )
-                label_color = Colors.CORAL
+                label_color = Colors.ERROR_TEXT
             elif index < self._current_index:
                 state = "완료"
                 foreground, background, border, marker = (
@@ -436,7 +531,7 @@ class PipelineRail(QFrame):
                     Colors.EMERALD,
                     "✓",
                 )
-                label_color = Colors.EMERALD
+                label_color = Colors.SUCCESS_TEXT
             elif index == self._current_index and self._current_index < len(self._stages):
                 state = "진행 중"
                 foreground, background, border, marker = (
@@ -476,3 +571,10 @@ class PipelineRail(QFrame):
             connector.setStyleSheet(f"background-color: {color}; border: none;")
 
         self.setAccessibleDescription(", ".join(descriptions))
+        if self._current_index >= len(self._stages):
+            summary = f"{len(self._stages)}/{len(self._stages)} · 작업 완료"
+        else:
+            summary = f"{self._current_index + 1}/{len(self._stages)} · {self._stages[self._current_index]}"
+            if self._error_index is not None:
+                summary += " · 확인 필요"
+        self._compact_summary.setText(summary)

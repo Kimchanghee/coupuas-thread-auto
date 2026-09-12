@@ -17,6 +17,7 @@ from src.fs_security import secure_dir_permissions, secure_file_permissions
 from src.models.threads_account import ThreadsAccount, normalize_threads_username
 from src.secure_storage import protect_secret, unprotect_secret
 from src.services.post_concepts import DEFAULT_POST_CONCEPT_ID, normalize_concept_id
+from src.threads_login_transaction import recover_pending_threads_login_transactions
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,13 @@ class Config:
 
     def __init__(self):
         self._lock = threading.RLock()
+        self._persistence_quarantine_reason = ""
         self.config_dir = Path.home() / ".shorts_thread_maker"
         self.config_file = self.config_dir / "config.json"
         self.secrets_file = self.config_dir / "secrets.json"
         self.ensure_config_dir()
+        if not recover_pending_threads_login_transactions(self.config_dir):
+            raise RuntimeError("Interrupted Threads login transaction recovery failed")
         self.load()
 
     def ensure_config_dir(self):
@@ -40,6 +44,31 @@ class Config:
             self.config_dir.mkdir(parents=True, mode=0o700)
         if not secure_dir_permissions(self.config_dir):
             raise PermissionError("Configuration directory ACL hardening failed")
+
+    @property
+    def persistence_quarantined(self) -> bool:
+        """Whether this process must stop writing configuration until restart."""
+        with self._lock:
+            return bool(self._persistence_quarantine_reason)
+
+    def quarantine_persistence(
+        self, reason: str = "state_recovery_required"
+    ) -> None:
+        """Fail closed after an outcome-ambiguous durable transaction."""
+        with self._lock:
+            self._persistence_quarantine_reason = str(
+                reason or "state_recovery_required"
+            )
+            logger.critical(
+                "설정 저장이 앱 재시작 전까지 격리되었습니다: %s",
+                self._persistence_quarantine_reason,
+            )
+
+    def _ensure_persistence_mutable(self) -> None:
+        if self._persistence_quarantine_reason:
+            raise RuntimeError(
+                "Configuration persistence is quarantined until application restart"
+            )
 
     def load(self):
         """Load config and encrypted secrets."""
@@ -236,6 +265,12 @@ class Config:
         self._sync_gemini_key_state()
 
     def _save_secrets(self):
+        if self._persistence_quarantine_reason:
+            logger.critical(
+                "격리된 설정의 비밀값 저장을 차단했습니다: %s",
+                self._persistence_quarantine_reason,
+            )
+            return False
         payload = {}
         protection_failed = False
         for key in self._SECRET_KEYS:
@@ -341,6 +376,12 @@ class Config:
     def save(self):
         """Save non-sensitive config and encrypted secrets."""
         with self._lock:
+            if self._persistence_quarantine_reason:
+                logger.critical(
+                    "격리된 설정 저장을 차단했습니다: %s",
+                    self._persistence_quarantine_reason,
+                )
+                return False
             self._sync_gemini_key_state()
             data = {
                 "upload_interval": self.upload_interval,
@@ -454,6 +495,7 @@ class Config:
 
     def set_gemini_api_keys(self, keys):
         with self._lock:
+            self._ensure_persistence_mutable()
             self.gemini_api_keys = self._normalize_gemini_keys(keys)
             self.gemini_api_key = self.gemini_api_keys[0] if self.gemini_api_keys else ""
 
@@ -472,6 +514,7 @@ class Config:
 
     def add_threads_account(self, expected_username, **values):
         with self._lock:
+            self._ensure_persistence_mutable()
             if len(self.threads_accounts) >= self._MAX_THREADS_ACCOUNTS:
                 raise ValueError("Threads 계정은 최대 10개까지 추가할 수 있습니다.")
             account = ThreadsAccount.create(expected_username, **values)
@@ -489,6 +532,7 @@ class Config:
 
     def update_threads_account(self, account_id, **changes):
         with self._lock:
+            self._ensure_persistence_mutable()
             for index, account in enumerate(self.threads_accounts):
                 if account.account_id == str(account_id or ""):
                     updated = account.updated(**changes)
@@ -504,6 +548,7 @@ class Config:
 
     def remove_threads_account(self, account_id):
         with self._lock:
+            self._ensure_persistence_mutable()
             target = str(account_id or "")
             remaining = [account for account in self.threads_accounts if account.account_id != target]
             if len(remaining) == len(self.threads_accounts):
@@ -514,6 +559,7 @@ class Config:
 
     def set_active_threads_account(self, account_id):
         with self._lock:
+            self._ensure_persistence_mutable()
             account = self.get_threads_account(account_id)
             if account is None:
                 raise KeyError("Threads 계정을 찾을 수 없습니다.")

@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build, Sign, Verify, and Release
 
 on:
   push:
@@ -7,18 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (optional, e.g., v3.0.3). Empty = auto next version."
+        description: "Must match src/version.py (optional leading v)"
         required: false
         type: string
-      bump:
-        description: "Auto version bump when version is empty"
-        required: false
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
       run_live_auth_smoke:
         description: "Create an isolated live trial account and run the authentication GUI smoke"
         required: false
@@ -33,20 +24,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-executable:
     runs-on: windows-latest
+    timeout-minutes: 60
     permissions:
       contents: read
     outputs:
-      version: ${{ steps.get_version.outputs.VERSION }}
+      version: ${{ steps.version.outputs.VERSION }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a protected release tag
+        shell: bash
+        env:
+          RELEASE_REF_TYPE: ${{ github.ref_type }}
+          RELEASE_REF_PROTECTED: ${{ github.ref_protected }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_REF_TYPE" != "tag" || "$RELEASE_REF_PROTECTED" != "true" ]]; then
+            echo "Public signing and release require a protected canonical tag ref."
+            exit 1
+          fi
 
       - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: "pip"
@@ -57,109 +62,81 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Install dependencies (locked + hashed)
+      - name: Install locked dependencies
         shell: bash
         run: |
+          set -euo pipefail
           pip install --require-hashes -r requirements.lock
           npm ci
 
-      - name: Run automated tests
+      - name: Run automated release gates
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pytest -q
-          node --test tests_js/*.test.mjs
+          npm test
+          python -m compileall -q main.py login_main.py setup_login.py src
+          python tools/sanity_check.py
 
-      - name: Get version
-        id: get_version
+      - name: Validate canonical release version
+        id: version
         shell: bash
         env:
           RELEASE_VERSION_INPUT: ${{ inputs.version || '' }}
-          RELEASE_BUMP_INPUT: ${{ inputs.bump || 'patch' }}
         run: |
-          if [[ -n "$RELEASE_VERSION_INPUT" && ! "$RELEASE_VERSION_INPUT" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid explicit version format"
+          set -euo pipefail
+          VERSION="$(python -c 'from src.version import VERSION_TAG; print(VERSION_TAG)')"
+          if [[ ! "$VERSION" =~ ^v[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}$ ]]; then
+            echo "Invalid canonical version: $VERSION"
             exit 1
           fi
-          if [[ ! "$RELEASE_BUMP_INPUT" =~ ^(patch|minor|major)$ ]]; then
-            echo "Invalid bump value"
+          if [[ -n "$RELEASE_VERSION_INPUT" ]]; then
+            INPUT_VERSION="$RELEASE_VERSION_INPUT"
+            [[ "$INPUT_VERSION" == v* ]] || INPUT_VERSION="v$INPUT_VERSION"
+            if [[ "$INPUT_VERSION" != "$VERSION" ]]; then
+              echo "Requested version $INPUT_VERSION does not match src/version.py ($VERSION)."
+              exit 1
+            fi
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "$VERSION" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match src/version.py ($VERSION)."
             exit 1
           fi
-          VERSION="$(python .github/scripts/next_version.py \
-            --explicit "$RELEASE_VERSION_INPUT" \
-            --ref "${GITHUB_REF}" \
-            --bump "$RELEASE_BUMP_INPUT")"
-          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Resolved release version: ${VERSION}"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Canonical release version: $VERSION"
 
-      - name: Validate release version
-        shell: bash
-        run: |
-          VERSION="${{ steps.get_version.outputs.VERSION }}"
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid version format: $VERSION"
-            exit 1
-          fi
-
-      - name: Run explicitly approved live authentication GUI smoke
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_auth_smoke }}
+      - name: Require exact managed signer pins before building updater trust
         shell: pwsh
-        timeout-minutes: 5
+        env:
+          AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
         run: |
-          & "tools\live_auth_gui_smoke.ps1" -HoldSeconds 5
+          $pins = @(
+            $env:AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS -split "[,;\s]+" |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+          )
+          if ($pins.Count -lt 1 -or $pins.Count -gt 2) {
+            throw "Configure one signer pin, or current,next during certificate rotation."
+          }
+          foreach ($pin in $pins) {
+            if (($pin -replace "[^a-fA-F0-9]", "") -notmatch "^[a-fA-F0-9]{40}$") {
+              throw "AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS contains an invalid SHA-1 thumbprint."
+            }
+          }
 
-      - name: Sync version in source files
-        shell: bash
-        run: |
-          VERSION="${{ steps.get_version.outputs.VERSION }}"
-          python .github/scripts/set_version.py "$VERSION"
-          grep "VERSION =" main.py
-          grep "VERSION =" login_main.py
-
-      - name: Build executable
+      - name: Build unsigned executable with exact updater pins
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: 1
-          COUPUAS_TRUSTED_SIGNER_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
-        run: |
-          python build_exe.py
+          AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+        run: python build_exe.py
 
-      - name: Sign executable with configured pinned certificate
-        shell: pwsh
-        timeout-minutes: 5
-        env:
-          WINDOWS_CODE_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_CERT_BASE64 }}
-          WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
-          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
-        run: |
-          & ".github/scripts/sign-windows-artifact.ps1" `
-            -Path "dist\CoupangThreadAuto.exe"
-
-      - name: Verify executable release signature
-        shell: pwsh
-        env:
-          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
-        run: |
-          & ".github/scripts/assert-public-authenticode.ps1" `
-            -Path "dist\CoupangThreadAuto.exe" `
-            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
-
-      - name: Launch signed packaged login window
+      - name: Launch packaged login window
         shell: pwsh
         timeout-minutes: 2
         run: |
           & "tools\packaged_gui_smoke.ps1" `
             -ExePath "dist\CoupangThreadAuto.exe" `
             -TimeoutSeconds 60
-
-      - name: Verify build
-        run: |
-          if (Test-Path "dist\\CoupangThreadAuto.exe") {
-            Write-Host "Build successful!"
-            $size = (Get-Item "dist\\CoupangThreadAuto.exe").Length / 1MB
-            Write-Host "File size: $([math]::Round($size, 2)) MB"
-          } else {
-            Write-Error "Build failed - EXE not found"
-            exit 1
-          }
 
       - name: Verify packaged Windows child processes stay hidden
         shell: pwsh
@@ -193,63 +170,224 @@ jobs:
             Start-Sleep -Milliseconds 25
             $process.Refresh()
           }
-          if ($process.ExitCode -ne 0) {
+          if ($process.ExitCode -ne 0 -or $visible) {
             Get-Content $resultPath -ErrorAction SilentlyContinue
-            throw "Packaged Windows child-process smoke failed with exit code $($process.ExitCode)"
-          }
-          if ($visible) {
-            $visible | Sort-Object Id -Unique | Format-Table -AutoSize
-            throw "A child console window was visible during the packaged smoke test."
+            throw "Packaged Windows child-process smoke failed."
           }
           $result = Get-Content -Raw $resultPath | ConvertFrom-Json
           if (-not $result.frozen -or -not $result.passed) {
-            Get-Content $resultPath
             throw "Packaged Windows child-process assertions failed."
           }
 
-      - name: Generate checksum
+      - name: Generate release metadata and notes
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
-          $hash = (Get-FileHash "dist\\CoupangThreadAuto.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash CoupangThreadAuto.exe" | Out-File -FilePath "dist\\CoupangThreadAuto.exe.sha256" -Encoding ascii
-          Write-Host "SHA256: $hash"
+          $ownerRepo = "${{ github.repository }}"
+          $metadata = [ordered]@{
+            version = $env:RELEASE_VERSION
+            installer = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAutoSetup.exe"
+            installer_sha256 = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAutoSetup.exe.sha256"
+            standalone_exe = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAuto.exe"
+            standalone_exe_sha256 = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAuto.exe.sha256"
+          }
+          $metadata | ConvertTo-Json -Depth 3 | Out-File "dist\latest.json" -Encoding utf8
+          python .github/scripts/release_notes.py `
+            --version $env:RELEASE_VERSION `
+            --output "dist\RELEASE_NOTES.md"
 
-      - name: Locate Inno Setup
+      - name: Upload unsigned executable input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-executable-${{ steps.version.outputs.VERSION }}
+          path: |
+            dist/CoupangThreadAuto.exe
+            dist/latest.json
+            dist/RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 1
+
+  live-auth-canary:
+    needs: build-executable
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_auth_smoke }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: production-live-auth-canary
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the exact release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install --require-hashes -r requirements.lock
+
+      - name: Run explicitly approved live authentication GUI smoke
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          & "tools\live_auth_gui_smoke.ps1" -HoldSeconds 5
+
+  sign-executable:
+    needs: [build-executable, live-auth-canary]
+    if: ${{ always() && needs.build-executable.result == 'success' && (needs.live-auth-canary.result == 'success' || needs.live-auth-canary.result == 'skipped') }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: production-code-signing
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      version: ${{ needs.build-executable.outputs.version }}
+    steps:
+      - name: Download unsigned executable only
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unsigned-executable-${{ needs.build-executable.outputs.version }}
+          path: sign-input
+
+      - name: Validate fail-closed Artifact Signing configuration
+        shell: pwsh
+        env:
+          SIGN_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          SIGN_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          SIGN_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          SIGN_CLIENT_ID: ${{ vars.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          SIGN_TENANT_ID: ${{ vars.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          SIGN_SUBSCRIPTION_ID: ${{ vars.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+          SIGN_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+        run: |
+          $required = @("SIGN_ENDPOINT", "SIGN_ACCOUNT", "SIGN_PROFILE", "SIGN_CLIENT_ID", "SIGN_TENANT_ID", "SIGN_SUBSCRIPTION_ID", "SIGN_THUMBPRINTS")
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing) { throw "Managed signing is not configured: $($missing -join ', ')" }
+          if ($env:SIGN_ENDPOINT -notmatch '^https://[a-zA-Z0-9.-]+\.codesigning\.azure\.net/?$') {
+            throw "AZURE_ARTIFACT_SIGNING_ENDPOINT must be an Azure codesigning HTTPS endpoint."
+          }
+          foreach ($name in @("SIGN_CLIENT_ID", "SIGN_TENANT_ID", "SIGN_SUBSCRIPTION_ID")) {
+            if ([Environment]::GetEnvironmentVariable($name) -notmatch '^[0-9a-fA-F-]{36}$') {
+              throw "$name must be a UUID."
+            }
+          }
+
+      - name: Azure login with GitHub OIDC
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        with:
+          client-id: ${{ vars.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+
+      - name: Sign executable with Azure Artifact Signing
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          files: ${{ github.workspace }}\sign-input\CoupangThreadAuto.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-azure-cli-credential: false
+          exclude-interactive-browser-credential: true
+          cache-dependencies: false
+
+      - name: Verify executable signature without repository code
+        shell: pwsh
+        env:
+          TRUSTED_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+        run: |
+          $pins = @($env:TRUSTED_THUMBPRINTS -split "[,;\s]+" | Where-Object { $_ } | ForEach-Object { ($_ -replace '[^a-fA-F0-9]', '').ToUpperInvariant() })
+          if ($pins.Count -lt 1 -or $pins.Count -gt 2 -or @($pins | Where-Object { $_ -notmatch '^[A-F0-9]{40}$' })) {
+            throw "Invalid exact signer pin configuration."
+          }
+          $path = "sign-input\CoupangThreadAuto.exe"
+          $signature = Get-AuthenticodeSignature -FilePath $path
+          $actual = ($signature.SignerCertificate.Thumbprint -replace '[^a-fA-F0-9]', '').ToUpperInvariant()
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $actual -notin $pins) {
+            throw "Signed executable failed exact Authenticode verification."
+          }
+          if (-not $signature.TimeStamperCertificate) { throw "Signed executable has no trusted timestamp." }
+          $hash = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash CoupangThreadAuto.exe" | Out-File "sign-input\CoupangThreadAuto.exe.sha256" -Encoding ascii
+
+      - name: Upload signed executable
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-executable-${{ needs.build-executable.outputs.version }}
+          path: sign-input/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-installer:
+    needs: sign-executable
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ needs.sign-executable.outputs.version }}
+    steps:
+      - name: Checkout installer source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download verified signed executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-executable-${{ needs.sign-executable.outputs.version }}
+          path: dist
+
+      - name: Re-verify executable before embedding
+        shell: pwsh
+        env:
+          TRUSTED_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+        run: |
+          & ".github/scripts/assert-public-authenticode.ps1" `
+            -Path "dist\CoupangThreadAuto.exe" `
+            -TrustedThumbprints $env:TRUSTED_THUMBPRINTS
+
+      - name: Locate verified Inno Setup
         shell: pwsh
         timeout-minutes: 5
         run: |
           $isccCandidates = @(
             (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
             (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
-            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
-            (Join-Path $env:RUNNER_TEMP "Inno Setup 6\ISCC.exe")
+            (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
           )
           $isccPath = $isccCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-
           if (-not $isccPath) {
-            Write-Warning "The runner image does not include Inno Setup. Using the verified immutable upstream release."
             $installerPath = Join-Path $env:RUNNER_TEMP "innosetup-6.6.1.exe"
             $portableToolDir = Join-Path $env:RUNNER_TEMP "Inno Setup 6"
-            $installLogPath = Join-Path $env:RUNNER_TEMP "innosetup-6.6.1-install.log"
             $downloadUrl = "https://github.com/jrsoftware/issrc/releases/download/is-6_6_1/innosetup-6.6.1.exe"
             $expectedHash = "d243ce440c02705530699554fb9612b9b2bd7a2a90629cdb7f41e66f5faeb91f"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $installerPath
-            $actualHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($actualHash -ne $expectedHash) {
-              throw "Inno Setup installer checksum mismatch."
-            }
-
+            $actualHash = (Get-FileHash $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $expectedHash) { throw "Inno Setup installer checksum mismatch." }
             $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
             $startInfo.FileName = $installerPath
             $startInfo.UseShellExecute = $false
+            $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
             foreach ($argument in @(
-              "/PORTABLE=1",
-              "/SILENT",
-              "/CURRENTUSER",
-              "/SUPPRESSMSGBOXES",
-              "/NORESTART",
-              "/SP-",
-              "/DIR=$portableToolDir",
-              "/LOG=$installLogPath"
+              "/PORTABLE=1", "/SILENT", "/CURRENTUSER", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$portableToolDir"
             )) {
               [void]$startInfo.ArgumentList.Add($argument)
             }
@@ -258,128 +396,276 @@ jobs:
               $process.Kill($true)
               throw "Inno Setup fallback installation timed out."
             }
-            if ($process.ExitCode -notin 0, 1641, 3010) {
-              if (Test-Path -LiteralPath $installLogPath) {
-                Get-Content -LiteralPath $installLogPath -Tail 100
-              }
-              throw "Inno Setup fallback installation failed with exit code $($process.ExitCode)."
-            }
+            if ($process.ExitCode -notin 0, 1641, 3010) { throw "Inno Setup fallback installation failed." }
             $isccPath = Join-Path $portableToolDir "ISCC.exe"
           }
-
-          if (-not (Test-Path -LiteralPath $isccPath -PathType Leaf)) {
-            throw "ISCC.exe was not found."
-          }
-          Write-Host "Using Inno Setup compiler: $isccPath"
-          "ISCC_PATH=$isccPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (-not (Test-Path -LiteralPath $isccPath -PathType Leaf)) { throw "ISCC.exe was not found." }
+          "ISCC_PATH=$isccPath" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           $global:LASTEXITCODE = 0
 
-      - name: Build installer
+      - name: Build installer around the signed executable
         env:
-          COUPUAS_APP_VERSION: ${{ steps.get_version.outputs.VERSION }}
+          COUPUAS_APP_VERSION: ${{ needs.sign-executable.outputs.version }}
           PYTHONIOENCODING: utf-8
           PYTHONUTF8: 1
-        run: |
-          python build_installer.py
+        run: python build_installer.py
 
-      - name: Sign installer with configured pinned certificate
-        shell: pwsh
-        timeout-minutes: 5
-        env:
-          WINDOWS_CODE_SIGN_CERT_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_CERT_BASE64 }}
-          WINDOWS_CODE_SIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_CERT_PASSWORD }}
-          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
-        run: |
-          & ".github/scripts/sign-windows-artifact.ps1" `
-            -Path "dist\CoupangThreadAutoSetup.exe"
-
-      - name: Verify installer release signature
-        shell: pwsh
-        env:
-          CODE_SIGN_CERT_THUMBPRINT: ${{ secrets.CODE_SIGN_CERT_THUMBPRINT }}
-        run: |
-          & ".github/scripts/assert-public-authenticode.ps1" `
-            -Path "dist\CoupangThreadAutoSetup.exe" `
-            -ExpectedThumbprint $env:CODE_SIGN_CERT_THUMBPRINT
-
-      - name: Verify installer
-        run: |
-          if (Test-Path "dist\\CoupangThreadAutoSetup.exe") {
-            Write-Host "Installer build successful!"
-            $size = (Get-Item "dist\\CoupangThreadAutoSetup.exe").Length / 1MB
-            Write-Host "Installer size: $([math]::Round($size, 2)) MB"
-          } else {
-            Write-Error "Installer build failed - setup EXE not found"
-            exit 1
-          }
-
-      - name: Generate installer checksum
-        run: |
-          $hash = (Get-FileHash "dist\\CoupangThreadAutoSetup.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash CoupangThreadAutoSetup.exe" | Out-File -FilePath "dist\\CoupangThreadAutoSetup.exe.sha256" -Encoding ascii
-          Write-Host "Installer SHA256: $hash"
-
-      - name: Generate release metadata
-        shell: pwsh
-        run: |
-          $version = "${{ steps.get_version.outputs.VERSION }}"
-          $ownerRepo = "${{ github.repository }}"
-          $metadata = [ordered]@{
-            version = $version
-            installer = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAutoSetup.exe"
-            installer_sha256 = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAutoSetup.exe.sha256"
-            standalone_exe = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAuto.exe"
-            standalone_exe_sha256 = "https://github.com/$ownerRepo/releases/latest/download/CoupangThreadAuto.exe.sha256"
-          }
-          $metadata | ConvertTo-Json -Depth 3 | Out-File -FilePath "dist\\latest.json" -Encoding utf8
-
-      - name: Generate release notes
-        shell: bash
-        run: |
-          python .github/scripts/release_notes.py \
-            --version "${{ steps.get_version.outputs.VERSION }}" \
-            --output "dist/RELEASE_NOTES.md"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - name: Upload unsigned installer input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CoupangThreadAuto-release
+          name: unsigned-installer-${{ needs.sign-executable.outputs.version }}
           path: |
             dist/CoupangThreadAuto.exe
             dist/CoupangThreadAuto.exe.sha256
             dist/CoupangThreadAutoSetup.exe
-            dist/CoupangThreadAutoSetup.exe.sha256
             dist/latest.json
             dist/RELEASE_NOTES.md
+          if-no-files-found: error
+          retention-days: 1
+
+  sign-installer:
+    needs: build-installer
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: production-code-signing
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    outputs:
+      version: ${{ needs.build-installer.outputs.version }}
+    steps:
+      - name: Download immutable original signed executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-executable-${{ needs.build-installer.outputs.version }}
+          path: original-signed
+
+      - name: Download unsigned installer and signed executable only
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unsigned-installer-${{ needs.build-installer.outputs.version }}
+          path: sign-input
+
+      - name: Reject signed executable substitution
+        shell: pwsh
+        run: |
+          $originalPath = "original-signed\CoupangThreadAuto.exe"
+          $candidatePath = "sign-input\CoupangThreadAuto.exe"
+          foreach ($path in @($originalPath, $candidatePath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Signed executable comparison input is missing: $path"
+            }
+          }
+          $originalHash = (Get-FileHash -LiteralPath $originalPath -Algorithm SHA256).Hash
+          $candidateHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash
+          if ($originalHash -ne $candidateHash) {
+            throw "Signed executable was replaced by the installer build stage."
+          }
+
+      - name: Validate fail-closed Artifact Signing configuration
+        shell: pwsh
+        env:
+          SIGN_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          SIGN_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          SIGN_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          SIGN_CLIENT_ID: ${{ vars.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          SIGN_TENANT_ID: ${{ vars.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          SIGN_SUBSCRIPTION_ID: ${{ vars.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+          SIGN_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+        run: |
+          $required = @("SIGN_ENDPOINT", "SIGN_ACCOUNT", "SIGN_PROFILE", "SIGN_CLIENT_ID", "SIGN_TENANT_ID", "SIGN_SUBSCRIPTION_ID", "SIGN_THUMBPRINTS")
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+          if ($missing) { throw "Managed signing is not configured: $($missing -join ', ')" }
+          if ($env:SIGN_ENDPOINT -notmatch '^https://[a-zA-Z0-9.-]+\.codesigning\.azure\.net/?$') { throw "Invalid Artifact Signing endpoint." }
+
+      - name: Azure login with GitHub OIDC
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        with:
+          client-id: ${{ vars.AZURE_ARTIFACT_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_ARTIFACT_SIGNING_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_ARTIFACT_SIGNING_SUBSCRIPTION_ID }}
+
+      - name: Sign installer with Azure Artifact Signing
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          files: ${{ github.workspace }}\sign-input\CoupangThreadAutoSetup.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-azure-cli-credential: false
+          exclude-interactive-browser-credential: true
+          cache-dependencies: false
+
+      - name: Verify both signatures and generate immutable release manifest
+        shell: pwsh
+        env:
+          TRUSTED_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+          RELEASE_VERSION: ${{ needs.build-installer.outputs.version }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          $pins = @($env:TRUSTED_THUMBPRINTS -split "[,;\s]+" | Where-Object { $_ } | ForEach-Object { ($_ -replace '[^a-fA-F0-9]', '').ToUpperInvariant() })
+          if ($pins.Count -lt 1 -or $pins.Count -gt 2 -or @($pins | Where-Object { $_ -notmatch '^[A-F0-9]{40}$' })) { throw "Invalid exact signer pins." }
+          $records = @()
+          foreach ($name in @("CoupangThreadAuto.exe", "CoupangThreadAutoSetup.exe")) {
+            $path = Join-Path "sign-input" $name
+            $signature = Get-AuthenticodeSignature -FilePath $path
+            $actual = ($signature.SignerCertificate.Thumbprint -replace '[^a-fA-F0-9]', '').ToUpperInvariant()
+            if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $actual -notin $pins) { throw "$name failed exact Authenticode verification." }
+            if (-not $signature.TimeStamperCertificate) { throw "$name has no trusted timestamp." }
+            $hash = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $records += [ordered]@{ file = $name; sha256 = $hash; signer_thumbprint = $actual }
+            if ($name -eq "CoupangThreadAutoSetup.exe") {
+              "$hash $name" | Out-File "sign-input\CoupangThreadAutoSetup.exe.sha256" -Encoding ascii
+            }
+          }
+          [ordered]@{
+            version = $env:RELEASE_VERSION
+            commit = $env:RELEASE_SHA
+            workflow_run_id = $env:RELEASE_RUN_ID
+            artifacts = $records
+          } | ConvertTo-Json -Depth 5 | Out-File "sign-input\signing-manifest.json" -Encoding utf8
+
+      - name: Upload signed release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-release-${{ needs.build-installer.outputs.version }}
+          path: sign-input/*
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-release:
+    needs: sign-installer
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ needs.sign-installer.outputs.version }}
+    steps:
+      - name: Checkout verification code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download signed release candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: signed-release-${{ needs.sign-installer.outputs.version }}
+          path: verified
+
+      - name: Verify detached signatures, hashes, and provenance
+        shell: pwsh
+        env:
+          TRUSTED_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+          EXPECTED_VERSION: ${{ needs.sign-installer.outputs.version }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          foreach ($name in @("CoupangThreadAuto.exe", "CoupangThreadAutoSetup.exe")) {
+            & ".github/scripts/assert-public-authenticode.ps1" `
+              -Path (Join-Path "verified" $name) `
+              -TrustedThumbprints $env:TRUSTED_THUMBPRINTS
+            $expected = ((Get-Content (Join-Path "verified" "$name.sha256") -Raw) -split '\s+')[0].ToLowerInvariant()
+            $actual = (Get-FileHash (Join-Path "verified" $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "$name checksum mismatch." }
+          }
+          $manifest = Get-Content "verified\signing-manifest.json" -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $env:EXPECTED_VERSION -or $manifest.commit -ne $env:EXPECTED_COMMIT) {
+            throw "Signing manifest provenance does not match this workflow run."
+          }
+          if (@($manifest.artifacts).Count -ne 2) { throw "Signing manifest must contain exactly two artifacts." }
+
+      - name: Launch the final signed packaged login window
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          & "tools\packaged_gui_smoke.ps1" `
+            -ExePath "verified\CoupangThreadAuto.exe" `
+            -TimeoutSeconds 60
+
+      - name: Install, launch, and uninstall the final installer
+        shell: pwsh
+        timeout-minutes: 5
+        env:
+          TRUSTED_THUMBPRINTS: ${{ vars.AZURE_ARTIFACT_SIGNING_CERT_THUMBPRINTS }}
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP "coupuas-installer-smoke"
+          $installLog = Join-Path $env:RUNNER_TEMP "coupuas-installer-smoke.log"
+          if (Test-Path -LiteralPath $installRoot) { throw "Installer smoke target unexpectedly exists." }
+          $setup = (Resolve-Path "verified\CoupangThreadAutoSetup.exe").Path
+          $install = Start-Process -FilePath $setup -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$installRoot", "/LOG=$installLog"
+          ) -WindowStyle Hidden -Wait -PassThru
+          if ($install.ExitCode -notin 0, 1641, 3010) {
+            Get-Content $installLog -Tail 100 -ErrorAction SilentlyContinue
+            throw "Installer smoke install failed with exit code $($install.ExitCode)."
+          }
+          $installedExe = Join-Path $installRoot "CoupangThreadAuto.exe"
+          if (-not (Test-Path -LiteralPath $installedExe -PathType Leaf)) { throw "Installed executable is missing." }
+          & ".github/scripts/assert-public-authenticode.ps1" `
+            -Path $installedExe `
+            -TrustedThumbprints $env:TRUSTED_THUMBPRINTS
+          $standaloneHash = (Get-FileHash "verified\CoupangThreadAuto.exe" -Algorithm SHA256).Hash
+          $installedHash = (Get-FileHash $installedExe -Algorithm SHA256).Hash
+          if ($installedHash -ne $standaloneHash) {
+            throw "Installer payload does not match the verified standalone executable."
+          }
+          & "tools\packaged_gui_smoke.ps1" -ExePath $installedExe -TimeoutSeconds 60
+          $uninstaller = Join-Path $installRoot "unins000.exe"
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "Uninstaller is missing." }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          ) -WindowStyle Hidden -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Installer smoke uninstall failed with exit code $($uninstall.ExitCode)." }
+          if (Test-Path -LiteralPath $installedExe) { throw "Uninstall left the application executable behind." }
+
+      - name: Promote only verified signed artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-release-${{ needs.sign-installer.outputs.version }}
+          path: verified/*
+          if-no-files-found: error
           retention-days: 30
 
   release:
-    needs: build
+    needs: verify-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
-      - name: Download build artifacts
+      - name: Download verified signed release only
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: CoupangThreadAuto-release
+          name: verified-release-${{ needs.verify-release.outputs.version }}
           path: dist
 
-      - name: Create Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          tag_name: ${{ needs.build.outputs.version }}
+          tag_name: ${{ needs.verify-release.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Thread Auto ${{ needs.build.outputs.version }}
+          name: Thread Auto ${{ needs.verify-release.outputs.version }}
           body_path: dist/RELEASE_NOTES.md
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
           files: |
             dist/CoupangThreadAuto.exe
             dist/CoupangThreadAuto.exe.sha256
             dist/CoupangThreadAutoSetup.exe
             dist/CoupangThreadAutoSetup.exe.sha256
             dist/latest.json
+            dist/signing-manifest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -390,6 +676,7 @@ jobs:
           INDEXNOW_KEY: 31d40a5ce9c84f0f9f1f386ca9f96df6
           SITE_URL: https://coupuas-thread-auto-ten.vercel.app
         run: |
+          set -euo pipefail
           payload="$(jq -nc \
             --arg host "coupuas-thread-auto-ten.vercel.app" \
             --arg key "$INDEXNOW_KEY" \
@@ -411,4 +698,3 @@ jobs:
             cat indexnow-response.txt
             exit 1
           fi
-          echo "IndexNow accepted the release URLs (HTTP $status)."

@@ -7,7 +7,8 @@ import sys
 import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 _INITIALIZED = False
 _PRINT_HOOKED = False
@@ -18,6 +19,12 @@ _PREV_THREAD_EXCEPTHOOK = None
 _ALLOWED_LOGGER_PREFIXES = ("main", "src", "runtime", "__main__")
 
 _SENSITIVE_PATTERNS = [
+    (
+        re.compile(
+            r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
+        ),
+        "[JWT]",
+    ),
     (re.compile(r"(x-goog-api-key\s*[:=]\s*)([^\s,;]+)", re.IGNORECASE), r"\1[REDACTED]"),
     (re.compile(r"(key=)([^&\s]+)", re.IGNORECASE), r"\1[REDACTED]"),
     (re.compile(r"(authorization\s*[:=]\s*bearer\s+)([^\s,;]+)", re.IGNORECASE), r"\1[REDACTED]"),
@@ -109,9 +116,107 @@ _LOCALIZE_PATTERNS = [
     (re.compile(r"at most\s+(\d+)\s+characters?", re.IGNORECASE), r"최대 \1자"),
 ]
 
+_URL_IN_LOG_PATTERN = re.compile(
+    r"\b(?:https?://|mailto:|tel:|file:|data:|javascript:)[^\s<>\"']+",
+    re.IGNORECASE,
+)
+_RELATIVE_URL_FIELD_PATTERN = re.compile(
+    r"(\b(?:url|href|uri)\s*[:=]\s*)(/[^\s,;]*)",
+    re.IGNORECASE,
+)
+_EMAIL_IN_LOG_PATTERN = re.compile(
+    r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])",
+    re.IGNORECASE,
+)
+_THREADS_HANDLE_IN_LOG_PATTERN = re.compile(
+    r"(?<![\w@])@[A-Z0-9._]{1,30}\b",
+    re.IGNORECASE,
+)
+_WINDOWS_PATH_IN_LOG_PATTERN = re.compile(
+    r'''(?ix)
+    (?<![\w])
+    (?:
+        "(?:[a-z]:\\|\\\\)[^"]+"
+        |
+        '(?:[a-z]:\\|\\\\)[^']+'
+        |
+        (?:[a-z]:\\|\\\\)[^\s,;]+
+    )
+    ''',
+)
+_POSIX_PATH_IN_LOG_PATTERN = re.compile(
+    r"(?<![:\w])/(?:home|users|tmp|var|etc|opt|srv|mnt|media)/[^\s,;]+",
+    re.IGNORECASE,
+)
+_RELATIVE_PROFILE_PATH_PATTERN = re.compile(
+    r"(?<![\w/])(?:\.{1,2}[\\/])?\.threads_profile[^\s,;]*",
+    re.IGNORECASE,
+)
+_STRUCTURED_PATH_PATTERN = re.compile(
+    r"((?:path|file|filename|session[_-]?path|profile[_-]?dir)\s*[:=]\s*)"
+    r"(?:\[[A-Z]+\]|'[^']*'|\"[^\"]*\"|[^,;\s}\]]+)",
+    re.IGNORECASE,
+)
+_STRUCTURED_IDENTIFIER_PATTERN = re.compile(
+    r"((?:username|user[_-]?id|account[_-]?id|email|phone|contact)\s*[:=]\s*)"
+    r"(?:\[[A-Z]+\]|'[^']*'|\"[^\"]*\"|[^,;\s}\]]+)",
+    re.IGNORECASE,
+)
+_ACTIVITY_PRIVATE_FIELD_PATTERN = re.compile(
+    r"((?:profile[_-]?dir|product(?:[_-]?name)?|title|keywords?)\s*[:=]\s*)"
+    r"(?:'[^']*'|\"[^\"]*\"|[^,;\r\n]+)",
+    re.IGNORECASE,
+)
+
+
+def safe_external_url_for_log(value: Any) -> str:
+    """Return a navigation URL with credentials, query, and fragment removed."""
+    try:
+        parsed = urlsplit(str(value or "").strip())
+        scheme = parsed.scheme.lower()
+        if not scheme:
+            return ""
+
+        netloc = ""
+        if parsed.netloc:
+            host = (parsed.hostname or "").strip().lower()
+            if not host:
+                return ""
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            port = parsed.port
+            netloc = f"{host}:{port}" if port is not None else host
+
+        if scheme in {"http", "https"}:
+            return urlunsplit((scheme, netloc, "", "", "")) if netloc else ""
+        # Non-web schemes can encode recipients, file paths, or commands in the
+        # path component. Keep only the scheme in activity and diagnostic logs.
+        return f"{scheme}:"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _safe_url_match_for_log(match: re.Match[str]) -> str:
+    raw_value = match.group(0)
+    trailing = ""
+    while raw_value and raw_value[-1] in ".,;:!?)]}":
+        trailing = raw_value[-1] + trailing
+        raw_value = raw_value[:-1]
+    safe_value = safe_external_url_for_log(raw_value) or "[URL]"
+    return safe_value + trailing
+
 
 def _sanitize_log_text(text: str) -> str:
     safe = str(text or "")
+    safe = _URL_IN_LOG_PATTERN.sub(_safe_url_match_for_log, safe)
+    safe = _RELATIVE_URL_FIELD_PATTERN.sub(r"\1[URL]", safe)
+    safe = _POSIX_PATH_IN_LOG_PATTERN.sub("[PATH]", safe)
+    safe = _EMAIL_IN_LOG_PATTERN.sub("[EMAIL]", safe)
+    safe = _THREADS_HANDLE_IN_LOG_PATTERN.sub("@[HANDLE]", safe)
+    safe = _WINDOWS_PATH_IN_LOG_PATTERN.sub("[PATH]", safe)
+    safe = _RELATIVE_PROFILE_PATH_PATTERN.sub("[PATH]", safe)
+    safe = _STRUCTURED_IDENTIFIER_PATTERN.sub(r"\1[REDACTED]", safe)
+    safe = _STRUCTURED_PATH_PATTERN.sub(r"\1[PATH]", safe)
     for pattern, replacement in _SENSITIVE_PATTERNS:
         safe = pattern.sub(replacement, safe)
     safe = "".join(
@@ -119,6 +224,16 @@ def _sanitize_log_text(text: str) -> str:
         for char in safe
     )
     return re.sub(r"[ \t]+", " ", safe).strip()
+
+
+def safe_activity_content_for_log(value: Any, *, max_length: int = 700) -> str:
+    """Return bounded telemetry text with URLs and direct identifiers removed."""
+    safe = _sanitize_log_text(str(value or ""))
+    safe = _ACTIVITY_PRIVATE_FIELD_PATTERN.sub(r"\1[REDACTED]", safe)
+    limit = max(0, int(max_length))
+    if limit and len(safe) > limit:
+        return safe[: max(0, limit - 3)] + "..."
+    return safe
 
 
 def _localize_log_text(text: str) -> str:
@@ -142,7 +257,7 @@ def get_log_file(app_name: str = "coupuas-thread-auto") -> Path:
 
 
 def _is_allowed_logger_name(name: str) -> bool:
-    allow_all = os.getenv("THREAD_AUTO_LOG_ALL_LOGGERS", "1").strip() != "0"
+    allow_all = os.getenv("THREAD_AUTO_LOG_ALL_LOGGERS", "0").strip() == "1"
     if allow_all:
         return True
 
@@ -181,7 +296,8 @@ def _project_path_filter() -> logging.Filter:
                 try:
                     record.project_file = str(Path(pathname).resolve().relative_to(project_root))
                 except Exception:
-                    record.project_file = pathname
+                    filename = Path(pathname).name
+                    record.project_file = f"[external]/{filename}" if filename else "[external]"
             else:
                 record.project_file = "-"
             return True
@@ -273,7 +389,10 @@ def _run_runtime_security_check(is_frozen: bool, runtime_logger: logging.Logger)
     try:
         from src.runtime_security import RuntimeSecurityError, enforce_runtime_security
     except Exception as exc:
-        runtime_logger.warning("런타임 보안 모듈을 불러오지 못했습니다: %s", exc)
+        runtime_logger.warning(
+            "런타임 보안 모듈을 불러오지 못했습니다: error_type=%s",
+            type(exc).__name__,
+        )
         return
 
     try:
@@ -290,7 +409,7 @@ def _run_runtime_security_check(is_frozen: bool, runtime_logger: logging.Logger)
 def setup_logging(
     app_name: str = "coupuas-thread-auto",
     level: Optional[str] = None,
-    capture_print: bool = True,
+    capture_print: bool = False,
 ) -> Path:
     global _INITIALIZED
 
@@ -312,28 +431,48 @@ def setup_logging(
     root = logging.getLogger()
     root.setLevel(log_level)
 
-    formatter = SafeKoreanFormatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(process)d:%(threadName)s | "
-        "%(name)s | %(project_file)s:%(lineno)d | %(message)s",
+    log_format = (
+        "%(asctime)s | %(levelname)-8s | %(process)d:%(threadName)s | "
+        "%(name)s | %(project_file)s:%(lineno)d | %(message)s"
+    )
+    file_formatter = SafeKoreanFormatter(
+        fmt=log_format,
+        datefmt="%Y-%m-%d %H:%M:%S",
+        hide_exception_details=True,
+    )
+    console_formatter = SafeKoreanFormatter(
+        fmt=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
         hide_exception_details=is_frozen,
     )
     project_filter = _project_path_filter()
 
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(log_level)
-    file_handler.addFilter(project_filter)
-    root.addHandler(file_handler)
+    file_logging_allowed = False
+    try:
+        from src.fs_security import secure_dir_permissions, secure_file_permissions
+
+        file_logging_allowed = bool(secure_dir_permissions(log_dir))
+        if file_logging_allowed:
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=5 * 1024 * 1024,
+                backupCount=3,
+                encoding="utf-8",
+            )
+            if secure_file_permissions(log_file):
+                file_handler.setFormatter(file_formatter)
+                file_handler.setLevel(log_level)
+                file_handler.addFilter(project_filter)
+                root.addHandler(file_handler)
+            else:
+                file_handler.close()
+                file_logging_allowed = False
+    except Exception:
+        file_logging_allowed = False
 
     console_stream = getattr(sys, "stdout", None) or sys.__stdout__
     console_handler = logging.StreamHandler(console_stream)
-    console_handler.setFormatter(formatter)
+    console_handler.setFormatter(console_formatter)
     console_handler.setLevel(log_level)
     console_handler.addFilter(project_filter)
     root.addHandler(console_handler)
@@ -344,6 +483,8 @@ def setup_logging(
         _install_print_hook()
 
     runtime_logger = logging.getLogger("runtime.bootstrap")
+    if not file_logging_allowed:
+        runtime_logger.warning("로그 파일 권한을 안전하게 설정하지 못해 파일 로깅을 비활성화했습니다.")
     _run_runtime_security_check(is_frozen, runtime_logger)
     runtime_logger.info("로깅 초기화 완료")
     runtime_logger.info("파이썬 버전=%s", sys.version.replace("\n", " "))

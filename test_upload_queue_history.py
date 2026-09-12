@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.main_window import MainWindow
+from src.main_window import MainWindow, ResumeStatePersistenceError
 from src.services.link_history import LinkHistory
 from src.services.managed_ai_client import ManagedAiClientError
 
@@ -58,9 +58,10 @@ class _FakeAgent:
         pass
 
     def save_session(self):
-        pass
+        raise AssertionError("upload runtime must not overwrite verified sessions")
 
-    def close(self):
+    def close(self, *, save_session=True):
+        assert save_session is False
         pass
 
 
@@ -71,7 +72,11 @@ class _FakeHelper:
     def check_login_status(self):
         return True
 
-    def create_thread_direct(self, posts_data):
+    def verify_account(self, _expected_username):
+        return True
+
+    def create_thread_direct(self, posts_data, *, expected_username):
+        del expected_username
         raise AssertionError("duplicate links must not reach upload")
 
 
@@ -154,6 +159,27 @@ def test_validated_api_key_resolution_does_not_fallback_to_failed_key(monkeypatc
     assert MainWindow._resolve_runtime_gemini_api_key(object(), validate=False) == "expired-key-value"
 
 
+def test_resume_cleanup_wraps_unlink_failure_with_persistence_error():
+    failure = PermissionError("locked")
+
+    class FailingPath:
+        def unlink(self, *, missing_ok):
+            assert missing_ok is True
+            raise failure
+
+    fake_self = SimpleNamespace(
+        _resume_state_lock=threading.RLock(),
+        _resume_items=[],
+        _resume_state_path=FailingPath(),
+        _is_resume_unfinished=MainWindow._is_resume_unfinished,
+    )
+
+    with pytest.raises(ResumeStatePersistenceError) as caught:
+        MainWindow._save_resume_state(fake_self, "finished")
+
+    assert caught.value.__cause__ is failure
+
+
 @pytest.mark.parametrize(
     ("code", "status_code", "expected_attempts", "retry_with_new_key"),
     [
@@ -172,8 +198,14 @@ def test_legacy_generation_catch_releases_and_rotates_managed_reservation(
     expected_attempts,
     retry_with_new_key,
 ):
+    import src.computer_use_agent as computer_use_agent
     import src.main_window as main_window
+    import src.threads_playwright_helper as threads_playwright_helper
     from src import auth_client
+
+    monkeypatch.setattr(computer_use_agent, "ComputerUseAgent", _FakeAgent)
+    monkeypatch.setattr(threads_playwright_helper, "ThreadsPlaywrightHelper", _FakeHelper)
+    monkeypatch.setattr(main_window, "goto_threads_with_fallback", lambda *args, **kwargs: "")
 
     url = "https://link.coupang.com/a/managed-boundary"
     link_queue = queue.Queue()
@@ -267,7 +299,11 @@ def test_legacy_generation_catch_releases_and_rotates_managed_reservation(
     MainWindow._run_upload_queue(
         fake_self,
         30,
-        {"api_key": "", "profile_dir": "test"},
+        {
+            "api_key": "",
+            "profile_dir": "test",
+            "expected_username": "expected_user",
+        },
         ManagedFailurePipeline(),
     )
 
@@ -281,3 +317,76 @@ def test_legacy_generation_catch_releases_and_rotates_managed_reservation(
     expected_status = "failed" if expected_attempts > 1 else "pending"
     assert fake_self._resume_items[0]["status"] == expected_status
     assert fake_self._resume_items[0]["idempotency_key"] != original_key
+
+
+def test_unattempted_legacy_post_releases_then_rotates_and_requeues(monkeypatch):
+    from src import auth_client
+
+    marks = []
+    queued = queue.Queue()
+    fake_self = SimpleNamespace(
+        link_queue=queued,
+        _mark_resume_item=lambda *args, **kwargs: marks.append((args, kwargs)),
+        _is_work_allowed=MainWindow._is_work_allowed,
+    )
+    releases = []
+    monkeypatch.setattr(
+        auth_client,
+        "release_reserved_work",
+        lambda reservation_id: releases.append(reservation_id) or {"success": True},
+    )
+    item = ("https://link.coupang.com/a/pre-post", "keyword")
+
+    outcome = MainWindow._recover_unattempted_legacy_post(
+        fake_self,
+        item=item,
+        url=item[0],
+        product_title="product",
+        error="thread_structure_unverified",
+        reservation_supported=True,
+        reservation_id="reservation-1",
+        idempotency_key="old-key",
+    )
+
+    assert outcome == "requeued"
+    assert releases == ["reservation-1"]
+    assert marks[0][0][1] == "reservation_release_pending"
+    assert marks[1][0][1] == "pending"
+    assert marks[1][1]["idempotency_key"] != "old-key"
+    assert marks[1][1]["clear_reconciliation"] is True
+    assert queued.get_nowait() == item
+
+
+def test_unattempted_legacy_post_release_failure_stays_reconciliation_blocked(
+    monkeypatch,
+):
+    from src import auth_client
+
+    marks = []
+    queued = queue.Queue()
+    fake_self = SimpleNamespace(
+        link_queue=queued,
+        _mark_resume_item=lambda *args, **kwargs: marks.append((args, kwargs)),
+        _is_work_allowed=MainWindow._is_work_allowed,
+    )
+    monkeypatch.setattr(
+        auth_client,
+        "release_reserved_work",
+        lambda _reservation_id: {"success": False},
+    )
+
+    outcome = MainWindow._recover_unattempted_legacy_post(
+        fake_self,
+        item=("https://link.coupang.com/a/pre-post", None),
+        url="https://link.coupang.com/a/pre-post",
+        product_title="product",
+        error="media_attachment_unverified",
+        reservation_supported=True,
+        reservation_id="reservation-1",
+        idempotency_key="old-key",
+    )
+
+    assert outcome == "reservation_release_pending"
+    assert len(marks) == 1
+    assert marks[0][0][1] == "reservation_release_pending"
+    assert queued.empty()

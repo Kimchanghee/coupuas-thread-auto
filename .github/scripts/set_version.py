@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize the application version across release-time source files."""
+"""Update the repository's single canonical application version."""
 
 from __future__ import annotations
 
@@ -38,10 +38,11 @@ def main() -> None:
 
     v_prefixed, dotted = _normalize_version(args.version)
 
-    _replace("main.py", r'^\s*VERSION\s*=\s*["\'][^"\']+["\']', f'VERSION = "{v_prefixed}"')
-    _replace("login_main.py", r'^\s*VERSION\s*=\s*["\'][^"\']+["\']', f'VERSION = "{v_prefixed}"')
-    _replace("src/__init__.py", r'^\s*__version__\s*=\s*["\'][^"\']+["\']', f'__version__ = "{dotted}"')
-    _replace("setup.py", r'^\s*version\s*=\s*["\'][^"\']+["\']', f'    version="{dotted}"')
+    _replace(
+        "src/version.py",
+        r'^VERSION\s*=\s*["\'][^"\']+["\']',
+        f'VERSION = "{dotted}"',
+    )
 
     print(f"VERSION={v_prefixed}")
 

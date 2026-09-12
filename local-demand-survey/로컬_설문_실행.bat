@@ -9,14 +9,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "node_modules\.bin\next.cmd" (
-  echo 잠긴 버전의 의존성을 설치하고 있습니다...
-  call npm ci --no-audit --no-fund
-  if errorlevel 1 (
-    echo 설치에 실패했습니다. 인터넷 연결과 Node.js 버전을 확인해주세요.
-    pause
-    exit /b 1
-  )
+node scripts\ensure-locked-deps.mjs
+if errorlevel 1 (
+  echo 설치에 실패했습니다. package-lock.json, 인터넷 연결, Node.js 버전을 확인해주세요.
+  pause
+  exit /b 1
 )
 
 echo Next.js 운영 빌드를 만들고 있습니다...

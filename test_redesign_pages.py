@@ -106,11 +106,8 @@ def test_redesign_pages_reflow_without_horizontal_scroll_at_supported_sizes():
                 if compact
                 else pages[0].dashboard_pair_layout.Direction.LeftToRight
             )
-            assert pages[3].subscription_pair_layout.direction() == (
-                pages[3].subscription_pair_layout.Direction.TopToBottom
-                if compact
-                else pages[3].subscription_pair_layout.Direction.LeftToRight
-            )
+            # Comparison now gets the full content width; support sits below.
+            assert pages[3].subscription_pair_layout.direction() == pages[3].subscription_pair_layout.Direction.TopToBottom
     finally:
         _close_pages(app, pages)
 

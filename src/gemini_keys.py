@@ -107,7 +107,11 @@ def generate_content_with_model_fallback(
         except Exception as exc:
             last_error = exc
             if is_retryable_gemini_model_error(exc):
-                logger.warning("Gemini 모델 %s 호출 실패, 다음 후보로 재시도합니다: %s", model, exc)
+                logger.warning(
+                    "Gemini 모델 %s 호출 실패, 다음 후보로 재시도합니다: error_type=%s",
+                    model,
+                    type(exc).__name__,
+                )
                 continue
             raise
     if last_error is not None:
@@ -225,13 +229,13 @@ def select_working_gemini_api_key(validate: bool = True) -> str:
             selected = key
             selected_reason = reason
             break
-        logger.warning("Gemini API 키 %d 검증 실패: %s", index + 1, reason)
+        logger.warning("Gemini API 키 %d 검증 실패", index + 1)
 
     if not selected:
         return ""
 
     if selected_reason:
-        logger.info("Gemini API 키 검증 보류: %s", selected_reason)
+        logger.info("Gemini API 키 검증 보류")
 
     if selected != keys[0]:
         reordered = [selected] + [k for k in keys if k != selected]

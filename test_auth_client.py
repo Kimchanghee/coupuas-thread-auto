@@ -316,6 +316,39 @@ def test_log_action_can_be_disabled_by_environment(monkeypatch):
     assert session.calls == []
 
 
+def test_log_action_removes_urls_identifiers_paths_and_invalid_metadata(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state["user_id"] = "user-1"
+    auth_client._auth_state["token"] = "token-1"
+    auth_client._auth_state["token_issued_at"] = time.time()
+    session = _FakeSession(_FakeResponse(200, {}))
+    monkeypatch.setattr(auth_client, "_session", session)
+    monkeypatch.delenv("THREAD_AUTO_DISABLE_ACTIVITY_LOGS", raising=False)
+
+    auth_client.log_action(
+        "upload success / private",
+        (
+            "url=https://alice:secret@example.com/private/item?token=top-secret#fragment; "
+            "email=alice@example.com; handle=@private_user; "
+            r"path=C:\Users\Alice\AppData\Local\secret.json"
+        ),
+        level="made-up",
+    )
+
+    payload = session.calls[0]["json"]
+    assert payload["action"] == "upload_success_private"
+    assert payload["level"] == "INFO"
+    assert "https://example.com" in payload["content"]
+    assert "alice" not in payload["content"].lower()
+    assert "top-secret" not in payload["content"]
+    assert "fragment" not in payload["content"]
+    assert "private_user" not in payload["content"]
+    assert "C:\\Users" not in payload["content"]
+    assert "email=[REDACTED]" in payload["content"]
+    assert "@[HANDLE]" in payload["content"]
+    assert "[PATH]" in payload["content"]
+
+
 def test_log_action_suppresses_retries_after_timeout(monkeypatch):
     _reset_auth_state()
     auth_client._auth_state["user_id"] = "user-1"
@@ -777,6 +810,30 @@ def test_create_payapp_subscription_routes_shopping_pro_month_plan(monkeypatch):
     assert session.calls[-1]["json"]["plan_id"] == "stmaker_shopping_pro_month"
 
 
+def test_payapp_mutation_requests_are_never_automatically_replayed(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state.update({"user_id": "7001", "token": "token-a"})
+    calls = []
+
+    def fail_request(_method, url, **kwargs):
+        calls.append((url, kwargs.get("retries")))
+        raise requests.exceptions.ConnectionError("response lost")
+
+    monkeypatch.setattr(auth_client, "_request_with_retry", fail_request)
+
+    checkout = auth_client.create_payapp_checkout("01012345678")
+    subscription = auth_client.create_payapp_subscription(
+        "01012345678",
+        plan_id="stmaker_pro_month",
+    )
+    cancellation = auth_client.cancel_payapp_subscription("rebill-1")
+
+    assert checkout["success"] is False
+    assert subscription["success"] is False
+    assert cancellation["success"] is False
+    assert [retries for _url, retries in calls] == [0, 0, 0]
+
+
 def test_merge_account_state_includes_server_shopping_entitlement():
     _reset_auth_state()
 
@@ -857,7 +914,194 @@ def test_payment_url_helpers_allow_only_https_payapp():
     assert auth_client.is_trusted_payment_url("https://m.payapp.kr/pay/123?secret=1")
     assert not auth_client.is_trusted_payment_url("http://payapp.kr/pay/123")
     assert not auth_client.is_trusted_payment_url("https://payapp.kr.evil.example/pay")
-    assert auth_client.safe_url_for_log("https://m.payapp.kr/pay/123?secret=1#frag") == "https://m.payapp.kr/pay/123"
+    assert auth_client.safe_url_for_log("https://m.payapp.kr/pay/123?secret=1#frag") == "https://m.payapp.kr"
+    assert auth_client.safe_url_for_log("https://user:pass@PAYAPP.KR:443/private-id?token=x") == "https://payapp.kr:443"
+    assert auth_client.safe_url_for_log("mailto:buyer@example.com?body=secret") == "mailto:"
+
+
+def test_paid_state_derivation_precedence_and_transitions():
+    cases = [
+        ({"is_paid": False, "subscription_status": "active", "plan_type": "pro"}, True, False),
+        ({"subscription_status": "expired", "plan_type": "pro"}, True, False),
+        ({"subscription_status": "active", "user_type": "subscriber"}, False, True),
+        ({"subscription_status": "active", "user_type": "admin", "is_trial": True}, False, True),
+        ({"plan_id": "stmaker_shopping_pro_month"}, False, True),
+        ({"plan_id": "stmaker_shopping_pro_month", "is_trial": True}, False, True),
+        ({"work_count": -1}, False, True),
+        ({"is_trial": True}, True, False),
+        ({"is_trial": True, "plan_type": "monthly_trial"}, False, False),
+        ({"plan_type": "free_month_trial"}, False, False),
+        ({"plan_type": "stmaker_pro_month"}, False, True),
+        ({"plan_type": "unknown_monthly_offer"}, False, False),
+        ({"status": True}, False, False),
+        ({"message": "ok"}, None, None),
+    ]
+    for payload, current, expected in cases:
+        assert auth_client.derive_paid_state(payload, current) is expected
+
+
+def test_paid_state_recomputes_when_paid_signals_arrive_after_free_state():
+    _reset_auth_state()
+    auth_client._auth_state["is_paid"] = False
+
+    auth_client._merge_account_state(
+        {"subscription_status": "active", "user_type": "subscriber"}
+    )
+
+    assert auth_client.get_auth_state()["is_paid"] is True
+
+
+def test_stale_authenticated_response_cannot_mutate_new_identity(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state.update(
+        {"user_id": "user-a", "username": "user-a", "token": "token-a", "is_paid": False}
+    )
+
+    class _IdentitySwitchingSession:
+        def post(self, *_args, **_kwargs):
+            auth_client._clear_auth_state_memory()
+            with auth_client._AUTH_STATE_LOCK:
+                auth_client._auth_state.update(
+                    {
+                        "user_id": "user-b",
+                        "username": "user-b",
+                        "token": "token-b",
+                        "token_issued_at": time.time(),
+                        "is_paid": False,
+                    }
+                )
+            return _FakeResponse(
+                200,
+                {
+                    "status": True,
+                    "user_id": "user-a",
+                    "user_type": "subscriber",
+                    "work_count": 999,
+                },
+            )
+
+    monkeypatch.setattr(auth_client, "_session", _IdentitySwitchingSession())
+
+    response = auth_client.heartbeat()
+    state = auth_client.get_auth_state()
+
+    assert response["status"] is True
+    assert state["user_id"] == "user-b"
+    assert state["token"] == "token-b"
+    assert state["is_paid"] is False
+    assert state["work_count"] == 0
+
+
+def test_identity_commit_resets_previous_account_scoped_state(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state.update(
+        {
+            "user_id": "user-a",
+            "username": "user-a",
+            "token": "token-a",
+            "plan_type": "pro",
+            "plan_id": "old-plan",
+            "is_paid": True,
+            "work_count": 99,
+        }
+    )
+    monkeypatch.setattr(
+        auth_client,
+        "_session",
+        _FakeSession(_FakeResponse(200, {"status": True, "id": "user-b", "key": "token-b"})),
+    )
+    monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
+
+    result = auth_client.login("user_b", "SamplePass123")
+    state = auth_client.get_auth_state()
+
+    assert result["status"] is True
+    assert state["user_id"] == "user-b"
+    assert state["token"] == "token-b"
+    assert state["plan_type"] is None
+    assert state["plan_id"] is None
+    assert state["is_paid"] is None
+    assert state["work_count"] == 0
+
+
+def test_auth_session_snapshot_is_invalidated_by_token_rotation():
+    _reset_auth_state()
+    auth_client._auth_state.update(
+        {"user_id": "user-1", "token": "token-old", "token_issued_at": time.time()}
+    )
+    snapshot = auth_client.capture_auth_session_snapshot()
+
+    assert snapshot is not None
+    assert auth_client._merge_account_state(
+        {"user_id": "user-1", "token": "token-new"}, snapshot=snapshot
+    )
+    assert auth_client.is_auth_session_snapshot_current(snapshot) is False
+    assert auth_client.capture_auth_session_snapshot().token == "token-new"
+
+
+def test_payapp_request_rejects_a_stale_caller_snapshot_without_network(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state.update(
+        {"user_id": "user-a", "token": "token-a", "token_issued_at": time.time()}
+    )
+    snapshot_a = auth_client.capture_auth_session_snapshot()
+    auth_client._clear_auth_state_memory()
+    auth_client._auth_state.update(
+        {"user_id": "user-b", "token": "token-b", "token_issued_at": time.time()}
+    )
+    session = _FakeSession(_FakeResponse(200, {"success": True}))
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.create_payapp_checkout(
+        "01012345678",
+        session_snapshot=snapshot_a,
+    )
+
+    assert result["success"] is False
+    assert session.calls == []
+
+
+def test_payapp_request_uses_fixed_snapshot_identity_during_concurrent_relogin(monkeypatch):
+    _reset_auth_state()
+    auth_client._auth_state.update(
+        {"user_id": "user-a", "token": "token-a", "token_issued_at": time.time()}
+    )
+    snapshot_a = auth_client.capture_auth_session_snapshot()
+
+    class _SwitchAfterDispatchSession(_FakeSession):
+        def post(self, url, json=None, timeout=None, headers=None):
+            self.calls.append(
+                {
+                    "method": "POST",
+                    "url": url,
+                    "json": json,
+                    "timeout": timeout,
+                    "headers": headers or {},
+                }
+            )
+            auth_client._clear_auth_state_memory()
+            auth_client._auth_state.update(
+                {"user_id": "user-b", "token": "token-b", "token_issued_at": time.time()}
+            )
+            return self.response
+
+    session = _SwitchAfterDispatchSession(
+        _FakeResponse(200, {"success": True, "payurl": "https://payapp.kr/pay/a"})
+    )
+    monkeypatch.setattr(auth_client, "_session", session)
+
+    result = auth_client.create_payapp_checkout(
+        "01012345678",
+        session_snapshot=snapshot_a,
+    )
+
+    assert result["success"] is True
+    assert session.calls[0]["headers"]["Authorization"] == "Bearer token-a"
+    assert session.calls[0]["headers"]["X-User-ID"] == "user-a"
+    assert session.calls[0]["json"]["user_id"] == "user-a"
+    state = auth_client.get_auth_state()
+    assert state["user_id"] == "user-b"
+    assert state["token"] == "token-b"
 
 
 def test_check_username_rejects_empty_input_without_network(monkeypatch):

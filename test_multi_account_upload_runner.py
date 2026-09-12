@@ -48,31 +48,45 @@ class FakeAgent:
         self.events.append(("browser", self.profile_id))
 
     def save_session(self):
-        self.events.append(("save", self.profile_id))
+        raise AssertionError("upload workers must not overwrite verified sessions")
 
-    def close(self):
-        self.events.append(("close", self.profile_id))
+    def close(self, *, save_session=True):
+        self.events.append(("close", self.profile_id, save_session))
 
 
 class FakeHelper:
-    def __init__(self, *, login=True, matches=True, upload=True, on_verify=None):
+    def __init__(
+        self,
+        *,
+        login=True,
+        matches=True,
+        upload=True,
+        on_verify=None,
+        external_post_attempted=True,
+        upload_error="",
+    ):
         self.login = login
         self.matches = matches
         self.upload = upload
         self.on_verify = on_verify
         self.expected = ""
-        self.last_error = ""
+        self.last_error = upload_error
+        self.external_post_attempted = external_post_attempted
+        self.create_expected = ""
+        self.verify_count = 0
 
     def check_login_status(self):
         return self.login
 
     def verify_account(self, expected_username):
+        self.verify_count += 1
         self.expected = expected_username
         if self.on_verify is not None:
             self.on_verify()
         return self.matches
 
-    def create_thread_direct(self, _payload):
+    def create_thread_direct(self, _payload, *, expected_username):
+        self.create_expected = expected_username
         return self.upload
 
 
@@ -210,14 +224,16 @@ def test_runner_uses_expected_account_profile_and_completes_queue(tmp_path):
     assert result.success
     assert result.pending_count == 0
     assert helper.expected == "expected_user"
+    assert helper.create_expected == "expected_user"
     assert pipeline.calls == [
         ("https://link.coupang.com/a/test", "키워드"),
     ]
     assert history.is_uploaded("https://link.coupang.com/a/test")
     assert events == [
         ("browser", "profile-a"),
-        ("save", "profile-a"),
-        ("close", "profile-a"),
+        ("close", "profile-a", False),
+        ("browser", "profile-a"),
+        ("close", "profile-a", False),
     ]
     assert quota.reserved == quota.committed == 1
 
@@ -244,8 +260,15 @@ def test_stop_after_login_releases_managed_reservation_before_requeue(tmp_path):
         tmp_path,
         helper,
     )
-    helper.on_verify = lambda: queue.request_stop(True)
     pipeline.managed_reservation_id = "managed-reservation-stop"
+    original_process = pipeline.process_link
+
+    def process_then_stop(*args, **kwargs):
+        result = original_process(*args, **kwargs)
+        queue.request_stop(True)
+        return result
+
+    pipeline.process_link = process_then_stop
     item = queue.enqueue("https://link.coupang.com/a/managed-stop")
 
     result = runner.process_one("account-a")
@@ -267,8 +290,15 @@ def test_failed_managed_release_persists_recovery_metadata(tmp_path):
         helper,
         quota,
     )
-    helper.on_verify = lambda: queue.request_stop(True)
     pipeline.managed_reservation_id = "managed-reservation-pending"
+    original_process = pipeline.process_link
+
+    def process_then_stop(*args, **kwargs):
+        result = original_process(*args, **kwargs)
+        queue.request_stop(True)
+        return result
+
+    pipeline.process_link = process_then_stop
     item = queue.enqueue("https://link.coupang.com/a/managed-pending")
 
     result = runner.process_one("account-a")
@@ -284,7 +314,7 @@ def test_failed_managed_release_persists_recovery_metadata(tmp_path):
 
 def test_account_mismatch_requeues_item_and_blocks_only_that_account(tmp_path):
     helper = FakeHelper(matches=False)
-    runner, queue, history, _pipeline, _events, quota = _build_runner(
+    runner, queue, history, pipeline, _events, quota = _build_runner(
         tmp_path,
         helper,
     )
@@ -298,6 +328,7 @@ def test_account_mismatch_requeues_item_and_blocks_only_that_account(tmp_path):
     assert state["pending_items"][0]["item_id"] == item["item_id"]
     assert not history.is_uploaded(item["url"])
     assert quota.reserved == 0
+    assert pipeline.calls == []
 
 
 def test_duplicate_is_skipped_without_opening_browser(tmp_path):
@@ -357,6 +388,54 @@ def test_uncertain_post_is_blocked_instead_of_requeued(tmp_path):
     assert quota.released == 0
 
 
+def test_identity_block_before_external_post_releases_and_requeues(tmp_path):
+    helper = FakeHelper(
+        upload=False,
+        external_post_attempted=False,
+        upload_error="account_identity_unverified",
+    )
+    runner, queue, history, _pipeline, _events, quota = _build_runner(
+        tmp_path,
+        helper,
+    )
+    item = queue.enqueue("https://link.coupang.com/a/identity-change")
+
+    result = runner.process_one("account-a")
+
+    state = queue.snapshot()
+    assert result.block_reason == "account_identity_unverified"
+    assert state["phase"] == "blocked"
+    assert state["pending_items"][0]["item_id"] == item["item_id"]
+    assert state["current_item"] is None
+    assert not history.is_uploaded(item["url"])
+    assert quota.reserved == 1
+    assert quota.released == 1
+
+
+def test_compose_validation_failure_before_external_post_is_not_ambiguous(tmp_path):
+    helper = FakeHelper(
+        upload=False,
+        external_post_attempted=False,
+        upload_error="thread_structure_unverified",
+    )
+    runner, queue, history, _pipeline, _events, quota = _build_runner(
+        tmp_path,
+        helper,
+    )
+    item = queue.enqueue("https://link.coupang.com/a/compose-validation")
+
+    result = runner.process_one("account-a")
+
+    state = queue.snapshot()
+    assert result.block_reason == "pre_post_validation_failed"
+    assert state["phase"] == "blocked"
+    assert state["current_item"] is None
+    assert state["pending_items"][0]["item_id"] == item["item_id"]
+    assert not history.is_uploaded(item["url"])
+    assert quota.reserved == 1
+    assert quota.released == 1
+
+
 def test_transient_analysis_failure_is_requeued_with_backoff(tmp_path):
     helper = FakeHelper()
     runner, queue, _history, pipeline, events, quota = _build_runner(
@@ -377,7 +456,10 @@ def test_transient_analysis_failure_is_requeued_with_backoff(tmp_path):
     assert state["stats"]["failed"] == 0
     assert state["pending_items"][0]["item_id"] == item["item_id"]
     assert state["pending_items"][0]["retry_count"] == 1
-    assert events == []
+    assert events == [
+        ("browser", "profile-a"),
+        ("close", "profile-a", False),
+    ]
     assert quota.reserved == 0
 
 
@@ -506,7 +588,7 @@ def test_posted_resolution_recovers_history_failure_without_reposting(
     assert queue.snapshot()["current_item"] is None
     assert quota.committed == 1
     assert pipeline.calls == [(url, None)]
-    assert len([event for event in events if event[0] == "browser"]) == 1
+    assert len([event for event in events if event[0] == "browser"]) == 2
 
 
 def test_posted_resolution_recovers_queue_completion_failure_without_reposting(
@@ -541,7 +623,7 @@ def test_posted_resolution_recovers_queue_completion_failure_without_reposting(
     assert queue.snapshot()["current_item"] is None
     assert quota.committed == 1
     assert pipeline.calls == [(url, None)]
-    assert len([event for event in events if event[0] == "browser"]) == 1
+    assert len([event for event in events if event[0] == "browser"]) == 2
 
 
 def test_not_posted_resolution_retries_failed_release_with_same_next_key(
@@ -642,7 +724,10 @@ def test_managed_ai_reservation_error_persists_release_then_rotates_requeue_key(
     assert persisted["reservation_id"] == "managed-reservation-error"
     assert persisted["ai_job_id"] == "managed-job-error"
     assert persisted["idempotency_key"] == original["idempotency_key"]
-    assert events == []
+    assert events == [
+        ("browser", "profile-a"),
+        ("close", "profile-a", False),
+    ]
 
     quota.release_result = True
     recovery = runner._recover_interrupted_current(queue, history, persisted)
@@ -687,7 +772,8 @@ def test_managed_ai_reconciliation_stops_after_fourth_failed_generation(tmp_path
     assert queue.snapshot()["current_item"] is None
     assert queue.snapshot()["pending_items"] == []
     assert after_exhaustion.processed is False
-    assert events == []
+    assert len([event for event in events if event[0] == "browser"]) == 4
+    assert len([event for event in events if event[0] == "close"]) == 4
 
 
 def test_released_replay_rotates_keys_and_stops_after_fourth_retry(tmp_path):
@@ -722,7 +808,8 @@ def test_released_replay_rotates_keys_and_stops_after_fourth_retry(tmp_path):
     assert queue.snapshot()["current_item"] is None
     assert queue.snapshot()["pending_items"] == []
     assert after_exhaustion.processed is False
-    assert events == []
+    assert len([event for event in events if event[0] == "browser"]) == 4
+    assert len([event for event in events if event[0] == "close"]) == 4
 
 
 def test_lost_success_response_replay_rotates_key_then_generation_succeeds(
@@ -803,11 +890,8 @@ def test_lost_success_response_replay_rotates_key_then_generation_succeeds(
     assert request_keys[1] != request_keys[0]
     assert quota.released == 0
     assert quota.committed == 1
-    assert events == [
-        ("browser", "profile-a"),
-        ("save", "profile-a"),
-        ("close", "profile-a"),
-    ]
+    assert len([event for event in events if event[0] == "browser"]) == 3
+    assert len([event for event in events if event[0] == "close"]) == 3
 
 
 def test_managed_ai_missing_reservation_uses_safe_idempotency_replay_recovery(
@@ -847,4 +931,7 @@ def test_managed_ai_missing_reservation_uses_safe_idempotency_replay_recovery(
     assert state["pending_items"][0]["idempotency_key"] != original["idempotency_key"]
     assert quota.recovered_keys == [original["idempotency_key"]]
     assert quota.released == 1
-    assert events == []
+    assert events == [
+        ("browser", "profile-a"),
+        ("close", "profile-a", False),
+    ]

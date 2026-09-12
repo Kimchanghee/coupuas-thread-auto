@@ -510,6 +510,10 @@ class OnboardingDialog(QDialog):
         )
         self.sample_link_btn.clicked.connect(self._request_sample_link)
         sample_layout.addWidget(self.sample_link_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        dry_run_notice = QLabel("여기서는 실제 게시하지 않습니다. 자동화 화면에서 계정과 링크를 확인하고 실행해야 게시됩니다.", sample_box)
+        dry_run_notice.setWordWrap(True)
+        dry_run_notice.setStyleSheet(f"color: {Colors.TEXT_MUTED}; font-size: 13px;")
+        sample_layout.addWidget(dry_run_notice)
         return sample_box
 
     @staticmethod

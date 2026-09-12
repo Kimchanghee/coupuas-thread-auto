@@ -248,7 +248,7 @@ def _configure_app() -> QApplication:
 
 
 def main() -> int:
-    log_file = setup_logging(capture_print=True)
+    log_file = setup_logging(capture_print=False)
     logger.info("Summer batch app launcher started; log_file=%s", log_file)
 
     app = _configure_app()

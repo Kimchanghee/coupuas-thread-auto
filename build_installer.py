@@ -9,9 +9,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-APP_EXE_PATH = Path("dist") / "CoupangThreadAuto.exe"
-INSTALLER_SCRIPT = Path("installer") / "CoupangThreadAuto.iss"
-INSTALLER_OUTPUT = Path("dist") / "CoupangThreadAutoSetup.exe"
+from src.version import VERSION
+
+REPO_ROOT = Path(__file__).resolve().parent
+APP_EXE_PATH = REPO_ROOT / "dist" / "CoupangThreadAuto.exe"
+INSTALLER_SCRIPT = REPO_ROOT / "installer" / "CoupangThreadAuto.iss"
+INSTALLER_OUTPUT = REPO_ROOT / "dist" / "CoupangThreadAutoSetup.exe"
 _VERSION_PATTERN = re.compile(r"[0-9]{1,5}(?:\.[0-9]{1,5}){2}")
 
 
@@ -23,19 +26,18 @@ def _validated_version(value: str) -> str:
 
 
 def _resolve_app_version() -> str:
+    canonical_version = _validated_version(VERSION)
     env_version = str(os.getenv("COUPUAS_APP_VERSION", "")).strip()
     if env_version:
-        return _validated_version(env_version)
+        requested_version = _validated_version(env_version)
+        if requested_version != canonical_version:
+            raise ValueError(
+                "COUPUAS_APP_VERSION must exactly match src/version.py "
+                f"({canonical_version})"
+            )
+        return requested_version
 
-    try:
-        main_py = Path("login_main.py").read_text(encoding="utf-8")
-        match = re.search(r'^\s*VERSION\s*=\s*["\']([^"\']+)["\']', main_py, re.MULTILINE)
-        if match:
-            return _validated_version(match.group(1))
-    except Exception:
-        pass
-
-    return "0.0.0"
+    return canonical_version
 
 
 def _find_iscc_path() -> str:
@@ -85,7 +87,7 @@ def build_installer() -> bool:
     ]
 
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, cwd=REPO_ROOT, check=True)
     except subprocess.CalledProcessError as exc:
         print(f"ERROR: installer build failed ({exc})")
         return False
