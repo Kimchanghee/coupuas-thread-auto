@@ -214,7 +214,8 @@ def test_editorial_automation_keeps_primary_action_in_a_sticky_footer():
             assert window._link_scroll.horizontalScrollBar().maximum() == 0
 
             compact = window._page_stack.width() < 900
-            assert window.link_table.isColumnHidden(2) is compact
+            # Original URLs remain identifiable at every supported width.
+            assert not window.link_table.isColumnHidden(2)
             assert window.link_table.isColumnHidden(4) is compact
 
         window.resize(1360, 900)
@@ -228,7 +229,7 @@ def test_editorial_automation_keeps_primary_action_in_a_sticky_footer():
         app.processEvents()
 
 
-def test_editorial_settings_use_twelve_column_pairings_and_tokens():
+def test_editorial_settings_keep_sections_separate_and_use_shared_tokens():
     app = _app()
     window = MainWindow()
     window.resize(1360, 900)
@@ -247,6 +248,8 @@ def test_editorial_settings_use_twelve_column_pairings_and_tokens():
             assert (
                 primary.geometry().right() < secondary.x()
                 or secondary.geometry().right() < primary.x()
+                or primary.geometry().bottom() < secondary.y()
+                or secondary.geometry().bottom() < primary.y()
             )
             assert primary.geometry().right() < window._settings_content.width()
             assert secondary.geometry().right() < window._settings_content.width()

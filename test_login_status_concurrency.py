@@ -40,7 +40,7 @@ def test_login_check_button_waits_for_every_inflight_account(monkeypatch, tmp_pa
         assert window.event(first_event) is True
         assert not window.check_login_btn.isEnabled()
         assert window.check_login_btn.text() == "확인 중..."
-        assert window.login_status_label.text() == "@second_account · 확인 필요"
+        assert window.login_status_label.text() == "@second_account · 연결 확인 필요"
 
         second_event = LoginStatusEvent(
             (True, second.expected_username, second.account_id, second.expected_username, 12)
@@ -48,7 +48,7 @@ def test_login_check_button_waits_for_every_inflight_account(monkeypatch, tmp_pa
         assert window.event(second_event) is True
         assert window.check_login_btn.isEnabled()
         assert window.check_login_btn.text() == "로그인 상태 확인"
-        assert window.login_status_label.text() == "@second_account · 마지막 확인"
+        assert window.login_status_label.text() == "@second_account · 최근 확인됨"
     finally:
         window._closed = True
         window.close()

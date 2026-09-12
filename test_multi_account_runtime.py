@@ -136,10 +136,12 @@ def _account(name):
 
 
 def _wait_for_runtime(runtime):
-    deadline = time.monotonic() + 3
-    while runtime.is_running and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert not runtime.is_running
+    # Durable Windows ACL/file operations can exceed three seconds under CI
+    # load. Join the worker, and never leak it into the following test on failure.
+    finished = runtime.wait_until_stopped(15)
+    if not finished:
+        runtime.stop_and_join(5)
+    assert finished, "account runtime did not finish its test queue"
 
 
 def test_runtime_processes_independent_account_queues_with_one_browser(tmp_path):
