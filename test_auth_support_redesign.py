@@ -126,8 +126,8 @@ def test_registration_uses_two_local_steps_without_recreating_public_fields(monk
         window.reg_name.setText("테스트 사용자")
         window.reg_email.setText("user@example.com")
         window.reg_username.setText("test_user")
-        window.reg_pw.setText("password8")
-        window.reg_pw_confirm.setText("password8")
+        window.reg_pw.setText("A strong passphrase 8")
+        window.reg_pw_confirm.setText("A strong passphrase 8")
         window._username_available = True
         window._username_available_for = "test_user"
         window._go_register_step_two()

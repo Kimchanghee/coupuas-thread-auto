@@ -118,8 +118,6 @@ def protect_secret(value: str, purpose: str = "coupuas-thread-auto") -> Optional
     """
     if not isinstance(value, str) or not value:
         return value
-    if value.startswith("dpapi:") or value.startswith(_FERNET_PREFIX):
-        return value
     if os.name == "nt":
         try:
             import ctypes

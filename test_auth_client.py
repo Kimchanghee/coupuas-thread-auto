@@ -22,7 +22,7 @@ class _FakeSession:
         self.response = response
         self.calls = []
 
-    def post(self, url, json=None, timeout=None, headers=None):
+    def post(self, url, json=None, timeout=None, headers=None, allow_redirects=True):
         self.calls.append(
             {
                 "method": "POST",
@@ -60,7 +60,7 @@ class _SequenceSession:
             raise value
         return value
 
-    def post(self, url, json=None, timeout=None, headers=None):
+    def post(self, url, json=None, timeout=None, headers=None, allow_redirects=True):
         self.calls.append(
             {
                 "method": "POST",
@@ -134,13 +134,13 @@ def test_login_payload_includes_required_ip(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", session)
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("SampleUser", "SamplePass123")
+    result = auth_client.login("SampleUser", "SamplePass123-long")
 
     assert result["status"] == "EU001"
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
     assert payload["id"] == "sampleuser"
-    assert payload["pw"] == hashlib.sha256("SamplePass123".encode("utf-8")).hexdigest()
+    assert payload["pw"] == hashlib.sha256("SamplePass123-long".encode("utf-8")).hexdigest()
     assert payload["force"] is False
     assert payload["ip"] == "10.20.30.40"
 
@@ -152,7 +152,7 @@ def test_login_never_requests_active_session_replacement(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", session)
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("SampleUser", "SamplePass123", force=True)
+    result = auth_client.login("SampleUser", "SamplePass123-long", force=True)
 
     assert result["status"] == "EU003"
     assert session.calls[0]["json"]["force"] is False
@@ -176,7 +176,7 @@ def test_login_422_uses_nested_validation_error_message(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "127.0.0.1")
 
-    result = auth_client.login("sampleuser", "SamplePass123")
+    result = auth_client.login("sampleuser", "SamplePass123-long")
 
     assert result["status"] is False
     assert "body.ip" in result["message"]
@@ -206,7 +206,7 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="sampleuser",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
         terms_accepted=True,
@@ -217,7 +217,7 @@ def test_register_422_uses_nested_validation_error_message(monkeypatch):
     assert "body.name" in result["message"]
 
 
-def test_register_payload_hashes_password(monkeypatch):
+def test_register_sends_versioned_plaintext_for_server_policy(monkeypatch):
     _reset_auth_state()
     response = _FakeResponse(422, {"success": False, "message": "invalid"})
     session = _FakeSession(response)
@@ -226,7 +226,7 @@ def test_register_payload_hashes_password(monkeypatch):
     auth_client.register(
         name="Tester1",
         username="sampleuser",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
         terms_accepted=True,
@@ -235,7 +235,8 @@ def test_register_payload_hashes_password(monkeypatch):
 
     assert len(session.calls) == 1
     payload = session.calls[0]["json"]
-    assert payload["password"] == hashlib.sha256("SamplePass123".encode("utf-8")).hexdigest()
+    assert payload["password"] == "SamplePass123-long"
+    assert payload["password_format"] == "plaintext-v2"
     assert payload["ym_news_opt_in"] is False
     assert payload["terms_accepted"] is True
     assert payload["privacy_accepted"] is True
@@ -252,7 +253,7 @@ def test_register_payload_supports_news_opt_in(monkeypatch):
     auth_client.register(
         name="Tester1",
         username="sampleuser",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
         ym_news_opt_in=True,
@@ -273,7 +274,7 @@ def test_register_rejects_missing_terms_consent(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="sampleuser",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
     )
@@ -291,7 +292,7 @@ def test_register_rejects_missing_privacy_consent(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="sampleuser",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
         terms_accepted=True,
@@ -384,7 +385,7 @@ def test_register_200_failure_with_error_object_returns_message(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="existing_user",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
         terms_accepted=True,
@@ -462,7 +463,7 @@ def test_register_429_normalizes_rate_limit_message(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="rateuser",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="rate@example.com",
         terms_accepted=True,
@@ -493,7 +494,7 @@ def test_login_merges_plan_and_expiry_fields(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -569,7 +570,7 @@ def test_login_success_keeps_user_id_when_backend_uses_user_id_field(monkeypatch
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -594,7 +595,7 @@ def test_login_promotion_id_never_overwrites_account_identity(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("account_owner", "SamplePass123")
+    result = auth_client.login("account_owner", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -615,7 +616,7 @@ def test_login_success_accepts_token_field_when_key_missing(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -636,7 +637,7 @@ def test_login_success_without_user_id_falls_back_to_username(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -658,7 +659,7 @@ def test_login_success_without_user_id_does_not_trust_unverified_token_sub(monke
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -679,7 +680,7 @@ def test_login_success_ignores_null_like_user_id_and_uses_username(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -706,7 +707,7 @@ def test_login_extracts_nested_user_id_from_data_data(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", _FakeSession(response))
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("paiduser", "SamplePass123")
+    result = auth_client.login("paiduser", "SamplePass123-long")
 
     assert result["status"] is True
     state = auth_client.get_auth_state()
@@ -1236,7 +1237,7 @@ def test_remember_username_persists_lowercase(monkeypatch):
     assert captured["payload"] == {"username": "test_user"}
 
 
-def test_remember_login_credentials_persists_username_and_password(monkeypatch):
+def test_remember_login_credentials_never_persists_password(monkeypatch):
     captured = {}
 
     def _fake_save(payload):
@@ -1244,12 +1245,11 @@ def test_remember_login_credentials_persists_username_and_password(monkeypatch):
 
     monkeypatch.setattr(auth_client, "_load_cred", lambda: {"token": "token-1"})
     monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
-    auth_client.remember_login_credentials("Test_User", "SamplePass123")
+    auth_client.remember_login_credentials("Test_User", "SamplePass123-long")
 
     assert captured["payload"] == {
         "token": "token-1",
         "username": "test_user",
-        "saved_password": "SamplePass123",
     }
 
 
@@ -1261,11 +1261,14 @@ def test_remember_login_credentials_persists_auto_login_opt_in(monkeypatch):
 
     monkeypatch.setattr(auth_client, "_load_cred", lambda: {})
     monkeypatch.setattr(auth_client, "_save_cred", _fake_save)
-    auth_client.remember_login_credentials("Test_User", "SamplePass123", auto_login=True)
+    monkeypatch.setattr(auth_client, "_check_api_url", lambda: None)
+    monkeypatch.setattr(auth_client, "_get_session_user_and_token", lambda: (1,"access-token"))
+    monkeypatch.setattr(auth_client, "_session", _FakeSession(_FakeResponse(200,{"refresh_token":"r"*43})))
+    auth_client.remember_login_credentials("Test_User", "SamplePass123-long", auto_login=True)
 
     assert captured["payload"] == {
         "username": "test_user",
-        "saved_password": "SamplePass123",
+        "refresh_token": "r"*43,
         "auto_login": True,
     }
 
@@ -1281,7 +1284,7 @@ def test_remember_login_credentials_clears_auto_login_without_password(monkeypat
         "_load_cred",
         lambda: {
             "username": "test_user",
-            "saved_password": "SamplePass123",
+            "saved_password": "SamplePass123-long",
             "auto_login": True,
             "token": "token-1",
         },
@@ -1324,36 +1327,32 @@ def test_get_saved_credentials_normalizes_username(monkeypatch):
     assert state["saved"] == {"username": "test_user"}
 
 
-def test_get_saved_credentials_returns_password_when_present(monkeypatch):
+def test_get_saved_credentials_purges_legacy_password(monkeypatch):
     monkeypatch.setattr(
         auth_client,
         "_load_cred",
-        lambda: {"username": "test_user", "saved_password": "SamplePass123"},
+        lambda: {"username": "test_user", "saved_password": "SamplePass123-long"},
     )
 
     result = auth_client.get_saved_credentials()
 
-    assert result == {"username": "test_user", "password": "SamplePass123"}
+    assert result == {"username": "test_user"}
 
 
-def test_get_saved_credentials_returns_auto_login_when_password_present(monkeypatch):
+def test_get_saved_credentials_removes_legacy_auto_login(monkeypatch):
     monkeypatch.setattr(
         auth_client,
         "_load_cred",
         lambda: {
             "username": "test_user",
-            "saved_password": "SamplePass123",
+            "saved_password": "SamplePass123-long",
             "auto_login": True,
         },
     )
 
     result = auth_client.get_saved_credentials()
 
-    assert result == {
-        "username": "test_user",
-        "password": "SamplePass123",
-        "auto_login": True,
-    }
+    assert result == {"username": "test_user"}
 
 
 def test_get_saved_credentials_clears_auto_login_without_password(monkeypatch):
@@ -1436,7 +1435,7 @@ def test_login_network_error_message_is_localized(monkeypatch):
     monkeypatch.setattr(auth_client, "_session", session)
     monkeypatch.setattr(auth_client, "_resolve_client_ip", lambda: "10.20.30.40")
 
-    result = auth_client.login("sampleuser", "SamplePass123")
+    result = auth_client.login("sampleuser", "SamplePass123-long")
 
     assert result["status"] is False
     assert "HTTPSConnectionPool" not in result["message"]
@@ -1474,7 +1473,7 @@ def test_register_does_not_retry_ambiguous_connection_failure(monkeypatch):
     result = auth_client.register(
         name="Tester1",
         username="no_retry_user",
-        password="SamplePass123",
+        password="SamplePass123-long",
         contact="01012345678",
         email="sample@example.com",
         terms_accepted=True,
@@ -1553,5 +1552,5 @@ def test_secret_protection_failure_removes_stale_credentials(monkeypatch, tmp_pa
     monkeypatch.setattr(auth_client, "_CRED_FILE", cred_file)
     monkeypatch.setattr(auth_client, "_protect_secret", lambda _value: None)
 
-    assert auth_client._save_cred({"saved_password": "replacement"}) is False
+    assert auth_client._save_cred({"refresh_token": "replacement"}) is False
     assert not cred_file.exists()

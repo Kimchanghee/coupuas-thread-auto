@@ -364,8 +364,8 @@ def test_registration_requires_legal_consent_and_exposes_policy_links(monkeypatc
     window.reg_username.setText("tester")
     window._username_available = True
     window._username_available_for = "tester"
-    window.reg_pw.setText("Password1!")
-    window.reg_pw_confirm.setText("Password1!")
+    window.reg_pw.setText("Correct Horse Battery 72!")
+    window.reg_pw_confirm.setText("Correct Horse Battery 72!")
     window.reg_contact.setText("010-1234-5678")
     window.reg_legal_consent.setChecked(False)
 
@@ -404,8 +404,8 @@ def test_registration_passes_required_consent_to_worker(monkeypatch):
     window.reg_username.setText("tester")
     window._username_available = True
     window._username_available_for = "tester"
-    window.reg_pw.setText("Password1!")
-    window.reg_pw_confirm.setText("Password1!")
+    window.reg_pw.setText("Correct Horse Battery 72!")
+    window.reg_pw_confirm.setText("Correct Horse Battery 72!")
     window.reg_contact.setText("010-1234-5678")
     window.reg_legal_consent.setChecked(True)
 
@@ -425,11 +425,11 @@ def test_registration_password_confirmation_updates_live(monkeypatch):
     window = login_window.LoginWindow()
 
     assert window.reg_pw_match_status.text() == ""
-    window.reg_pw.setText("Password1!")
+    window.reg_pw.setText("Correct Horse Battery 72!")
     window.reg_pw_confirm.setText("Password2!")
     assert window.reg_pw_match_status.text() == "✗ 비밀번호가 일치하지 않습니다"
 
-    window.reg_pw_confirm.setText("Password1!")
+    window.reg_pw_confirm.setText("Correct Horse Battery 72!")
     assert window.reg_pw_match_status.text() == "✓ 비밀번호가 일치합니다"
 
     window.reg_pw.setText("Changed1!")
@@ -455,7 +455,7 @@ def test_stale_username_check_restores_button_without_authorizing_new_value(monk
     window._on_username_checked(token, "first_user", True, "available")
 
     assert window.btn_check_user.isEnabled() is True
-    assert window.btn_check_user.text() == "중복확인"
+    assert window.btn_check_user.text() == "형식 확인"
     assert window._username_available is False
     assert window._username_available_for is None
     assert window.reg_user_status.text() == ""
@@ -470,7 +470,7 @@ def test_login_worker_persists_preferences_before_final_signal(monkeypatch):
     monkeypatch.setattr(
         auth_client,
         "login",
-        lambda *_args: events.append("login") or {"status": True, "id": "user-1"},
+        lambda *_args, **_kwargs: events.append("login") or {"status": True, "id": "user-1"},
     )
     monkeypatch.setattr(
         auth_client,
@@ -483,7 +483,7 @@ def test_login_worker_persists_preferences_before_final_signal(monkeypatch):
         lambda *_args: events.append("telemetry_queued"),
     )
     worker = login_window.LoginWorker(
-        "tester", "Password1!", remember_credentials=True, auto_login=True
+        "tester", "Correct Horse Battery 72!", remember_credentials=True, auto_login=True
     )
     worker.finished_signal.connect(lambda _result: events.append("signal"))
 
@@ -499,7 +499,7 @@ def test_register_worker_emits_only_after_password_cleanup(monkeypatch):
     worker = login_window.RegisterWorker(
         "Tester",
         "tester",
-        "Password1!",
+        "Correct Horse Battery 72!",
         "01012345678",
         "tester@example.com",
         terms_accepted=True,
@@ -556,7 +556,7 @@ def test_register_success_callback_does_not_send_activity_log(monkeypatch):
     class FakeWindow:
         btn_register = _Button()
         reg_username = type("Field", (), {"text": lambda self: "tester"})()
-        reg_pw = type("Field", (), {"text": lambda self: "Password1!"})()
+        reg_pw = type("Field", (), {"text": lambda self: "Correct Horse Battery 72!"})()
         login_id = type("Field", (), {"setText": lambda self, _value: None})()
         login_pw = type("Field", (), {"setText": lambda self, _value: None})()
         stack = type("Stack", (), {"setCurrentIndex": lambda self, _value: None})()
