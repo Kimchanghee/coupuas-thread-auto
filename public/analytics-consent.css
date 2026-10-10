@@ -1,0 +1,79 @@
+.analytics-consent-banner {
+  position: fixed;
+  z-index: 10000;
+  inset: auto 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px max(20px, calc((100vw - 1120px) / 2));
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  background: #171715;
+  color: #fff;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+  font: 500 14px/1.55 system-ui, sans-serif;
+}
+
+.analytics-consent-copy {
+  max-width: 760px;
+  margin: 0;
+}
+
+.analytics-consent-copy a {
+  color: #f2bd74;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.analytics-consent-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.analytics-consent-actions button,
+.analytics-consent-manage {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 9px;
+  background: transparent;
+  color: #fff;
+  font: 700 14px/1.2 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.analytics-consent-actions button[data-consent="granted"] {
+  border-color: #e69b76;
+  background: #e69b76;
+  color: #171715;
+}
+
+.analytics-consent-actions button:focus-visible,
+.analytics-consent-manage:focus-visible {
+  outline: 3px solid #f2bd74;
+  outline-offset: 3px;
+}
+
+.analytics-consent-manage {
+  position: fixed;
+  z-index: 9999;
+  right: 16px;
+  bottom: 16px;
+  border-color: #272724;
+  background: #272724;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 680px) {
+  .analytics-consent-banner {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px;
+  }
+
+  .analytics-consent-actions {
+    justify-content: flex-end;
+  }
+}
