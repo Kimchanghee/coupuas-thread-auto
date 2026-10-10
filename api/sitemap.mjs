@@ -1,6 +1,6 @@
 import { loadNoticePayload } from "./notices.mjs";
 
-const DEFAULT_SITE_URL = "https://coupuas-thread-auto-ten.vercel.app";
+const DEFAULT_SITE_URL = "https://coupasthreadauto.me";
 const CORE_PATHS = ["/", "/notices", "/terms", "/privacy", "/refund", "/support"];
 
 function escapeXml(value) {
@@ -12,8 +12,19 @@ function escapeXml(value) {
     .replaceAll("'", "&apos;");
 }
 
-function siteUrl() {
-  const configured = String(process.env.PUBLIC_SITE_URL || DEFAULT_SITE_URL).trim();
+export function getSiteUrl(env = process.env) {
+  if (env.VERCEL_ENV === "production") return DEFAULT_SITE_URL;
+
+  if (env.VERCEL_ENV === "preview" && env.VERCEL_URL) {
+    try {
+      const preview = new URL(`https://${String(env.VERCEL_URL).trim()}`);
+      if (preview.protocol === "https:" && preview.hostname.endsWith(".vercel.app")) return preview.origin;
+    } catch {
+      // Fall through to the configured public URL.
+    }
+  }
+
+  const configured = String(env.PUBLIC_SITE_URL || DEFAULT_SITE_URL).trim();
   try {
     const parsed = new URL(configured);
     if (parsed.protocol !== "https:") return DEFAULT_SITE_URL;
@@ -66,5 +77,5 @@ export default async function handler(req, res) {
   res.setHeader("Content-Type", "application/xml; charset=utf-8");
   res.setHeader("Cache-Control", "public, s-maxage=900, stale-while-revalidate=86400");
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.end(buildSitemap(posts, siteUrl()));
+  res.end(buildSitemap(posts, getSiteUrl()));
 }
