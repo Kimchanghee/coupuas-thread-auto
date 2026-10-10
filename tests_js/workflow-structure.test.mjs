@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
+const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 
 test("Store workflow installs locked Node 22 dependencies before Node tests", () => {
   const workflow = read("../.github/workflows/store-release.yml");
