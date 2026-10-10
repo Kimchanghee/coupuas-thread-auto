@@ -2,6 +2,7 @@
   const measurementId = "G-TQ30XL5VX0";
   const consentKey = "thread-auto-analytics-consent-v1";
   const cookieSuffix = measurementId.replace(/^G-/, "").replaceAll("-", "_");
+  let lastPageView = "";
 
   // Password recovery URLs can contain account tokens, so never send those pages to Analytics.
   if (/^\/(?:forgot-password|reset-password)(?:\/|$)/i.test(window.location.pathname)) return;
@@ -26,6 +27,17 @@
     }
   };
 
+  const sendPageView = () => {
+    if (typeof window.gtag !== "function") return;
+    const pageLocation = cleanUrl(window.location.href);
+    if (!pageLocation || pageLocation === lastPageView) return;
+    window.gtag("event", "page_view", {
+      page_location: pageLocation,
+      page_referrer: cleanUrl(document.referrer),
+    });
+    lastPageView = pageLocation;
+  };
+
   const loadAnalytics = () => {
     if (window.__threadAutoAnalyticsLoaded) return;
     window.__threadAutoAnalyticsLoaded = true;
@@ -33,10 +45,17 @@
     window.gtag = function gtag() {
       window.dataLayer.push(arguments);
     };
+    window.gtag("consent", "default", {
+      analytics_storage: "granted",
+      ad_storage: "denied",
+      ad_user_data: "denied",
+      ad_personalization: "denied",
+    });
     window.gtag("js", new Date());
     window.gtag("config", measurementId, {
       page_location: cleanUrl(window.location.href),
       page_referrer: cleanUrl(document.referrer),
+      send_page_view: false,
       cookie_expires: 60 * 60 * 24 * 60,
       cookie_update: false,
       allow_google_signals: false,
@@ -48,6 +67,7 @@
     script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
     script.referrerPolicy = "no-referrer";
     document.head.appendChild(script);
+    sendPageView();
   };
 
   const clearAnalyticsCookies = () => {
@@ -79,10 +99,25 @@
     }
     if (choice === "granted") {
       loadAnalytics();
+      if (typeof window.gtag === "function") {
+        window.gtag("consent", "update", {
+          analytics_storage: "granted",
+          ad_storage: "denied",
+          ad_user_data: "denied",
+          ad_personalization: "denied",
+        });
+      }
+      sendPageView();
     } else {
       if (typeof window.gtag === "function") {
-        window.gtag("consent", "update", { analytics_storage: "denied" });
+        window.gtag("consent", "update", {
+          analytics_storage: "denied",
+          ad_storage: "denied",
+          ad_user_data: "denied",
+          ad_personalization: "denied",
+        });
       }
+      lastPageView = "";
       clearAnalyticsCookies();
     }
   };
