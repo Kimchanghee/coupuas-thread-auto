@@ -18,7 +18,7 @@
     {
       "src": "/(.*)",
       "headers": {
-        "Content-Security-Policy": "default-src 'self'; script-src 'self'; frame-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' https://www.googletagmanager.com; script-src-elem 'self' https://www.googletagmanager.com; frame-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.googletagmanager.com https://*.google-analytics.com; connect-src 'self' https://www.googletagmanager.com https://*.google-analytics.com https://*.google.com; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests",
         "Referrer-Policy": "no-referrer",
         "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
         "X-Content-Type-Options": "nosniff",
