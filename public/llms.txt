@@ -1,0 +1,22 @@
+# Thread Auto
+
+> Threads 게시용 제휴 링크 문안을 만들고 여러 계정의 게시 대기열을 관리하는 Windows 데스크톱 앱(Thread Auto)의 공식 안내 사이트입니다. 웹 서비스가 아니라 설치형 앱입니다.
+
+## 핵심 페이지
+- [앱 소개·다운로드](https://coupasthreadauto.me/): 기능, 작동 방식, 요금 개요, Windows 다운로드
+- [구매·이용 안내](https://coupasthreadauto.me/support): 설치, 무료 이용, 유료 이용권 결제, 업데이트, 문제 해결, 사업자 정보
+- [공지·업데이트](https://coupasthreadauto.me/notices): 릴리스 노트와 공지
+- [이용약관](https://coupasthreadauto.me/terms)
+- [개인정보처리방침](https://coupasthreadauto.me/privacy)
+- [환불 정책](https://coupasthreadauto.me/refund)
+
+## 사실 정보
+- 형태: Windows 10 이상용 데스크톱 앱 (웹에서 실행하는 서비스가 아님)
+- 하는 일: 발급받은 제휴 링크로 Threads 문안을 만들고, 게시 전 검토하며, 계정별 대기열과 이력을 관리
+- 요금: 무료 이용 한도와 유료 이용권이 있으며 정확한 조건은 홈과 구매·이용 안내 페이지를 기준으로 함
+- 언어: 한국어
+
+## 정책
+- 앱은 사용자가 승인한 내용만 게시하도록 설계되었으며, 제휴 프로그램의 약관 준수 책임은 사용자에게 있음
+- 인용 시 표기: coupasthreadauto.me
+- 위 내용은 2026-10-13 기준이며 변경 시 홈 페이지와 공지 페이지가 우선함
